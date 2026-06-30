@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "kpi-report",
+      "query": "extract financial KPIs from a PDF report",
+      "required_skills": [
+        "skill:pdf-table-parser",
+        "skill:financial-kpi-extractor"
+      ]
+    }
+  ]
+}

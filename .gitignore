@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+environment/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# SkillFabric runtime outputs
+.skillfabric/
+runs/
+artifacts/
+models/
+experiments/
+
+# Editors and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
