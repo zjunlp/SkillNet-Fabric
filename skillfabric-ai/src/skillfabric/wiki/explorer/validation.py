@@ -90,7 +90,7 @@ def validate_skill_package(package: SkillPackage, query_wiki_root: Path) -> Skil
                 errors.append(f"edge evidence path escapes query_wiki: {edge.evidence_path}")
                 continue
             if not _valid_edge_evidence_path(edge.evidence_path):
-                errors.append(f"edge evidence path must be edges/*.jsonl or workflows/*.md: {edge.evidence_path}")
+                errors.append(f"edge evidence path must be edges/*.jsonl, workflows/*.md, or skills/*.md: {edge.evidence_path}")
                 continue
             if not (query_wiki_root / edge.evidence_path).exists():
                 errors.append(f"edge evidence path missing: {edge.evidence_path}")

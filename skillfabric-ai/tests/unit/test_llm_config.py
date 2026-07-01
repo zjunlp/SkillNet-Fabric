@@ -13,6 +13,41 @@ from unittest.mock import patch
 from skillfabric.llm import LLMConfig, litellm_completion, llm_usage_context
 from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
 
+LLM_ENV_KEYS = (
+    "API_KEY",
+    "BASE_URL",
+    "MODEL",
+    "MAX_TOKENS",
+    "TIMEOUT",
+    "SKILLFABRIC_LLM_API_BASE",
+    "SKILLFABRIC_LLM_API_KEY",
+    "SKILLFABRIC_LLM_MODEL",
+    "SKILLFABRIC_LLM_REASONING_EFFORT",
+    "SKILLFABRIC_LLM_MAX_TOKENS",
+    "SKILLFABRIC_LLM_TIMEOUT",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+    "USAGE_ENABLED",
+    "USAGE_LOG_PATH",
+    "USAGE_OPERATION",
+    "USAGE_METADATA",
+    "SKILLFABRIC_USAGE_ENABLED",
+    "SKILLFABRIC_USAGE_LOG_PATH",
+    "SKILLFABRIC_USAGE_OPERATION",
+    "SKILLFABRIC_USAGE_METADATA",
+)
+
+
+def _cleared_llm_env(**overrides: str) -> dict[str, str]:
+    values = {key: "" for key in LLM_ENV_KEYS}
+    values.update(overrides)
+    return values
+
 
 class LLMConfigTests(unittest.TestCase):
     def test_loads_litellm_settings_from_env_file(self) -> None:
@@ -37,21 +72,7 @@ class LLMConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            cleared_llm_env = {
-                "API_KEY": "",
-                "BASE_URL": "",
-                "MODEL": "",
-                "MAX_TOKENS": "",
-                "SKILLFABRIC_LLM_REASONING_EFFORT": "",
-                "OPENAI_API_BASE": "",
-                "OPENAI_BASE_URL": "",
-                "OPENAI_API_KEY": "",
-                "USAGE_ENABLED": "",
-                "USAGE_LOG_PATH": "",
-                "USAGE_OPERATION": "",
-                "USAGE_METADATA": "",
-            }
-            with patch.dict(os.environ, cleared_llm_env, clear=False):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 config = LLMConfig.from_env(env_path=env_path)
 
             self.assertEqual(config.api_base, "https://example.test/api")
@@ -79,22 +100,7 @@ class LLMConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "",
-                    "ANTHROPIC_BASE_URL": "",
-                    "ANTHROPIC_MODEL": "",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 config = LLMConfig.from_env(env_path=env_path)
 
             self.assertEqual(config.api_key, "sk-public")
@@ -116,22 +122,7 @@ class LLMConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "",
-                    "ANTHROPIC_BASE_URL": "",
-                    "ANTHROPIC_MODEL": "",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 config = LLMConfig.from_env(env_path=env_path)
 
             self.assertEqual(config.api_key, "sk-cc-token")
@@ -146,18 +137,12 @@ class LLMConfigTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "claude-sonnet-4-5",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "sk-cc-token",
-                    "ANTHROPIC_BASE_URL": "http://gateway.example",
-                    "ANTHROPIC_MODEL": "claude-sonnet-4-5",
-                },
+                _cleared_llm_env(
+                    MODEL="claude-sonnet-4-5",
+                    ANTHROPIC_AUTH_TOKEN="sk-cc-token",
+                    ANTHROPIC_BASE_URL="http://gateway.example",
+                    ANTHROPIC_MODEL="claude-sonnet-4-5",
+                ),
                 clear=False,
             ):
                 config = LLMConfig.from_env(env_path=env_path)
@@ -174,18 +159,14 @@ class LLMConfigTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "gpt-5.4-mini",
-                    "OPENAI_API_KEY": "sk-openai-compatible",
-                    "OPENAI_BASE_URL": "http://gateway.example",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "sk-cc-token",
-                    "ANTHROPIC_BASE_URL": "http://gateway.example",
-                    "ANTHROPIC_MODEL": "gpt-5.4-mini",
-                },
+                _cleared_llm_env(
+                    MODEL="gpt-5.4-mini",
+                    OPENAI_API_KEY="sk-openai-compatible",
+                    OPENAI_BASE_URL="http://gateway.example",
+                    ANTHROPIC_AUTH_TOKEN="sk-cc-token",
+                    ANTHROPIC_BASE_URL="http://gateway.example",
+                    ANTHROPIC_MODEL="gpt-5.4-mini",
+                ),
                 clear=False,
             ):
                 config = LLMConfig.from_env(env_path=env_path)
@@ -200,21 +181,7 @@ class LLMConfigTests(unittest.TestCase):
             env_path = Path(tmp) / ".env"
             env_path.write_text("", encoding="utf-8")
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "",
-                    "ANTHROPIC_BASE_URL": "",
-                    "ANTHROPIC_MODEL": "",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 with self.assertRaisesRegex(ValueError, "skillfabric help config"):
                     LLMConfig.from_env(env_path=env_path)
 
@@ -275,26 +242,7 @@ class LLMConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_AUTH_TOKEN": "",
-                    "ANTHROPIC_BASE_URL": "",
-                    "ANTHROPIC_MODEL": "",
-                    "SKILLFABRIC_LLM_API_BASE": "",
-                    "SKILLFABRIC_LLM_API_KEY": "",
-                    "SKILLFABRIC_LLM_MODEL": "",
-                    "SKILLFABRIC_LLM_REASONING_EFFORT": "",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 config = LLMConfig.from_env(env_path=env_path)
 
             self.assertEqual(config.api_base, "http://gateway.example/v1")
@@ -351,7 +299,7 @@ class LLMConfigTests(unittest.TestCase):
         original = sys.modules.get("litellm")
         sys.modules["litellm"] = fake_litellm
         try:
-            with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""}, clear=False):
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
                 litellm_completion(
                     messages=[{"role": "user", "content": "Hello"}],
                     config=LLMConfig(

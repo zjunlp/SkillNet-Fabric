@@ -8,6 +8,32 @@ from unittest.mock import patch
 
 from skillfabric.sdk_env import build_claude_code_sdk_env
 
+SDK_ENV_KEYS = (
+    "API_KEY",
+    "BASE_URL",
+    "MODEL",
+    "SKILLFABRIC_LLM_API_BASE",
+    "SKILLFABRIC_LLM_API_KEY",
+    "SKILLFABRIC_LLM_MODEL",
+    "SKILLFABRIC_LLM_REASONING_EFFORT",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_REASONING_EFFORT",
+)
+
+
+def _cleared_sdk_env() -> dict[str, str]:
+    return {key: "" for key in SDK_ENV_KEYS}
+
 
 class ClaudeCodeSdkEnvTests(unittest.TestCase):
     def test_skillfabric_llm_env_drives_openai_and_claude_code_aliases(self) -> None:
@@ -26,27 +52,7 @@ class ClaudeCodeSdkEnvTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "MODEL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                    "ANTHROPIC_AUTH_TOKEN": "",
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_BASE_URL": "",
-                    "ANTHROPIC_MODEL": "",
-                    "ANTHROPIC_SMALL_FAST_MODEL": "",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL": "",
-                    "ANTHROPIC_REASONING_EFFORT": "",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, _cleared_sdk_env(), clear=False):
                 env = build_claude_code_sdk_env(env_path)
 
         self.assertEqual(env["OPENAI_API_KEY"], "sk-test")

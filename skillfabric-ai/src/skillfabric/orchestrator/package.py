@@ -18,7 +18,6 @@ from skillfabric.router.models import RouteResult
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.pages import slug
 
-
 PLANNER_PROMPT_ID = "skillfabric_execution_package_planner"
 
 FORBIDDEN_EXECUTION_PROMPT_FRAGMENTS = (
