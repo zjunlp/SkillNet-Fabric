@@ -6,7 +6,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.orchestrator.agent_run_spec import agent_run_spec_from_route
-from skillfabric.orchestrator.outcome import ExecutionOutcomeInputs, classify_execution_outcome
 from skillfabric.orchestrator.package import (
     FORBIDDEN_EXECUTION_PROMPT_FRAGMENTS,
     PLANNER_PROMPT_ID,
@@ -357,103 +356,6 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertNotIn("agent_run_spec.json", codex.prompt)
             self.assertIn("Codex", codex.label)
             self.assertNotEqual(claude.prompt, codex.prompt)
-
-    def test_execution_outcome_classifies_plan_only_without_artifacts(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / "workspace"
-            workspace.mkdir()
-            route = _route(Path(tmp) / ".skillfabric")
-
-            outcome = classify_execution_outcome(
-                ExecutionOutcomeInputs(
-                    route=route,
-                    workspace=workspace,
-                    sdk_status="completed",
-                    sdk_response="Next steps: I would create report.docx and the PNG figures.",
-                    evaluation={"deferred": True, "passed": False},
-                )
-            )
-
-            self.assertEqual(outcome.primary_category, "plan_only")
-            self.assertIn("partial_artifact", outcome.categories)
-            self.assertEqual(outcome.stage, "execution")
-            self.assertFalse(outcome.completion_report_valid)
-
-    def test_execution_outcome_classifies_wrong_output_path(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workspace = root / "workspace"
-            package_root = root / "execution_package"
-            workspace.mkdir()
-            package_root.mkdir()
-            (package_root / "report.docx").write_text("report", encoding="utf-8")
-            _write_report(workspace, [])
-            route = _route(root / ".skillfabric")
-            route.task_understanding.required_deliverables[0].path = "report.docx"
-
-            outcome = classify_execution_outcome(
-                ExecutionOutcomeInputs(
-                    route=route,
-                    workspace=workspace,
-                    sdk_status="completed",
-                    evaluation={"passed": False, "summary": "file missing"},
-                )
-            )
-
-            self.assertEqual(outcome.primary_category, "wrong_output_path")
-            self.assertEqual(outcome.wrong_path_candidates, ["execution_package/report.docx"])
-
-    def test_execution_outcome_classifies_missing_dependency_and_format_invalid(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / "workspace"
-            workspace.mkdir()
-            _write_report(workspace, [])
-            route = _route(Path(tmp) / ".skillfabric")
-
-            outcome = classify_execution_outcome(
-                ExecutionOutcomeInputs(
-                    route=route,
-                    workspace=workspace,
-                    sdk_status="failed",
-                    sdk_error="ModuleNotFoundError: No module named 'openpyxl'",
-                    evaluation={"passed": False, "summary": "failed to parse report.docx"},
-                )
-            )
-
-            self.assertEqual(outcome.primary_category, "missing_dependency")
-            self.assertIn("format_invalid", outcome.categories)
-            self.assertEqual(outcome.stage, "execution")
-
-    def test_execution_outcome_classifies_router_miss(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / "workspace"
-            workspace.mkdir()
-
-            outcome = classify_execution_outcome(
-                ExecutionOutcomeInputs(
-                    route=None,
-                    workspace=workspace,
-                    sdk_status="failed",
-                    sdk_error="route failed",
-                    evaluation={"passed": False},
-                )
-            )
-
-            self.assertEqual(outcome.primary_category, "router_miss")
-            self.assertEqual(outcome.stage, "routing")
-
-
-def _write_report(workspace: Path, deliverables: list[str]) -> None:
-    payload = {
-        "completed_phases": ["produce", "verify", "report"],
-        "skills_used": ["skill:docx"],
-        "deliverables": [{"path": path, "description": "Generated output."} for path in deliverables],
-        "deviations": [],
-        "blocking_issues": [],
-        "verification": [],
-        "failure_signals": [],
-    }
-    (workspace / "execution_report.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 if __name__ == "__main__":

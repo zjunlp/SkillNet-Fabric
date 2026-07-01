@@ -51,7 +51,7 @@ def _current_usage_context() -> LLMUsageContext:
 
 @dataclass(slots=True)
 class LLMConfig:
-    """LLM configuration for SkillFabric experiments."""
+    """LLM configuration for SkillFabric workflows."""
 
     api_base: str
     api_key: str

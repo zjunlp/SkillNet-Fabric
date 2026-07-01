@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import tarfile
 import unittest
@@ -30,6 +31,43 @@ class PublicPackageTests(unittest.TestCase):
         self.assertFalse(hasattr(client, "build_wiki"))
         self.assertFalse(hasattr(client, "build_execution_package"))
         self.assertFalse(hasattr(client, "status"))
+
+    def test_public_orchestrator_does_not_export_isolated_native_skill_runtime(self) -> None:
+        import skillfabric.orchestrator as orchestrator
+
+        self.assertFalse(hasattr(orchestrator, "prepare_native_skill_runtime"))
+        self.assertFalse(hasattr(orchestrator, "NativeSkillRuntimeError"))
+        self.assertFalse(hasattr(orchestrator, "NativeSkillRuntimeResult"))
+        self.assertFalse(
+            (PACKAGE_ROOT / "src" / "skillfabric" / "orchestrator" / "native_skills.py").exists()
+        )
+
+    def test_public_package_does_not_ship_experiment_only_modules(self) -> None:
+        import skillfabric.orchestrator as orchestrator
+
+        removed_specs = (
+            "skillfabric.evaluation",
+            "skillfabric.evaluation.evaluation",
+            "skillfabric.exporters",
+            "skillfabric.exporters.neo4j",
+            "skillfabric.orchestrator.outcome",
+        )
+        for module_name in removed_specs:
+            with self.subTest(module=module_name):
+                self.assertIsNone(_find_spec(module_name))
+
+        for path in (
+            PACKAGE_ROOT / "src" / "skillfabric" / "evaluation",
+            PACKAGE_ROOT / "src" / "skillfabric" / "exporters",
+            PACKAGE_ROOT / "src" / "skillfabric" / "orchestrator" / "outcome.py",
+            PACKAGE_ROOT / "tests" / "unit" / "test_experimental_parity.py",
+            PACKAGE_ROOT / "tests" / "unit" / "test_neo4j_export.py",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(path.exists())
+
+        self.assertFalse(hasattr(orchestrator, "ExecutionOutcome"))
+        self.assertFalse(hasattr(orchestrator, "classify_execution_outcome"))
 
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -245,6 +283,36 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:execute",
         ):
             self.assertNotIn(removed_command, readme)
+        for internal_reference in (
+            "/Users/chenjiang",
+            "SkillNet/experiments",
+            "AgentSkillOS",
+            "benchmark",
+        ):
+            self.assertNotIn(internal_reference, readme)
+
+    def test_public_docs_do_not_reference_internal_experiment_surfaces(self) -> None:
+        doc_paths = [
+            PUBLIC_ROOT / "README.md",
+            PACKAGE_ROOT / "README.md",
+            PACKAGE_ROOT / "tests" / "README.md",
+            PUBLIC_ROOT / "docs" / "configuration.md",
+            PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md",
+        ]
+        forbidden = (
+            "/Users/chenjiang",
+            "SkillNet/experiments",
+            "AgentSkillOS",
+            "SKILLFABRIC_EXPERIMENTAL_ROOT",
+            "eval aggregation",
+            "eval_report",
+            "completion_report_schema",
+        )
+        for path in doc_paths:
+            text = path.read_text(encoding="utf-8")
+            for marker in forbidden:
+                with self.subTest(path=path, marker=marker):
+                    self.assertNotIn(marker, text)
 
     def test_python_facade_plan_generates_execution_package(self) -> None:
         from skillfabric import SkillFabric
@@ -302,6 +370,13 @@ class PublicPackageTests(unittest.TestCase):
                     archive_paths.extend(handle.getnames())
         for path in archive_paths:
             self.assertFalse(any(marker in path for marker in forbidden), path)
+
+
+def _find_spec(module_name: str) -> object | None:
+    try:
+        return importlib.util.find_spec(module_name)
+    except ModuleNotFoundError:
+        return None
 
 
 if __name__ == "__main__":

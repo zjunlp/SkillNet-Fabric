@@ -1,8 +1,7 @@
 # Tests
 
-This directory covers offline unit tests, fixture skill pools, and small
-integration checks. Real quality claims still need a fresh AgentSkillOS run
-through the current route and execution prompt package mainline.
+This directory covers offline unit tests, fixture skill pools, and gated
+integration checks for the public package and Claude Code plugin surface.
 
 ```text
 tests/
@@ -19,8 +18,8 @@ Current unit tests focus on:
 - Community assignment repair, semantic relocation, rebalance, and graph health.
 - Router coverage diagnostics, query_wiki assembly, SkillPackage validation,
   and Claude SDK prompt contracts.
-- AgentRunSpec, execution prompt package generation, and eval aggregation
-  across build, graph, execution, wiki, route, and orchestrator status.
+- AgentRunSpec, execution prompt package generation, and public facade behavior
+  across build, wiki, route, and plan workflows.
 
 Common local checks:
 

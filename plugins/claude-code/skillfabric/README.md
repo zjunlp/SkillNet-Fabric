@@ -97,7 +97,7 @@ Use disabled embeddings and skip LLM validation when you want to verify local
 plugin and CLI wiring without API calls:
 
 ```text
-/skillfabric:build /Users/chenjiang/Documents/SkillFabric/SkillNet/experiments/src/skills/webshop --workspace .skillfabric-webshop --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
+/skillfabric:build examples/skills --workspace .skillfabric-smoke --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
 ```
 
 The expected result is a JSON summary with:
@@ -112,8 +112,8 @@ Outside Claude Code, the same smoke check can be run directly:
 
 ```bash
 skillfabric build \
-  --skill-root /Users/chenjiang/Documents/SkillFabric/SkillNet/experiments/src/skills/webshop \
-  --workspace .skillfabric-webshop \
+  --skill-root examples/skills \
+  --workspace .skillfabric-smoke \
   --skip-llm-validation \
   --embedding-provider disabled \
   --wiki-summary-mode off

@@ -15,8 +15,8 @@ skillfabric help workflow
 skillfabric help config
 ```
 
-SkillFabric accepts the project-level API namespace used by the internal
-experiments, while keeping the shorter public aliases compatible:
+SkillFabric accepts the project-level `SKILLFABRIC_LLM_*` API namespace while
+keeping the shorter public aliases compatible:
 
 ```text
 SKILLFABRIC_LLM_API_BASE=<openai-compatible-base-url>

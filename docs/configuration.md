@@ -7,7 +7,8 @@ commands, from `--env-file`.
 skillfabric init --env-file .env
 ```
 
-The generated env file uses SkillNet-style generic names:
+The generated env file uses generic names that are safe to keep in a private,
+untracked configuration file:
 
 ```bash
 API_KEY=sk-...
@@ -61,5 +62,5 @@ not provide an embeddings endpoint. The local model path is read during both
 `--env-file`.
 
 Set `DISABLE_DENSE_EMBEDDINGS=1` or use `--embedding-provider disabled` only
-for deterministic internal smoke tests. The public build workflow expects
+for deterministic local smoke checks. The public build workflow expects
 API-backed LLM validation, embeddings, wiki summaries, and graph/KG artifacts.
