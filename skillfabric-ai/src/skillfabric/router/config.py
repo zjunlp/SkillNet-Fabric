@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from skillfabric.router.task_atoms import TaskDecomposition
+
 RouterSdkRuntime = Any
 
 
@@ -16,6 +18,7 @@ class RouterConfig:
     workspace: str | Path = ".skillfabric"
     query: str = ""
     env_file: str | Path = ".env"
+    task_atoms: TaskDecomposition | None = None
     use_llm_router: bool = True
     max_selected_skills: int = 8
     seed_limit: int = 8

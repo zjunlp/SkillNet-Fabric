@@ -24,6 +24,11 @@ from skillfabric.orchestrator.package import (
 from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
+from skillfabric.router.task_atoms import (
+    TaskDecomposition,
+    load_task_decomposition,
+    validate_task_decomposition,
+)
 from skillfabric.runtime_defaults import default_build_options, default_router_options
 from skillfabric.storage import Workspace
 from skillfabric.wiki.materializer import build_wiki
@@ -108,12 +113,14 @@ class SkillFabric:
         defaults = default_router_options()
         explorer_backend = str(overrides.pop("explorer_backend", defaults.explorer_backend))
         use_llm_router = bool(overrides.pop("use_llm_router", defaults.use_llm_router))
+        task_atoms = _task_atoms_from_overrides(overrides, query=query)
         if explorer_backend == "fallback":
             use_llm_router = False
         config = RouterConfig(
             workspace=self.workspace.root,
             query=query,
             env_file=overrides.pop("env_file", self.env_file),
+            task_atoms=task_atoms,
             use_llm_router=use_llm_router,
             explorer_backend=explorer_backend,
             max_selected_skills=int(overrides.pop("max_selected_skills", defaults.max_selected_skills)),
@@ -207,3 +214,19 @@ def _reject_removed_profile(overrides: dict[str, object]) -> None:
         "settings, or pass explicit options such as embedding_provider='disabled', "
         "wiki_summary_mode='all', or explorer_backend='claude-code'."
     )
+
+
+def _task_atoms_from_overrides(overrides: dict[str, object], *, query: str) -> TaskDecomposition | None:
+    task_atoms_file = overrides.pop("task_atoms_file", None)
+    task_atoms = overrides.pop("task_atoms", None)
+    if task_atoms is not None and task_atoms_file is not None:
+        raise TypeError("pass either task_atoms or task_atoms_file, not both")
+    if task_atoms_file is not None:
+        return load_task_decomposition(Path(str(task_atoms_file)), query=query)
+    if task_atoms is None:
+        return None
+    if isinstance(task_atoms, TaskDecomposition):
+        return validate_task_decomposition(task_atoms, query=query)
+    if isinstance(task_atoms, dict):
+        return validate_task_decomposition(task_atoms, query=query)
+    raise TypeError("task_atoms must be a TaskDecomposition or dict")

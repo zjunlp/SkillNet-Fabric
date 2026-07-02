@@ -195,6 +195,7 @@ def route_from_skill_package(
         wiki_pages_read=[evidence for skill in selected for evidence in skill.evidence],
         rationale=package.rationale,
         provenance="claude_code",
+        task_atoms=bundle.task_atoms,
         warnings=warnings,
     )
 

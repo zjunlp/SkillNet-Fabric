@@ -35,9 +35,11 @@ from skillfabric.orchestrator.package import (
 from skillfabric.orchestrator.renderers.claude_code import render_claude_code_entry_prompt
 from skillfabric.orchestrator.renderers.codex import render_codex_entry_prompt
 from skillfabric.progress import ProgressReporter
+from skillfabric.router.atomizer import atomize_task
 from skillfabric.router.bundle import build_router_bundle
 from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouteResult
 from skillfabric.router.routing import RouterConfig, route_task
+from skillfabric.router.task_atoms import load_task_decomposition
 from skillfabric.router.traces import _new_trace_id as _new_agent_trace_id
 from skillfabric.runtime_defaults import BuildOptions, default_build_options, default_router_options
 from skillfabric.storage import Workspace, atomic_write_text
@@ -239,6 +241,7 @@ def _add_route_options(parser: argparse.ArgumentParser, *, include_query: bool =
     parser.add_argument("--max-workflow-hints", type=int, default=12, help=argparse.SUPPRESS)
     parser.add_argument("--agent-mode", choices=["prepare", "finalize"], help=argparse.SUPPRESS)
     parser.add_argument("--skill-package-file", help=argparse.SUPPRESS)
+    parser.add_argument("--task-atoms-file", help=argparse.SUPPRESS)
 
 
 def _help(args: argparse.Namespace, command_parsers: dict[str, argparse.ArgumentParser]) -> None:
@@ -524,10 +527,12 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
     trace_id = args.trace_id or _new_agent_trace_id(args.query)
     trace_dir = workspace.runs_dir / trace_id
     trace_dir.mkdir(parents=True, exist_ok=True)
+    task_atoms = _task_atoms_from_args(args, query=args.query) or atomize_task(args.query, env_file=args.env_file)
     bundle = build_router_bundle(
         RouterBundleConfig(
             workspace=workspace.root,
             query=args.query,
+            task_atoms=task_atoms,
             env_file=args.env_file,
             seed_limit=args.seed_limit or options.seed_limit,
             expanded_limit=args.expanded_limit or options.expanded_limit,
@@ -540,9 +545,12 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
     router_bundle_path = trace_dir / "router_bundle.json"
     request_path = trace_dir / "agent_route_request.json"
     skill_package_path = trace_dir / "agent_skill_package.json"
+    task_atoms_path = trace_dir / "task_atoms.json"
+    atomic_write_text(task_atoms_path, json.dumps(bundle.task_atoms.to_dict(), ensure_ascii=False, indent=2) + "\n")
     atomic_write_text(router_bundle_path, json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2) + "\n")
     request = {
         "task": args.query,
+        "task_atoms_file": str(task_atoms_path),
         "trace_id": trace_id,
         "trace_dir": str(trace_dir),
         "query_wiki_root": str(query_wiki.root),
@@ -556,6 +564,7 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
         "trace_dir": str(trace_dir),
         "query_wiki_root": str(query_wiki.root),
         "router_bundle": str(router_bundle_path),
+        "task_atoms_file": str(task_atoms_path),
         "agent_route_request": str(request_path),
         "skill_package_file": str(skill_package_path),
         "expected_schema": schema,
@@ -721,6 +730,7 @@ def _router_config_from_args(args: argparse.Namespace, *, query: str) -> RouterC
         workspace=args.workspace,
         query=query,
         env_file=args.env_file,
+        task_atoms=_task_atoms_from_args(args, query=query),
         use_llm_router=use_llm_router,
         max_selected_skills=args.max_selected_skills or options.max_selected_skills,
         seed_limit=args.seed_limit or options.seed_limit,
@@ -732,6 +742,16 @@ def _router_config_from_args(args: argparse.Namespace, *, query: str) -> RouterC
         explorer_model=args.explorer_model,
         strict_explorer=args.strict_explorer,
     )
+
+
+def _task_atoms_from_args(args: argparse.Namespace, *, query: str):
+    path = getattr(args, "task_atoms_file", None)
+    if not path:
+        return None
+    try:
+        return load_task_decomposition(path, query=query)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid --task-atoms-file: {exc}") from exc
 
 
 def _embedding_provider_from_args(args: argparse.Namespace, *, options: BuildOptions):

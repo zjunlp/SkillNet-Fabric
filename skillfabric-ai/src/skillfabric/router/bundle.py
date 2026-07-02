@@ -10,8 +10,8 @@ from skillfabric.router.assembly import (
     _wiki_pages,
     _workflow_hints,
 )
+from skillfabric.router.coverage_selection import select_coverage_candidates
 from skillfabric.router.expansion import _expand_seed_skills, _expand_seed_skills_ppr
-from skillfabric.router.facet_preservation import preserve_facet_candidates
 from skillfabric.router.models import (
     RouterBundle,
     RouterBundleConfig,
@@ -21,6 +21,7 @@ from skillfabric.router.models import (
 )
 from skillfabric.router.retrieval import _seed_scores, apply_graph_grounded_scores
 from skillfabric.router.sidecars import load_execution_index, load_interfaces
+from skillfabric.router.task_atoms import TaskDecomposition
 from skillfabric.storage import Workspace
 
 
@@ -36,7 +37,15 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
         warnings.append(f"registry skills not found: {workspace.registry_dir / 'skills.jsonl'}")
     interfaces = load_interfaces(workspace)
     execution_index = load_execution_index(workspace)
-    seed_scores = _seed_scores(workspace, config.query, skills, warnings=warnings, env_file=config.env_file)
+    task_atoms = config.task_atoms or TaskDecomposition.empty()
+    seed_scores = _seed_scores(
+        workspace,
+        config.query,
+        skills,
+        warnings=warnings,
+        env_file=config.env_file,
+        task_atoms=task_atoms,
+    )
     apply_graph_grounded_scores(
         workspace,
         config.query,
@@ -44,14 +53,16 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
         seed_scores,
         interfaces=interfaces,
         execution_index=execution_index,
+        task_atoms=task_atoms,
     )
+    candidate_pool_limit = max(config.candidate_pool_limit, config.expanded_limit, 0)
     if config.graph_expansion_mode == "one_hop":
         selected = _expand_seed_skills(
             graph.edges,
             skills,
             seed_scores,
             seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
+            expanded_limit=candidate_pool_limit,
         )
     elif config.graph_expansion_mode == "ppr":
         selected = _expand_seed_skills_ppr(
@@ -59,7 +70,7 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
             skills,
             seed_scores,
             seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
+            expanded_limit=candidate_pool_limit,
             alpha=config.ppr_alpha,
             max_iter=max(config.ppr_max_iter, 1),
             tol=max(config.ppr_tol, 0.0),
@@ -71,20 +82,17 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
             skills,
             seed_scores,
             seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
+            expanded_limit=candidate_pool_limit,
             alpha=config.ppr_alpha,
             max_iter=max(config.ppr_max_iter, 1),
             tol=max(config.ppr_tol, 0.0),
         )
-    selected = preserve_facet_candidates(
+    selected = select_coverage_candidates(
         selected,
         seed_scores=seed_scores,
         skills=skills,
-        interfaces=interfaces,
-        query=config.query,
+        task_atoms=task_atoms,
         expanded_limit=max(config.expanded_limit, 0),
-        wiki_skills_dir=workspace.wiki_skills_dir,
-        warnings=warnings,
     )
     selected_ids = {item.skill_id for item in selected}
     community_context = _selected_communities(graph.edges, communities, selected_ids)
@@ -101,6 +109,7 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
         communities=community_context,
         workflow_hints=workflow_hints,
         wiki_pages=wiki_pages,
+        task_atoms=task_atoms,
         warnings=warnings,
     )
 

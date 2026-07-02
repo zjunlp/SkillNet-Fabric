@@ -17,6 +17,39 @@ PUBLIC_ROOT = PACKAGE_ROOT.parent
 FIXTURE_SKILLS = Path(__file__).resolve().parents[1] / "fixtures" / "skills"
 
 
+def _task_atoms_file(root: str | Path) -> Path:
+    path = Path(root) / "task_atoms.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "atoms": [
+                    {
+                        "id": "a1",
+                        "kind": "action",
+                        "text": "extract financial KPIs",
+                        "evidence": "extract financial KPIs",
+                        "required": True,
+                        "depends_on": [],
+                    },
+                    {
+                        "id": "a2",
+                        "kind": "artifact",
+                        "text": "PDF report",
+                        "evidence": "PDF report",
+                        "required": True,
+                        "depends_on": [],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 class PublicPackageTests(unittest.TestCase):
     def test_python_facade_exports_only_high_level_methods(self) -> None:
         from skillfabric import SkillFabric
@@ -75,7 +108,6 @@ class PublicPackageTests(unittest.TestCase):
         pyproject = (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
         for dependency in (
-            "graspologic",
             "litellm",
             "networkx",
             "python-dotenv",
@@ -171,6 +203,10 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertIn("--progress-json", text)
                 self.assertNotIn("--budget-usd", text)
                 self.assertNotIn("--estimate-only", text)
+            if command in {"prepare", "run"}:
+                self.assertIn("--task-atoms-file", text)
+                self.assertIn("TaskAtoms Schema", text)
+                self.assertIn("Do not output `skill_id`", text)
             for token in forbidden_tokens:
                 self.assertNotIn(token, command_text + text)
             self.assertNotIn("print `.env`", text.lower())
@@ -338,9 +374,11 @@ class PublicPackageTests(unittest.TestCase):
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
             client = SkillFabric(workspace=workspace)
+            atoms_file = _task_atoms_file(tmp)
 
             route = client.route(
                 "extract financial KPIs from a PDF report",
+                task_atoms_file=atoms_file,
                 use_llm_router=False,
                 explorer_backend="fallback",
             )

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from skillfabric.router.models import RouterBundle
 from skillfabric.router.routing import RouterConfig, route_task
+from skillfabric.router.task_atoms import TaskAtom, TaskDecomposition
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
 from skillfabric.wiki.explorer.prompting import EXPLORER_PROMPT_ID
 from skillfabric.wiki.explorer.search_index import load_page_index
@@ -81,6 +82,19 @@ class _StubSdkRuntime:
         yield self.ResultMessage(structured_output=self.structured_output, **self.metrics)
 
 
+def _route_test_atoms() -> TaskDecomposition:
+    return TaskDecomposition(
+        atoms=[
+            TaskAtom(
+                id="a1",
+                kind="action",
+                text="parse pdf tables",
+                evidence="pdf",
+            )
+        ]
+    )
+
+
 class WikiExplorerTests(unittest.TestCase):
     def test_build_wiki_writes_page_index_only(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -133,6 +147,7 @@ class WikiExplorerTests(unittest.TestCase):
                 RouterConfig(
                     workspace=workspace,
                     query="extract financial KPIs from a PDF report",
+                    task_atoms=_route_test_atoms(),
                     trace_id="cc-stub",
                     explorer_backend="claude-code",
                     explorer_model="test-sdk-model",
@@ -397,6 +412,7 @@ class WikiExplorerTests(unittest.TestCase):
                     RouterConfig(
                         workspace=workspace,
                         query="parse pdf tables",
+                        task_atoms=_route_test_atoms(),
                         trace_id="cc-running-loop",
                         explorer_backend="claude-code",
                     ),
@@ -520,6 +536,7 @@ class WikiExplorerTests(unittest.TestCase):
                 RouterConfig(
                     workspace=workspace,
                     query="extract financial KPIs from a PDF report",
+                    task_atoms=_route_test_atoms(),
                     trace_id="cc-wrapper-json",
                     explorer_backend="claude-code",
                 ),
@@ -576,6 +593,7 @@ class WikiExplorerTests(unittest.TestCase):
                 RouterConfig(
                     workspace=workspace,
                     query="parse pdf tables",
+                    task_atoms=_route_test_atoms(),
                     trace_id="cc-assistant-json",
                     explorer_backend="claude-code",
                 ),
@@ -722,6 +740,7 @@ class WikiExplorerTests(unittest.TestCase):
                 RouterConfig(
                     workspace=workspace,
                     query="parse pdf tables",
+                    task_atoms=_route_test_atoms(),
                     trace_id="cc-fallback",
                     explorer_backend="claude-code",
                 ),

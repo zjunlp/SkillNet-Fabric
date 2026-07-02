@@ -66,6 +66,7 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
         f"- scope: {row.get('scope', '')}",
         f"- route_score: {float(row.get('score', 0.0) or 0.0):.6f}",
         f"- sources: {_format_card_value(row.get('sources')) or 'none'}",
+        f"- atom_coverage: {_format_atom_coverage(row.get('atom_coverage')) or 'none'}",
         f"- page: {page_path}",
     ]
     introduced_by = _format_introduced_by(row.get("introduced_by", []))
@@ -124,6 +125,14 @@ def materialize_query_wiki(
     core_set = set(core_ids)
     score_lookup = {item.skill_id: item.score for item in bundle.selected_skills}
     source_lookup = {item.skill_id: sorted(set(item.sources)) for item in bundle.selected_skills}
+    atom_coverage_lookup = {
+        item.skill_id: {
+            str(atom_id): sorted({str(source) for source in sources})
+            for atom_id, sources in sorted(item.atom_coverage.items())
+            if sources
+        }
+        for item in bundle.selected_skills
+    }
 
     bridge_records = [
         record
@@ -198,6 +207,7 @@ def materialize_query_wiki(
                     bridge_records=bridge_records,
                     frontier_edges=frontier_edges,
                 ),
+                "atom_coverage": atom_coverage_lookup.get(skill_id, {}),
                 "page_path": page_path,
                 "card": card,
                 "introduced_by": _introduced_by(skill_id, core_set, included_skill_ids, bridge_records, frontier_edges),
@@ -237,6 +247,7 @@ def materialize_query_wiki(
 
     debug_manifest = {
         "query": bundle.query,
+        "task_atoms": bundle.task_atoms.to_dict(),
         "source_wiki": str(workspace.wiki_dir),
         "query_wiki": str(query_root),
         "selection_policy": {
@@ -599,8 +610,24 @@ def _render_index(manifest: dict[str, Any]) -> str:
         "",
         f"Query: {manifest['query']}",
         "",
-        "## Candidate Skill Cards",
+        "## Task Atoms",
     ]
+    task_atoms = manifest.get("task_atoms", {}) if isinstance(manifest.get("task_atoms", {}), dict) else {}
+    atoms = task_atoms.get("atoms", []) if isinstance(task_atoms.get("atoms", []), list) else []
+    if atoms:
+        for atom in atoms:
+            if not isinstance(atom, dict):
+                continue
+            required = "required" if atom.get("required", True) else "optional"
+            depends_on = _format_card_value(atom.get("depends_on")) or "none"
+            evidence = str(atom.get("evidence", "")).strip()
+            lines.append(
+                f"- {atom.get('id', '')} | {atom.get('kind', '')} | {required} | "
+                f"{atom.get('text', '')} | evidence: {evidence} | depends_on: {depends_on}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Candidate Skill Cards"])
     for skill in manifest["skills"]:
         if not skill.get("selectable", True):
             continue
@@ -611,6 +638,7 @@ def _render_index(manifest: dict[str, Any]) -> str:
                 f"- scope: {skill['scope']}",
                 f"- route_score: {float(skill.get('score', 0.0)):.6f}",
                 f"- sources: {_format_card_value(skill.get('sources')) or 'none'}",
+                f"- atom_coverage: {_format_atom_coverage(skill.get('atom_coverage')) or 'none'}",
                 f"- page: {skill['page_path']}",
             ]
         )
@@ -774,6 +802,19 @@ def _format_card_value(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _format_atom_coverage(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    chunks: list[str] = []
+    for atom_id, sources in sorted(value.items()):
+        source_text = _format_card_value(sources)
+        if source_text:
+            chunks.append(f"{atom_id} [{source_text}]")
+        else:
+            chunks.append(str(atom_id))
+    return "; ".join(chunks)
 
 
 def _format_introduced_by(rows: Any) -> str:

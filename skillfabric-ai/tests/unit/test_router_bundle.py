@@ -10,6 +10,7 @@ from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import build_embedding_store
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.router.task_atoms import TaskAtom, TaskDecomposition
 from skillfabric.storage import Workspace
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 
@@ -51,8 +52,12 @@ def _interface(
     ).to_dict()
 
 
+def _task_atoms(*atoms: TaskAtom) -> TaskDecomposition:
+    return TaskDecomposition(atoms=list(atoms))
+
+
 class RouterBundleTests(unittest.TestCase):
-    def test_facet_preservation_keeps_lower_scored_specialist_candidate(self) -> None:
+    def test_task_atoms_preserve_lower_scored_specialist_candidate(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Workspace(Path(tmp) / ".skillfabric")
             workspace.ensure()
@@ -78,11 +83,11 @@ class RouterBundleTests(unittest.TestCase):
             ]
             graph = GraphDocument(
                 schema_version="1.0",
-                build_id="facet-pptx-test",
+                build_id="task-atoms-pptx-test",
                 nodes=skills,
                 edges=[],
                 stats={},
-                config_digest="facet-pptx-test",
+                config_digest="task-atoms-pptx-test",
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
@@ -125,6 +130,20 @@ class RouterBundleTests(unittest.TestCase):
                         "The deck needs a clear scientific argument, references, and rich visuals. "
                         "Output presentation.pdf."
                     ),
+                    task_atoms=_task_atoms(
+                        TaskAtom(
+                            id="a1",
+                            kind="artifact",
+                            text="polished academic seminar presentation for a PhD research review",
+                            evidence="polished academic seminar presentation for a PhD research review",
+                        ),
+                        TaskAtom(
+                            id="a2",
+                            kind="constraint",
+                            text="clear scientific argument, references, and rich visuals",
+                            evidence="clear scientific argument, references, and rich visuals",
+                        ),
+                    ),
                     seed_limit=1,
                     expanded_limit=2,
                 )
@@ -134,9 +153,13 @@ class RouterBundleTests(unittest.TestCase):
             self.assertIn("skill:academic-seminar-slides", selected)
             self.assertTrue(
                 any(
-                    source.startswith(("interface:", "object:", "execution:", "facet:interface_text"))
+                    source.startswith(("atom:a1:", "atom:a2:", "interface:", "object:", "execution:"))
                     for source in selected["skill:academic-seminar-slides"].sources
                 )
+            )
+            self.assertTrue(selected["skill:academic-seminar-slides"].atom_coverage)
+            self.assertFalse(
+                any(source.startswith(("facet:", "coverage:")) for item in selected.values() for source in item.sources)
             )
 
     def test_object_and_interface_scores_softly_recall_deliverable_skills(self) -> None:
@@ -293,6 +316,32 @@ class RouterBundleTests(unittest.TestCase):
                         "Analyze artifacts/penguins.csv with statistical tests, generate at least "
                         "4 PNG figures, write report.docx, and create presentation.pptx."
                     ),
+                    task_atoms=_task_atoms(
+                        TaskAtom(
+                            id="a1",
+                            kind="action",
+                            text="Analyze artifacts/penguins.csv with statistical tests",
+                            evidence="Analyze artifacts/penguins.csv with statistical tests",
+                        ),
+                        TaskAtom(
+                            id="a2",
+                            kind="artifact",
+                            text="generate at least 4 PNG figures",
+                            evidence="4 PNG figures",
+                        ),
+                        TaskAtom(
+                            id="a3",
+                            kind="artifact",
+                            text="write report.docx",
+                            evidence="report.docx",
+                        ),
+                        TaskAtom(
+                            id="a4",
+                            kind="artifact",
+                            text="create presentation.pptx",
+                            evidence="presentation.pptx",
+                        ),
+                    ),
                     seed_limit=1,
                     expanded_limit=4,
                 )
@@ -401,7 +450,7 @@ class RouterBundleTests(unittest.TestCase):
             self.assertIn("skill:analyzing-financial-statements", selected)
             self.assertTrue(
                 any(
-                    source.startswith(("interface:", "facet:interface_text"))
+                    source.startswith("interface:")
                     for source in selected["skill:analyzing-financial-statements"]["sources"]
                 )
             )

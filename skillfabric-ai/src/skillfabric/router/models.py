@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from skillfabric.router.task_atoms import TaskDecomposition
+
 
 @dataclass(slots=True)
 class RouterQuery:
@@ -31,9 +33,11 @@ class RouterBundleConfig:
 
     workspace: str | Path = ".skillfabric"
     query: str = ""
+    task_atoms: TaskDecomposition | None = None
     env_file: str | Path | None = ".env"
     seed_limit: int = 8
     expanded_limit: int = 50
+    candidate_pool_limit: int = 250
     workflow_confidence_threshold: float = 0.95
     max_workflow_hints: int = 12
     graph_expansion_mode: str = "ppr"
@@ -55,6 +59,7 @@ class RouterSkillCandidate:
     seed_score: float = 0.0
     ppr_score: float = 0.0
     score_breakdown: dict[str, float] = field(default_factory=dict)
+    atom_coverage: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,6 +75,11 @@ class RouterSkillCandidate:
             "sources": sorted(set(self.sources)),
             "graph_depth": self.graph_depth,
             "reason": self.reason,
+            "atom_coverage": {
+                str(key): sorted({str(item) for item in value})
+                for key, value in sorted(self.atom_coverage.items())
+                if value
+            },
         }
 
     @classmethod
@@ -86,6 +96,10 @@ class RouterSkillCandidate:
             score_breakdown={
                 str(key): _safe_float(value, 0.0)
                 for key, value in dict(payload.get("score_breakdown", {}) or {}).items()
+            },
+            atom_coverage={
+                str(key): _string_list(value)
+                for key, value in dict(payload.get("atom_coverage", {}) or {}).items()
             },
         )
 
@@ -162,11 +176,13 @@ class RouterBundle:
     communities: list[RouterCommunityContext]
     workflow_hints: list[RouterWorkflowHint]
     wiki_pages: list[str]
+    task_atoms: TaskDecomposition = field(default_factory=TaskDecomposition.empty)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
+            "task_atoms": self.task_atoms.to_dict(),
             "selected_skills": [item.to_dict() for item in self.selected_skills],
             "communities": [item.to_dict() for item in self.communities],
             "workflow_hints": [item.to_dict() for item in self.workflow_hints],
@@ -178,6 +194,9 @@ class RouterBundle:
     def from_dict(cls, payload: dict[str, Any]) -> RouterBundle:
         return cls(
             query=str(payload.get("query", "")),
+            task_atoms=TaskDecomposition.from_dict(
+                dict(payload.get("task_atoms", {}) or {})
+            ) if isinstance(payload.get("task_atoms", {}), dict) else TaskDecomposition.empty(),
             selected_skills=[
                 RouterSkillCandidate.from_dict(item)
                 for item in payload.get("selected_skills", [])
@@ -282,6 +301,7 @@ class RouteResult:
     wiki_pages_read: list[str] = field(default_factory=list)
     rationale: str = ""
     provenance: str = "deterministic_fallback"
+    task_atoms: TaskDecomposition = field(default_factory=TaskDecomposition.empty)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -300,6 +320,7 @@ class RouteResult:
             "wiki_pages_read": list(self.wiki_pages_read),
             "rationale": self.rationale,
             "provenance": self.provenance,
+            "task_atoms": self.task_atoms.to_dict(),
             "warnings": list(self.warnings),
         }
 
@@ -332,6 +353,9 @@ class RouteResult:
             wiki_pages_read=[str(item) for item in payload.get("wiki_pages_read", [])],
             rationale=str(payload.get("rationale", "")),
             provenance=str(payload.get("provenance", "deterministic_fallback")),
+            task_atoms=TaskDecomposition.from_dict(
+                dict(payload.get("task_atoms", {}) or {})
+            ) if isinstance(payload.get("task_atoms", {}), dict) else TaskDecomposition.empty(),
             warnings=[str(item) for item in payload.get("warnings", [])],
         )
 
