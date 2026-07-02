@@ -17,7 +17,6 @@ from skillfabric.metrics import merge_wiki_metrics
 from skillfabric.orchestrator.package import (
     ExecutionPackageResult,
     PreparedExecutionPackageResult,
-    build_execution_package,
     finalize_execution_package,
     prepare_execution_package,
 )
@@ -132,14 +131,15 @@ class SkillFabric:
         renderer: str = "claude-code",
         **route_overrides: object,
     ) -> ExecutionPackageResult:
-        """Plan an external-agent workflow and execution prompt from a route or task query."""
+        """Direct finalized planning is not available without an agent planner."""
 
-        resolved_route = route or self._route_from_file(route_file)
-        if resolved_route is None:
-            if query is None:
-                raise ValueError("plan requires query, route, or route_file")
-            resolved_route = self.route(query, **route_overrides)
-        return build_execution_package(self.workspace, resolved_route, renderer=renderer)
+        del renderer, route_overrides
+        if query is None and route is None and route_file is None:
+            raise ValueError("plan requires query, route, or route_file")
+        raise ValueError(
+            "SkillFabric.plan() no longer creates a finalized execution package without an agent planner. "
+            "Use prepare_plan(...), run the prompt planner, then finalize_plan(...)."
+        )
 
     def prepare_plan(
         self,

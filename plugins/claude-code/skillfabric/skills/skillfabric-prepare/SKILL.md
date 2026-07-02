@@ -1,6 +1,6 @@
 ---
 name: skillfabric-prepare
-description: Use when the user wants Claude Code to select relevant skills and create a SkillFabric execution package, handoff prompt, or implementation plan without executing the final task.
+description: Use when the user wants Claude Code to select relevant skills and create a SkillFabric execution package and prompt-only handoff without executing the final task.
 license: MIT
 ---
 
@@ -10,7 +10,7 @@ license: MIT
 
 Prepare a complete SkillFabric handoff for one task. Build the workspace when
 needed, route the task through query-wiki exploration, create a validated
-execution package, and stop before final task execution.
+prompt-only execution package, and stop before final task execution.
 
 ## Input Contract
 
@@ -55,7 +55,7 @@ and warnings.
 8. Launch `skillfabric-query-wiki-explorer`.
 9. Run `skillfabric route --agent-mode finalize --skill-package-file -`.
 10. Run `skillfabric plan --agent-mode prepare --route-file $final_route_json`.
-11. Launch `skillfabric-workflow-planner`.
+11. Launch `skillfabric-workflow-planner` as the prompt-only planner.
 12. Run `skillfabric plan --agent-mode finalize --package-root $package_root --planner-output-file -`.
 13. Stop after finalization. Do not read and execute `execution_prompt.md`.
 
@@ -73,11 +73,9 @@ and warnings.
 
 Return:
 
-- Handoff prompt path.
 - Execution package root.
-- `workflow_plan.json`.
 - `execution_prompt.md`.
-- Renderer and entry prompt label.
+- Planner validation path.
 - Selected skills, warnings, coverage gaps, and blockers.
 
 State that the final task has not been executed.

@@ -333,7 +333,7 @@ class PublicPackageTests(unittest.TestCase):
                 with self.subTest(path=path, marker=marker):
                     self.assertNotIn(marker, text)
 
-    def test_python_facade_plan_generates_execution_package(self) -> None:
+    def test_python_facade_plan_requires_agent_planner(self) -> None:
         from skillfabric import SkillFabric
 
         with TemporaryDirectory() as tmp:
@@ -347,11 +347,40 @@ class PublicPackageTests(unittest.TestCase):
                 use_llm_router=False,
                 explorer_backend="fallback",
             )
-            plan = client.plan(route=route, renderer="codex")
 
-            self.assertEqual(plan.renderer, "codex")
-            self.assertTrue(plan.prompt_path.exists())
-            self.assertTrue((plan.root / "agent_run_spec.json").exists())
+            with self.assertRaisesRegex(ValueError, "no longer creates a finalized execution package"):
+                client.plan(route=route, renderer="codex")
+
+    def test_python_facade_prepare_and_finalize_plan_prompt_only(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            client = SkillFabric(workspace=workspace)
+
+            route = client.route(
+                "extract financial KPIs from a PDF report",
+                use_llm_router=False,
+                explorer_backend="fallback",
+            )
+            prepared = client.prepare_plan(route=route, renderer="codex")
+            self.assertTrue((prepared.root / "planner_request.json").exists())
+            self.assertFalse((prepared.root / "agent_run_spec_draft.json").exists())
+            self.assertFalse((prepared.root / "execution_prompt.md").exists())
+
+            result = client.finalize_plan(
+                prepared.root,
+                {"execution_prompt": "# Prompt\n\nExtract the KPIs and verify the deliverable."},
+                renderer="codex",
+            )
+
+            self.assertEqual(result.renderer, "codex")
+            self.assertEqual(result.prompt_path, prepared.root / "execution_prompt.md")
+            self.assertTrue(result.prompt_path.exists())
+            self.assertFalse((prepared.root / "workflow_plan.json").exists())
+            self.assertFalse((prepared.root / "agent_run_spec.json").exists())
 
     def test_python_facade_build_accepts_explicit_disabled_embeddings_without_api(self) -> None:
         from skillfabric import SkillFabric

@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+  "graspologic>=3.4.4; python_version < '3.13'",
   "litellm>=1.63.8",
   "networkx>=3.2",
   "python-dotenv>=1.0",

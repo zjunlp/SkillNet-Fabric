@@ -28,12 +28,9 @@ from skillfabric.llm import (
 from skillfabric.metrics import merge_wiki_metrics
 from skillfabric.orchestrator.package import (
     ExecutionPackageResult,
-    build_execution_package,
     finalize_execution_package,
     prepare_execution_package,
 )
-from skillfabric.orchestrator.renderers.claude_code import render_claude_code_entry_prompt
-from skillfabric.orchestrator.renderers.codex import render_codex_entry_prompt
 from skillfabric.progress import ProgressReporter
 from skillfabric.router.bundle import build_router_bundle
 from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouteResult
@@ -100,8 +97,8 @@ WORKFLOW_HELP = """Recommended SkillFabric workflow
 3. Route a task to the relevant skills:
    skillfabric route "extract financial KPIs from a PDF report" --workspace .skillfabric
 
-4. Plan the execution workflow and prompt for Claude Code or Codex:
-   skillfabric plan "extract financial KPIs from a PDF report" --workspace .skillfabric
+4. Prepare and finalize a prompt-only execution package through an agent planner:
+   skillfabric plan --agent-mode prepare --route-file .skillfabric/runs/<trace>/route.json --workspace .skillfabric
 
 SkillFabric prepares context and execution prompts. It does not execute the final task.
 """
@@ -187,7 +184,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
 
     plan_parser = subcommands.add_parser(
         "plan",
-        help="Plan a Claude Code/Codex workflow and execution prompt from a task or route",
+        help="Prepare or finalize a prompt-only execution handoff from a task or route",
     )
     plan_parser.add_argument("query", nargs="?")
     plan_parser.add_argument("--route-file")
@@ -619,9 +616,10 @@ def _plan(args: argparse.Namespace) -> None:
             raise SystemExit(str(exc)) from exc
         print(json.dumps(_plan_payload(result), ensure_ascii=False, indent=2))
         return
-    route = _route_from_args_or_file(args)
-    result = build_execution_package(args.workspace, route, renderer=args.renderer)
-    print(json.dumps(_plan_payload(result), ensure_ascii=False, indent=2))
+    raise SystemExit(
+        "skillfabric plan now requires --agent-mode prepare or --agent-mode finalize; "
+        "direct deterministic planning was removed."
+    )
 
 
 def _read_agent_skill_package(skill_package_file: str, trace_dir: Path) -> dict[str, object]:
@@ -690,14 +688,7 @@ def _resolve_inside_root(root: Path, path: str | Path, *, outside_message: str) 
 
 
 def _plan_payload(result: ExecutionPackageResult) -> dict[str, object]:
-    if result.renderer == "codex":
-        entry_prompt = render_codex_entry_prompt(result.spec, execution_package_root=result.root)
-    else:
-        entry_prompt = render_claude_code_entry_prompt(result.spec, execution_package_root=result.root)
-    return {
-        **result.to_dict(),
-        "entry_prompt": entry_prompt.to_dict(),
-    }
+    return result.to_dict()
 
 
 def _route_from_args_or_file(args: argparse.Namespace) -> RouteResult:

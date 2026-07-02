@@ -8,7 +8,7 @@ license: MIT
 
 ## Purpose
 
-Prepare a validated SkillFabric execution plan and then execute the user's task
+Prepare a validated SkillFabric execution prompt and then execute the user's task
 in the current Claude Code session. This is the only SkillFabric workflow that
 continues into final task execution.
 
@@ -55,7 +55,7 @@ Preparation:
 8. Launch `skillfabric-query-wiki-explorer`.
 9. Run `skillfabric route --agent-mode finalize --skill-package-file -`.
 10. Run `skillfabric plan --agent-mode prepare --route-file $final_route_json`.
-11. Launch `skillfabric-workflow-planner`.
+11. Launch `skillfabric-workflow-planner` as the prompt-only planner.
 12. Run `skillfabric plan --agent-mode finalize --package-root $package_root --planner-output-file -`.
 
 Execution:

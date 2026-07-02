@@ -2,23 +2,18 @@ from __future__ import annotations
 
 import json
 import unittest
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import skillfabric.orchestrator.package as package_module
 from skillfabric.orchestrator.agent_run_spec import agent_run_spec_from_route
 from skillfabric.orchestrator.package import (
-    FORBIDDEN_EXECUTION_PROMPT_FRAGMENTS,
     PLANNER_PROMPT_ID,
-    build_execution_package,
-    deterministic_planner_output,
     finalize_execution_package,
+    planner_output_json_schema,
     prepare_execution_package,
 )
-from skillfabric.orchestrator.renderers.claude_code import (
-    render_claude_code_entry_prompt,
-    render_execution_prompt,
-)
-from skillfabric.orchestrator.renderers.codex import render_codex_entry_prompt
 from skillfabric.router.models import (
     RouteEdge,
     RouteResult,
@@ -63,6 +58,21 @@ def _route(workspace: Path) -> RouteResult:
     )
 
 
+def _valid_planner_output(route: RouteResult) -> dict[str, str]:
+    return {
+        "execution_prompt": (
+            "# Execution Prompt\n\n"
+            "## Objective\n"
+            f"{route.query}\n\n"
+            "## Selected Skills\n"
+            "- skill:data-visualization: Create requested PNG figures.\n"
+            "- skill:docx: Write the requested Word report.\n\n"
+            "## Final Report\n"
+            "Briefly summarize deliverables, checks, and blockers."
+        ),
+    }
+
+
 class OrchestratorPackageTests(unittest.TestCase):
     def test_agent_run_spec_from_route_contains_phases_and_execution_strategy(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -75,6 +85,10 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertEqual(
                 [item["skill_id"] for item in payload["selected_skills"]],
                 ["skill:data-visualization", "skill:docx"],
+            )
+            self.assertEqual(
+                [item["native_skill_name"] for item in payload["selected_skills"]],
+                ["data-visualization", "docx"],
             )
             self.assertEqual(payload["phases"][0]["skill_ids"], ["skill:data-visualization"])
             self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
@@ -125,44 +139,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertEqual(parallelize["control"], "parallel")
             self.assertCountEqual(parallelize["skill_ids"], ["skill:data-visualization", "skill:docx"])
 
-    def test_renderer_prompts_use_target_agent_dialects(self) -> None:
-        with TemporaryDirectory() as tmp:
-            route = _route(Path(tmp) / ".skillfabric")
-            spec = agent_run_spec_from_route(route)
-
-            codex_prompt = render_execution_prompt(spec, renderer="codex")
-            claude_prompt = render_execution_prompt(spec, renderer="claude-code")
-
-            self.assertIn("update_plan", codex_prompt)
-            self.assertIn("apply_patch", codex_prompt)
-            self.assertIn("spawn_agent", codex_prompt)
-            self.assertNotIn("TodoWrite", codex_prompt)
-            self.assertNotIn("Task tool", codex_prompt)
-            self.assertIn("TodoWrite", claude_prompt)
-            self.assertIn("Read / Grep / Glob / LS", claude_prompt)
-            self.assertIn("Task", claude_prompt)
-            self.assertNotIn("apply_patch", claude_prompt)
-            self.assertNotIn("spawn_agent", claude_prompt)
-            self.assertIn("Skill Use Protocol", claude_prompt)
-            self.assertIn("Verification Protocol", claude_prompt)
-            self.assertIn("coverage gap", claude_prompt)
-            self.assertIn("selected capability roles", claude_prompt)
-            self.assertNotIn("Skill tool", claude_prompt)
-            self.assertNotIn("Audit context", claude_prompt)
-            self.assertNotIn("current Claude Code skill surface", claude_prompt)
-            self.assertNotIn("not as a replacement for native skill instructions", claude_prompt)
-            for heading in (
-                "## TODO",
-                "## Input",
-                "## Output",
-                "## Workflow",
-                "## Rules",
-                "## Constraints",
-                "## Action Type Definitions",
-            ):
-                self.assertIn(heading, claude_prompt)
-
-    def test_execution_package_contains_only_selected_skills_and_agent_artifacts(self) -> None:
+    def test_prepare_execution_package_contains_selected_context_and_planner_artifacts_only(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"
             workspace = Workspace(workspace_path)
@@ -172,68 +149,59 @@ class OrchestratorPackageTests(unittest.TestCase):
                 path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
                 path.write_text(f"# {skill_id}\n", encoding="utf-8")
 
-            result = build_execution_package(workspace, route)
+            result = prepare_execution_package(workspace, route)
 
             root = result.root
-            self.assertTrue((root / "execution_prompt.md").exists())
-            self.assertTrue((root / "agent_run_spec.json").exists())
-            self.assertFalse((root / "completion_report_schema.json").exists())
+            self.assertFalse((root / "execution_prompt.md").exists())
+            self.assertFalse((root / "agent_run_spec.json").exists())
+            self.assertFalse((root / "agent_run_spec_draft.json").exists())
+            self.assertFalse((root / "workflow_plan.json").exists())
+            self.assertTrue((root / "planner_request.json").exists())
+            self.assertTrue((root / "PLANNER.md").exists())
             self.assertTrue((root / "evidence" / "route_summary.json").exists())
             self.assertTrue((root / "evidence" / "selected_skill_evidence.json").exists())
             self.assertTrue((root / "evidence" / "required_edges.json").exists())
             copied = sorted(path.name for path in (root / "selected_skills").glob("*.md"))
             self.assertEqual(copied, ["data-visualization.md", "docx.md"])
             self.assertFalse((root / "selected_skills" / "outside.md").exists())
-            self.assertEqual(result.prompt_path, root / "execution_prompt.md")
             self.assertEqual(result.renderer, "claude-code")
-            spec_payload = json.loads((root / "agent_run_spec.json").read_text(encoding="utf-8"))
-            self.assertEqual(spec_payload["selected_skills"][0]["skill_context_path"], "selected_skills/data-visualization.md")
-            self.assertIn("execution_strategy", spec_payload)
-            prompt = (root / "execution_prompt.md").read_text(encoding="utf-8")
-            self.assertIn("SkillFabric Execution Prompt", prompt)
-            self.assertIn("Selected Skills", prompt)
-            self.assertIn("Final Report", prompt)
-            for fragment in FORBIDDEN_EXECUTION_PROMPT_FRAGMENTS:
-                self.assertNotIn(fragment.lower(), prompt.lower())
+            self.assertFalse(hasattr(result, "draft_spec"))
 
-    def test_prepare_package_waits_for_planner_before_writing_final_prompt(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            for skill_id in ["skill:data-visualization", "skill:docx"]:
-                path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
-                path.write_text(f"# {skill_id}\n", encoding="utf-8")
-
-            prepared = prepare_execution_package(workspace, route)
-
-            self.assertEqual(prepared.root, route.trace_dir / "execution_package")
-            self.assertTrue((prepared.root / "route.json").exists())
-            self.assertTrue((prepared.root / "agent_run_spec_draft.json").exists())
-            self.assertTrue((prepared.root / "planner_request.json").exists())
-            self.assertTrue((prepared.root / "PLANNER.md").exists())
-            self.assertFalse((prepared.root / "execution_prompt.md").exists())
-            self.assertFalse((prepared.root / "agent_run_spec.json").exists())
-            planner_request = json.loads((prepared.root / "planner_request.json").read_text(encoding="utf-8"))
+            planner_request = json.loads((root / "planner_request.json").read_text(encoding="utf-8"))
+            self.assertEqual(planner_request["expected_output"], str(root / "planner_output.json"))
+            self.assertEqual(planner_request["expected_schema"], planner_output_json_schema())
+            self.assertEqual(planner_request["expected_schema"]["required"], ["execution_prompt"])
+            self.assertNotIn("workflow_plan", planner_request["expected_schema"]["properties"])
+            self.assertEqual(planner_request["final_artifacts"], {"execution_prompt": str(root / "execution_prompt.md")})
             self.assertEqual(planner_request["prompt_id"], PLANNER_PROMPT_ID)
-            planner_prompt = (prepared.root / "PLANNER.md").read_text(encoding="utf-8")
-            for heading in (
+            self.assertNotIn("draft_agent_run_spec", planner_request)
+            self.assertNotIn("agent_run_spec", json.dumps(planner_request, ensure_ascii=False))
+
+            planner_prompt = (root / "PLANNER.md").read_text(encoding="utf-8")
+            for section in (
                 "# Prompt Contract",
                 "# Role",
+                "# Authority",
+                "# Inputs",
                 "# Success Criteria",
-                "# Workflow",
+                "# Reading Order",
+                "# Planning Policy",
+                "# Claude Code Execution Capabilities",
                 "# Output Contract",
-                "# Final Execution Prompt Policy",
+                "# Final Prompt Requirements",
                 "# Self-Check",
             ):
-                self.assertIn(heading, planner_prompt)
-            self.assertIn("skill:data-visualization -> skill:docx", planner_prompt)
-            self.assertNotIn("benchmark", planner_prompt.lower())
-            self.assertNotIn("audit", planner_prompt.lower())
-            self.assertNotIn("completion_report", planner_prompt)
+                self.assertIn(section, planner_prompt)
+            self.assertIn("Return one strict JSON object with exactly one top-level key", planner_prompt)
+            self.assertIn("Read `planner_request.json` first", planner_prompt)
+            self.assertIn("Do not execute the task", planner_prompt)
+            self.assertIn("required_edges are hard ordering constraints", planner_prompt)
+            self.assertIn("ordered_hints are soft ordering guidance", planner_prompt)
+            self.assertIn("bounded subagent", planner_prompt)
+            self.assertNotIn("workflow_plan", planner_prompt)
+            self.assertNotIn("Skill tool", planner_prompt)
 
-    def test_finalize_package_uses_planner_workflow_as_final_prompt_contract(self) -> None:
+    def test_finalize_execution_package_writes_prompt_only_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"
             workspace = Workspace(workspace_path)
@@ -243,113 +211,62 @@ class OrchestratorPackageTests(unittest.TestCase):
                 path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
                 path.write_text(f"# {skill_id}\n", encoding="utf-8")
             prepared = prepare_execution_package(workspace, route)
-            planner_output = deterministic_planner_output(route, prepared.draft_spec)
-            planner_output["workflow_plan"]["phases"] = [
-                {
-                    "id": "phase_story",
-                    "goal": "Create the PNG charts first.",
-                    "skill_ids": ["skill:data-visualization"],
-                    "depends_on": [],
-                    "expected_outputs": ["PNG charts"],
-                    "evidence_refs": ["evidence/selected_skill_evidence.json"],
-                    "guidance": "Render figures before writing the report.",
-                },
-                {
-                    "id": "phase_report",
-                    "goal": "Write the Word report using generated charts.",
-                    "skill_ids": ["skill:docx"],
-                    "depends_on": ["phase_story"],
-                    "expected_outputs": ["report.docx"],
-                    "evidence_refs": ["evidence/required_edges.json"],
-                    "guidance": "Integrate figures into the report.",
-                },
-            ]
-            planner_output["execution_prompt"] = "# Planner Authored Prompt\n\nUse the planned workflow."
+            planner_output = _valid_planner_output(route)
 
             result = finalize_execution_package(prepared.root, planner_output)
 
-            self.assertTrue(result.prompt_path.exists())
-            self.assertEqual(result.prompt_path.read_text(encoding="utf-8"), "# Planner Authored Prompt\n\nUse the planned workflow.\n")
-            self.assertTrue((prepared.root / "workflow_plan.json").exists())
-            self.assertTrue((prepared.root / "planner_output.json").exists())
-            self.assertTrue((prepared.root / "planner_validation.json").exists())
-            self.assertFalse((prepared.root / "handoff_prompt.md").exists())
-            spec_payload = json.loads((prepared.root / "agent_run_spec.json").read_text(encoding="utf-8"))
-            self.assertEqual([phase["id"] for phase in spec_payload["phases"]], ["phase_story", "phase_report"])
-            self.assertEqual(spec_payload["phases"][1]["depends_on"], ["phase_story"])
-            self.assertEqual(result.planner_validation_path, prepared.root / "planner_validation.json")
+            root = result.root
+            self.assertTrue((root / "planner_output.json").exists())
+            self.assertTrue((root / "planner_validation.json").exists())
+            self.assertFalse((root / "workflow_plan.json").exists())
+            self.assertFalse((root / "agent_run_spec.json").exists())
+            self.assertTrue((root / "execution_prompt.md").exists())
+            self.assertEqual(result.prompt_path, root / "execution_prompt.md")
+            self.assertFalse(hasattr(result, "workflow_plan_path"))
+            self.assertFalse(hasattr(result, "spec"))
+            prompt = (root / "execution_prompt.md").read_text(encoding="utf-8")
+            self.assertIn("Execution Prompt", prompt)
+            self.assertIn("Selected Skills", prompt)
+            self.assertIn("Final Report", prompt)
+            self.assertNotIn("Skill tool", prompt)
+            self.assertNotIn("SkillFabric", prompt)
+            self.assertNotIn("selected_skills/", prompt)
+            validation = json.loads((root / "planner_validation.json").read_text(encoding="utf-8"))
+            self.assertTrue(validation["valid"])
 
-    def test_finalize_package_rejects_unselected_skills_and_order_violations(self) -> None:
+    def test_finalize_execution_package_rejects_invalid_planner_outputs(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"
             workspace = Workspace(workspace_path)
             workspace.ensure()
             route = _route(workspace_path)
             prepared = prepare_execution_package(workspace, route)
-            planner_output = deterministic_planner_output(route, prepared.draft_spec)
-            planner_output["workflow_plan"]["phases"] = [
-                {
-                    "id": "phase_report",
-                    "goal": "Write report too early.",
-                    "skill_ids": ["skill:docx"],
-                    "depends_on": [],
-                },
-                {
-                    "id": "phase_unknown",
-                    "goal": "Use a skill that was not selected.",
-                    "skill_ids": ["skill:outside"],
-                    "depends_on": ["phase_report"],
-                },
-                {
-                    "id": "phase_charts",
-                    "goal": "Create charts after report.",
-                    "skill_ids": ["skill:data-visualization"],
-                    "depends_on": ["phase_report"],
-                },
-            ]
 
-            with self.assertRaises(ValueError) as raised:
-                finalize_execution_package(prepared.root, planner_output)
+            with self.assertRaisesRegex(ValueError, "execution_prompt must be a non-empty string"):
+                finalize_execution_package(prepared.root, {})
 
-            message = str(raised.exception)
-            self.assertIn("unselected skill", message)
-            self.assertIn("violates required order", message)
+            extra_key = {
+                "workflow_plan": {"objective": route.query},
+                "execution_prompt": "Do the task.",
+            }
+            with self.assertRaisesRegex(ValueError, "planner output keys must be exactly"):
+                finalize_execution_package(prepared.root, extra_key)
 
-    def test_finalize_package_rejects_runtime_mechanics_in_execution_prompt(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            prepared = prepare_execution_package(workspace, route)
-            planner_output = deterministic_planner_output(route, prepared.draft_spec)
-            planner_output["execution_prompt"] = (
-                "# Bad Prompt\n\n"
-                "Use the Skill tool and read selected_skills/data-visualization.md."
-            )
-
-            with self.assertRaises(ValueError) as raised:
-                finalize_execution_package(prepared.root, planner_output)
-
-            message = str(raised.exception)
-            self.assertIn("forbidden runtime-mechanism wording", message)
+            polluted_prompt = _valid_planner_output(route)
+            polluted_prompt["execution_prompt"] = "Use the Skill tool and selected_skills/docx.md."
+            with self.assertRaisesRegex(ValueError, "forbidden runtime-mechanism wording"):
+                finalize_execution_package(prepared.root, polluted_prompt)
             self.assertTrue((prepared.root / "planner_validation.json").exists())
 
-    def test_renderers_return_entry_prompts_for_same_spec(self) -> None:
-        with TemporaryDirectory() as tmp:
-            route = _route(Path(tmp) / ".skillfabric")
-            spec = agent_run_spec_from_route(route)
+    def test_deterministic_planner_fallback_is_not_available(self) -> None:
+        self.assertFalse(hasattr(package_module, "deterministic_planner_output"))
+        self.assertFalse(hasattr(package_module, "build_execution_package"))
 
-            claude = render_claude_code_entry_prompt(spec, execution_package_root=route.trace_dir / "execution_package")
-            codex = render_codex_entry_prompt(spec, execution_package_root=route.trace_dir / "execution_package")
-
-            self.assertIn("execution_prompt.md", claude.prompt)
-            self.assertNotIn("agent_run_spec.json", claude.prompt)
-            self.assertIn("Claude Code", claude.label)
-            self.assertIn("execution_prompt.md", codex.prompt)
-            self.assertNotIn("agent_run_spec.json", codex.prompt)
-            self.assertIn("Codex", codex.label)
-            self.assertNotEqual(claude.prompt, codex.prompt)
+    def test_direct_execution_prompt_renderer_modules_are_removed(self) -> None:
+        with self.assertRaises(ModuleNotFoundError):
+            import_module("skillfabric.orchestrator.renderers.claude_code")
+        with self.assertRaises(ModuleNotFoundError):
+            import_module("skillfabric.orchestrator.renderers.codex")
 
 
 if __name__ == "__main__":

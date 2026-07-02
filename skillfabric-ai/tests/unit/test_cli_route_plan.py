@@ -92,7 +92,7 @@ class RoutePlanCliTests(unittest.TestCase):
             self.assertTrue(captured["config"].use_llm_router)
             self.assertEqual(captured["config"].explorer_backend, "claude-code")
 
-    def test_route_and_plan_cli_offline(self) -> None:
+    def test_route_and_plan_cli_offline_requires_agent_mode(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             query = "extract financial KPIs from a PDF report"
@@ -117,8 +117,7 @@ class RoutePlanCliTests(unittest.TestCase):
             route_path = Path(route_payload["trace_dir"]) / "route.json"
             self.assertTrue(route_path.exists())
 
-            plan_output = io.StringIO()
-            with contextlib.redirect_stdout(plan_output):
+            with self.assertRaises(SystemExit) as raised:
                 cli_main(
                     [
                         "plan",
@@ -130,19 +129,56 @@ class RoutePlanCliTests(unittest.TestCase):
                         "codex",
                     ]
                 )
-            plan_payload = json.loads(plan_output.getvalue())
-            package_root = Path(plan_payload["root"])
-            self.assertTrue((package_root / "execution_prompt.md").exists())
-            self.assertTrue((package_root / "agent_run_spec.json").exists())
-            self.assertEqual(Path(plan_payload["prompt_path"]), package_root / "execution_prompt.md")
-            self.assertIn("Codex", plan_payload["entry_prompt"]["label"])
-            self.assertIn("execution_prompt.md", plan_payload["entry_prompt"]["prompt"])
-            self.assertEqual(
-                [item["skill_id"] for item in plan_payload["agent_run_spec"]["selected_skills"]],
-                [item["skill_id"] for item in route_payload["selected_skills"]],
-            )
+            self.assertIn("requires --agent-mode prepare", str(raised.exception))
 
-    def test_plan_cli_can_route_from_query(self) -> None:
+            prepare_output = io.StringIO()
+            with contextlib.redirect_stdout(prepare_output):
+                cli_main(
+                    [
+                        "plan",
+                        "--route-file",
+                        str(route_path),
+                        "--workspace",
+                        str(workspace),
+                        "--renderer",
+                        "codex",
+                        "--agent-mode",
+                        "prepare",
+                    ]
+                )
+            prepared = json.loads(prepare_output.getvalue())
+            package_root = Path(prepared["root"])
+            self.assertTrue((package_root / "planner_request.json").exists())
+            self.assertFalse((package_root / "execution_prompt.md").exists())
+            self.assertFalse((package_root / "agent_run_spec_draft.json").exists())
+
+            planner_output = {"execution_prompt": "# Prompt\n\nExecute the task."}
+            finalize_output = io.StringIO()
+            with patch("sys.stdin", io.StringIO(json.dumps(planner_output))):
+                with contextlib.redirect_stdout(finalize_output):
+                    cli_main(
+                        [
+                            "plan",
+                            "--workspace",
+                            str(workspace),
+                            "--renderer",
+                            "codex",
+                            "--agent-mode",
+                            "finalize",
+                            "--package-root",
+                            str(package_root),
+                            "--planner-output-file",
+                            "-",
+                        ]
+                    )
+            finalized = json.loads(finalize_output.getvalue())
+            self.assertEqual(Path(finalized["prompt_path"]), package_root / "execution_prompt.md")
+            self.assertEqual(finalized["renderer"], "codex")
+            self.assertTrue((package_root / "execution_prompt.md").exists())
+            self.assertFalse((package_root / "workflow_plan.json").exists())
+            self.assertFalse((package_root / "agent_run_spec.json").exists())
+
+    def test_plan_cli_can_prepare_from_query(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             query = "extract financial KPIs from a PDF report"
@@ -162,13 +198,40 @@ class RoutePlanCliTests(unittest.TestCase):
                         "fallback",
                         "--renderer",
                         "claude-code",
+                        "--agent-mode",
+                        "prepare",
                     ]
                 )
 
             payload = json.loads(output.getvalue())
             package_root = Path(payload["root"])
-            self.assertTrue((package_root / "execution_prompt.md").exists())
+            self.assertTrue((package_root / "planner_request.json").exists())
+            self.assertFalse((package_root / "execution_prompt.md").exists())
             self.assertEqual(payload["renderer"], "claude-code")
+
+    def test_plan_cli_without_agent_mode_rejects_query(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            query = "extract financial KPIs from a PDF report"
+            build_fixture_workspace(workspace)
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+
+            with self.assertRaises(SystemExit) as raised:
+                cli_main(
+                    [
+                        "plan",
+                        query,
+                        "--workspace",
+                        str(workspace),
+                        "--skip-llm-router",
+                        "--explorer-backend",
+                        "fallback",
+                        "--renderer",
+                        "claude-code",
+                    ]
+                )
+
+            self.assertIn("direct deterministic planning was removed", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -424,21 +424,8 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertTrue((package_root / "planner_request.json").exists())
             self.assertTrue((package_root / "PLANNER.md").exists())
             self.assertFalse((package_root / "execution_prompt.md").exists())
-            draft = prepared["draft_agent_run_spec"]
+            self.assertNotIn("draft_agent_run_spec", prepared)
             planner_output = {
-                "workflow_plan": {
-                    "objective": draft["objective"],
-                    "selected_skill_ids": [item["skill_id"] for item in draft["selected_skills"]],
-                    "phases": draft["phases"],
-                    "execution_strategy": {
-                        "parallelization_policy": "Use only independent parallel work.",
-                        "delegation_policy": "Delegate only bounded independent checks.",
-                        "verification_policy": "Verify final deliverables before reporting.",
-                    },
-                    "constraints": draft["constraints"],
-                    "coverage_notes": [],
-                    "rationale": "Fixture planner output.",
-                },
                 "execution_prompt": "# Fixture Planner Prompt\n\nExecute the task with selected skills.",
             }
 
@@ -465,8 +452,9 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                 (package_root / "execution_prompt.md").read_text(encoding="utf-8"),
                 "# Fixture Planner Prompt\n\nExecute the task with selected skills.\n",
             )
-            self.assertTrue((package_root / "workflow_plan.json").exists())
-            self.assertTrue((package_root / "agent_run_spec.json").exists())
+            self.assertFalse((package_root / "workflow_plan.json").exists())
+            self.assertFalse((package_root / "agent_run_spec.json").exists())
+            self.assertFalse((package_root / "agent_run_spec_draft.json").exists())
             self.assertFalse((package_root / "handoff_prompt.md").exists())
 
 

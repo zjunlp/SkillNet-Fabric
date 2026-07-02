@@ -1,13 +1,13 @@
 # SkillFabric Claude Code Plugin
 
 SkillFabric routes a user task through a graph-backed workspace of native
-skills, then produces validated route, workflow, and execution prompt artifacts
-for Claude Code.
+skills, then produces validated route, planner validation, and execution prompt
+artifacts for Claude Code.
 
 The `skillfabric` CLI is the artifact source of truth. Claude Code commands and
 subagents prepare inputs and perform bounded reasoning, but the CLI owns writes
-to `.skillfabric`: registry, graph, wiki, runs, route finalization, workflow
-plans, planner validation metadata, and `execution_prompt.md`.
+to `.skillfabric`: registry, graph, wiki, runs, route finalization, planner
+validation metadata, and `execution_prompt.md`.
 
 ## Requirements
 
