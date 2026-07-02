@@ -51,6 +51,7 @@ class PublicPackageTests(unittest.TestCase):
             "skillfabric.exporters",
             "skillfabric.exporters.neo4j",
             "skillfabric.orchestrator.outcome",
+            "skillfabric.task_understanding",
         )
         for module_name in removed_specs:
             with self.subTest(module=module_name):
@@ -60,6 +61,7 @@ class PublicPackageTests(unittest.TestCase):
             PACKAGE_ROOT / "src" / "skillfabric" / "evaluation",
             PACKAGE_ROOT / "src" / "skillfabric" / "exporters",
             PACKAGE_ROOT / "src" / "skillfabric" / "orchestrator" / "outcome.py",
+            PACKAGE_ROOT / "src" / "skillfabric" / "task_understanding.py",
             PACKAGE_ROOT / "tests" / "unit" / "test_experimental_parity.py",
             PACKAGE_ROOT / "tests" / "unit" / "test_neo4j_export.py",
         ):
@@ -68,6 +70,20 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertFalse(hasattr(orchestrator, "ExecutionOutcome"))
         self.assertFalse(hasattr(orchestrator, "classify_execution_outcome"))
+
+    def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
+        pyproject = (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+        for dependency in (
+            "graspologic",
+            "litellm",
+            "networkx",
+            "python-dotenv",
+            "pyyaml",
+            "rapidfuzz",
+        ):
+            with self.subTest(dependency=dependency):
+                self.assertIn(f'"{dependency}', pyproject)
 
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"

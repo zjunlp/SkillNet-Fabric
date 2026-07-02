@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from skillfabric.router.models import RouteResult, RouteSelectedSkill
-from skillfabric.task_understanding import CoverageRequirement, skill_satisfies_requirement
 from skillfabric.wiki.pages import slug
 
 EXECUTION_OPERATIONS = {
@@ -491,25 +490,8 @@ def _operation_guidance(phase: AgentRunPhase) -> str:
 
 
 def _acceptance_criteria(route: RouteResult) -> list[AgentRunAcceptanceCriterion]:
-    selected_ids = set(route.selected_skill_ids)
-    criteria: list[AgentRunAcceptanceCriterion] = []
-    for requirement in route.task_understanding.coverage_requirements:
-        if requirement.kind != "deliverable":
-            continue
-        covered_by = [
-            skill_id
-            for skill_id in [*requirement.preferred_skill_ids, *requirement.acceptable_skill_ids]
-            if skill_id in selected_ids and skill_satisfies_requirement(skill_id, requirement)
-        ]
-        criteria.append(
-            AgentRunAcceptanceCriterion(
-                id=requirement.id,
-                description=f"Create the requested {requirement.label or requirement.format} deliverable.",
-                expected_artifacts=_expected_artifacts(requirement),
-                covered_by=_dedupe(covered_by),
-            )
-        )
-    return criteria
+    del route
+    return []
 
 
 def _expected_outputs(skill: RouteSelectedSkill) -> list[str]:
@@ -517,12 +499,6 @@ def _expected_outputs(skill: RouteSelectedSkill) -> list[str]:
     if skill.reason:
         outputs.append(skill.reason)
     return outputs
-
-
-def _expected_artifacts(requirement: CoverageRequirement) -> list[str]:
-    if requirement.format:
-        return [f"*.{requirement.format}"]
-    return []
 
 
 def _expected_artifacts_from_criteria(criteria: list[AgentRunAcceptanceCriterion]) -> list[str]:

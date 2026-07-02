@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skillfabric.task_understanding import TaskUnderstanding
-
 
 @dataclass(slots=True)
 class RouterQuery:
@@ -164,8 +162,6 @@ class RouterBundle:
     communities: list[RouterCommunityContext]
     workflow_hints: list[RouterWorkflowHint]
     wiki_pages: list[str]
-    task_understanding: TaskUnderstanding = field(default_factory=lambda: TaskUnderstanding(query=""))
-    coverage_diagnostics: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -175,8 +171,6 @@ class RouterBundle:
             "communities": [item.to_dict() for item in self.communities],
             "workflow_hints": [item.to_dict() for item in self.workflow_hints],
             "wiki_pages": list(self.wiki_pages),
-            "task_understanding": self.task_understanding.to_dict(),
-            "coverage_diagnostics": dict(self.coverage_diagnostics),
             "warnings": list(self.warnings),
         }
 
@@ -200,10 +194,6 @@ class RouterBundle:
                 if isinstance(item, dict)
             ],
             wiki_pages=_string_list(payload.get("wiki_pages", [])),
-            task_understanding=TaskUnderstanding.from_dict(payload.get("task_understanding")),
-            coverage_diagnostics=dict(payload.get("coverage_diagnostics", {}))
-            if isinstance(payload.get("coverage_diagnostics", {}), dict)
-            else {},
             warnings=_string_list(payload.get("warnings", [])),
         )
 
@@ -290,8 +280,6 @@ class RouteResult:
     ordered_hints: list[RouteEdge] = field(default_factory=list)
     near_misses: list[dict[str, str]] = field(default_factory=list)
     wiki_pages_read: list[str] = field(default_factory=list)
-    task_understanding: TaskUnderstanding = field(default_factory=lambda: TaskUnderstanding(query=""))
-    coverage_diagnostics: dict[str, Any] = field(default_factory=dict)
     rationale: str = ""
     provenance: str = "deterministic_fallback"
     warnings: list[str] = field(default_factory=list)
@@ -310,8 +298,6 @@ class RouteResult:
             "ordered_hints": [item.to_dict() for item in self.ordered_hints],
             "near_misses": [dict(item) for item in self.near_misses],
             "wiki_pages_read": list(self.wiki_pages_read),
-            "task_understanding": self.task_understanding.to_dict(),
-            "coverage_diagnostics": dict(self.coverage_diagnostics),
             "rationale": self.rationale,
             "provenance": self.provenance,
             "warnings": list(self.warnings),
@@ -344,10 +330,6 @@ class RouteResult:
                 if isinstance(item, dict)
             ],
             wiki_pages_read=[str(item) for item in payload.get("wiki_pages_read", [])],
-            task_understanding=TaskUnderstanding.from_dict(payload.get("task_understanding")),
-            coverage_diagnostics=dict(payload.get("coverage_diagnostics", {}))
-            if isinstance(payload.get("coverage_diagnostics", {}), dict)
-            else {},
             rationale=str(payload.get("rationale", "")),
             provenance=str(payload.get("provenance", "deterministic_fallback")),
             warnings=[str(item) for item in payload.get("warnings", [])],

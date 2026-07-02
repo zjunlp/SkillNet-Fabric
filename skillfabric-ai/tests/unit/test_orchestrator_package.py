@@ -19,22 +19,17 @@ from skillfabric.orchestrator.renderers.claude_code import (
     render_execution_prompt,
 )
 from skillfabric.orchestrator.renderers.codex import render_codex_entry_prompt
-from skillfabric.router.models import RouteEdge, RouteResult, RouteSelectedSkill
+from skillfabric.router.models import (
+    RouteEdge,
+    RouteResult,
+    RouteSelectedSkill,
+)
 from skillfabric.storage import Workspace
-from skillfabric.task_understanding import analyze_task
 from skillfabric.wiki.pages import slug
 
 
 def _route(workspace: Path) -> RouteResult:
     query = "Generate PNG figures and write report.docx from analyzed data."
-    understanding = analyze_task(query)
-    for requirement in understanding.coverage_requirements:
-        if requirement.id == "deliverable:png":
-            requirement.preferred_skill_ids = ["skill:data-visualization"]
-            requirement.acceptable_skill_ids = ["skill:data-visualization"]
-        if requirement.id == "deliverable:docx":
-            requirement.preferred_skill_ids = ["skill:docx"]
-            requirement.acceptable_skill_ids = ["skill:docx"]
     return RouteResult(
         query=query,
         trace_id="exec-test",
@@ -64,13 +59,12 @@ def _route(workspace: Path) -> RouteResult:
                 source="execution_index",
             )
         ],
-        task_understanding=understanding,
         provenance="test",
     )
 
 
 class OrchestratorPackageTests(unittest.TestCase):
-    def test_agent_run_spec_from_route_contains_phases_and_acceptance_criteria(self) -> None:
+    def test_agent_run_spec_from_route_contains_phases_and_execution_strategy(self) -> None:
         with TemporaryDirectory() as tmp:
             route = _route(Path(tmp) / ".skillfabric")
 
@@ -85,7 +79,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertEqual(payload["phases"][0]["skill_ids"], ["skill:data-visualization"])
             self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
             self.assertEqual(payload["required_order"][0]["before_skill"], "skill:data-visualization")
-            self.assertIn("deliverable:png", {item["id"] for item in payload["acceptance_criteria"]})
+            self.assertEqual(payload["acceptance_criteria"], [])
             self.assertNotIn("completion_report", payload)
             operation_names = [item["operation"] for item in payload["execution_strategy"]["operations"]]
             self.assertEqual(operation_names[:2], ["orient", "inspect"])

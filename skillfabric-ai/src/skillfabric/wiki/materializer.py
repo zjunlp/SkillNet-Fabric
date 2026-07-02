@@ -18,7 +18,6 @@ from skillfabric.wiki.renderers import (
     _deliverables_page,
     _first_paragraph,
     _overview_page,
-    _resolver_page,
     _skill_page,
     _skill_summary_payload,
     _workflow_page,
@@ -42,7 +41,6 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     pages.extend(
         [
             _overview_page(source, workspace),
-            _resolver_page(source, workspace),
             _deliverables_page(source, workspace),
             WikiPage(
                 path=workspace.wiki_dir / "index.md",
@@ -99,6 +97,9 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
     stale_hot = workspace.wiki_dir / "hot.md"
     if stale_hot.exists():
         stale_hot.unlink()
+    stale_resolver = workspace.wiki_dir / "resolver.md"
+    if stale_resolver.exists():
+        stale_resolver.unlink()
     if not include_debug_pages and workspace.wiki_debug_dir.exists():
         shutil.rmtree(workspace.wiki_debug_dir)
     workspace.wiki_workflows_dir.mkdir(parents=True, exist_ok=True)

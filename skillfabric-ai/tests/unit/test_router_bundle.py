@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -135,13 +134,12 @@ class RouterBundleTests(unittest.TestCase):
             self.assertIn("skill:academic-seminar-slides", selected)
             self.assertTrue(
                 any(
-                    source.startswith("coverage:deliverable:pptx")
-                    or source.startswith("facet:interface_text")
+                    source.startswith(("interface:", "object:", "execution:", "facet:interface_text"))
                     for source in selected["skill:academic-seminar-slides"].sources
                 )
             )
 
-    def test_deliverable_requirements_are_hard_included_even_with_small_seed_limit(self) -> None:
+    def test_object_and_interface_scores_softly_recall_deliverable_skills(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Workspace(Path(tmp) / ".skillfabric")
             workspace.ensure()
@@ -218,6 +216,70 @@ class RouterBundleTests(unittest.TestCase):
                     ),
                 ],
             )
+            workspace.write_jsonl(
+                workspace.execution_dir / "canonical_objects.jsonl",
+                [
+                    {
+                        "canonical_id": "canonical:png_figures",
+                        "name": "png figures",
+                        "type": "artifact",
+                        "description": "Publication-quality PNG figure artifacts.",
+                        "aliases": ["chart.png", "image_asset"],
+                        "required_by": [],
+                        "produced_by": ["skill:data-visualization"],
+                        "reuse_count": 1,
+                        "promoted": True,
+                        "confidence": 0.95,
+                        "provenance": "test",
+                        "reason": "interface produces png figures",
+                    },
+                    {
+                        "canonical_id": "canonical:docx_report",
+                        "name": "docx report",
+                        "type": "artifact",
+                        "description": "Word report document.",
+                        "aliases": ["report.docx", "docx_document"],
+                        "required_by": [],
+                        "produced_by": ["skill:docx"],
+                        "reuse_count": 1,
+                        "promoted": True,
+                        "confidence": 0.95,
+                        "provenance": "test",
+                        "reason": "interface produces docx reports",
+                    },
+                    {
+                        "canonical_id": "canonical:pptx_deck",
+                        "name": "presentation deck",
+                        "type": "artifact",
+                        "description": "PowerPoint presentation deck.",
+                        "aliases": ["presentation.pptx", "slide deck"],
+                        "required_by": [],
+                        "produced_by": ["skill:pptx"],
+                        "reuse_count": 1,
+                        "promoted": True,
+                        "confidence": 0.95,
+                        "provenance": "test",
+                        "reason": "interface produces presentation decks",
+                    },
+                ],
+            )
+            workspace.write_jsonl(
+                workspace.execution_dir / "execution_index.jsonl",
+                [
+                    {
+                        "source_skill": "skill:xlsx",
+                        "target_skill": "skill:data-visualization",
+                        "relation_type": "artifact_compatibility",
+                        "canonical_object": "statistical_summary",
+                        "direction": "source_to_target",
+                        "confidence": 0.96,
+                        "evidence": [],
+                        "projected_edge_type": "depend_on",
+                        "reason": "statistics feed chart generation",
+                        "metadata": {},
+                    }
+                ],
+            )
             build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
             for skill in skills:
                 page = workspace.wiki_skills_dir / f"{skill.name}.md"
@@ -242,23 +304,24 @@ class RouterBundleTests(unittest.TestCase):
                 selected_ids,
                 {"skill:data-visualization", "skill:xlsx", "skill:docx", "skill:pptx"},
             )
-            self.assertTrue(
-                all(
-                    any(source.startswith("coverage:") for source in item["sources"])
+            self.assertFalse(
+                any(
+                    source.startswith("coverage:")
                     for item in payload["selected_skills"]
+                    for source in item["sources"]
                 )
             )
+            self.assertNotIn("task_understanding", payload)
+            self.assertNotIn("coverage_diagnostics", payload)
             self.assertTrue(
-                all(
-                    any(key.startswith("coverage:") for key in item["score_breakdown"])
+                any(
+                    source.startswith(("interface:", "object:", "execution:"))
                     for item in payload["selected_skills"]
+                    for source in item["sources"]
                 )
             )
-            self.assertEqual(payload["coverage_diagnostics"]["missing"], [])
-            requirement_ids = {item["id"] for item in payload["task_understanding"]["coverage_requirements"]}
-            self.assertIn("deliverable:pptx", requirement_ids)
 
-    def test_query_bundle_filters_unavailable_coverage_skills(self) -> None:
+    def test_query_bundle_uses_interface_text_without_task_coverage_parser(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Workspace(Path(tmp) / ".skillfabric")
             workspace.ensure()
@@ -324,17 +387,24 @@ class RouterBundleTests(unittest.TestCase):
                 )
             )
             payload = bundle.to_dict()
-            financial_requirement = next(
-                item
-                for item in payload["task_understanding"]["coverage_requirements"]
-                if item["id"] == "intent:financial_statement_analysis"
-            )
 
-            self.assertEqual(
-                financial_requirement["acceptable_skill_ids"],
-                ["skill:analyzing-financial-statements"],
+            selected = {item["skill_id"]: item for item in payload["selected_skills"]}
+            self.assertNotIn("task_understanding", payload)
+            self.assertNotIn("coverage_diagnostics", payload)
+            self.assertFalse(
+                any(
+                    source.startswith("coverage:")
+                    for item in payload["selected_skills"]
+                    for source in item["sources"]
+                )
             )
-            self.assertNotIn("skill:financial-kpi-extractor", json.dumps(payload))
+            self.assertIn("skill:analyzing-financial-statements", selected)
+            self.assertTrue(
+                any(
+                    source.startswith(("interface:", "facet:interface_text"))
+                    for source in selected["skill:analyzing-financial-statements"]["sources"]
+                )
+            )
 
     def test_query_bundle_uses_query_local_graph_and_wiki_context(self) -> None:
         with TemporaryDirectory() as tmp:

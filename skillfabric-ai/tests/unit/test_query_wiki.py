@@ -47,7 +47,7 @@ class QueryWikiTests(unittest.TestCase):
             self.assertIn("## Candidate Skill Cards", index_md)
             self.assertIn("Read this file first", index_md)
             self.assertIn("route_score:", index_md)
-            self.assertIn("page: skills/graph_frontier/pdf-table-parser.md", index_md)
+            self.assertIn("page: skills/core/pdf-table-parser.md", index_md)
             self.assertIn("summary:", index_md)
             self.assertIn("requires:", index_md)
             self.assertIn("produces:", index_md)
@@ -69,7 +69,7 @@ class QueryWikiTests(unittest.TestCase):
             manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
             scopes = {item["skill_id"]: item["scope"] for item in manifest["skills"]}
             self.assertIn("skill:pdf-table-parser", scopes)
-            self.assertEqual(scopes["skill:pdf-table-parser"], "graph_frontier")
+            self.assertEqual(scopes["skill:pdf-table-parser"], "core")
             parser_manifest = next(item for item in manifest["skills"] if item["skill_id"] == "skill:pdf-table-parser")
             self.assertIn("card", parser_manifest)
             self.assertIn("summary", parser_manifest["card"])
@@ -77,7 +77,7 @@ class QueryWikiTests(unittest.TestCase):
             card_text = render_query_wiki_skill_card(root, "skill:pdf-table-parser")
             self.assertIn("# skill:pdf-table-parser", card_text)
             self.assertIn("## Card", card_text)
-            self.assertIn("page: skills/graph_frontier/pdf-table-parser.md", card_text)
+            self.assertIn("page: skills/core/pdf-table-parser.md", card_text)
             self.assertNotIn("## Source", card_text)
             scope_rank = {"core": 0, "workflow_bridge": 1, "graph_frontier": 2}
             self.assertEqual(
@@ -130,7 +130,8 @@ class QueryWikiTests(unittest.TestCase):
             debug_manifest = json.loads((trace_dir / "query_wiki_debug_manifest.json").read_text(encoding="utf-8"))
             self.assertIn("source_wiki", debug_manifest)
             self.assertIn("excluded_workflows", debug_manifest)
-            self.assertIn("coverage_diagnostics", debug_manifest)
+            self.assertNotIn("coverage_diagnostics", debug_manifest)
+            self.assertNotIn("task_understanding", debug_manifest)
 
             explorer_surfaces = self._explorer_surface_text(root)
             self.assertNotIn("[[skills/testing-python]]", explorer_surfaces)

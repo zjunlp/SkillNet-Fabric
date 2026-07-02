@@ -10,7 +10,6 @@ from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterSkillCandidate
-from skillfabric.task_understanding import TaskUnderstanding
 from skillfabric.wiki.pages import slug
 
 _STOP_TERMS = {
@@ -84,8 +83,7 @@ def preserve_facet_candidates(
     seed_scores: dict[str, RouterSkillCandidate],
     skills: dict[str, SkillNode],
     interfaces: dict[str, SkillInterface],
-    understanding: TaskUnderstanding,
-    hard_include_ids: set[str],
+    query: str,
     expanded_limit: int,
     wiki_skills_dir: Path,
     warnings: list[str],
@@ -102,42 +100,17 @@ def preserve_facet_candidates(
         for skill_id, candidate in candidate_pool.items()
         if _has_candidate_evidence(candidate)
         or skill_id in expanded_ids
-        or skill_id in hard_include_ids
     }
     selected_ids: list[str] = []
-    limit = max(expanded_limit, len(hard_include_ids & available_ids))
+    limit = max(expanded_limit, 0)
 
-    for skill_id in _rank_ids(hard_include_ids & available_ids, candidate_pool):
-        _append_selected(selected_ids, skill_id, limit)
-    global_budget = max(_global_budget(expanded_limit), len(selected_ids))
+    global_budget = _global_budget(expanded_limit)
     for skill_id in _rank_ids(expanded_ids, candidate_pool):
         if len(selected_ids) >= min(global_budget, limit):
             break
         _append_selected(selected_ids, skill_id, limit)
-    for skill_id, source in _coverage_facet_ids(
-        understanding,
-        skills=skills,
-        candidate_pool=candidate_pool,
-        expanded_limit=expanded_limit,
-        wiki_skills_dir=wiki_skills_dir,
-        require_wiki_page=has_wiki_pages,
-        warnings=warnings,
-    ):
-        _preserve_with_source(selected_ids, candidate_pool, skill_id, source, limit)
-        available_ids.add(skill_id)
-    for skill_id, source in _domain_facet_ids(
-        understanding,
-        skills=skills,
-        interfaces=interfaces,
-        candidate_pool=candidate_pool,
-        wiki_skills_dir=wiki_skills_dir,
-        require_wiki_page=has_wiki_pages,
-        warnings=warnings,
-    ):
-        _preserve_with_source(selected_ids, candidate_pool, skill_id, source, limit)
-        available_ids.add(skill_id)
     for skill_id, source in _interface_text_facet_ids(
-        understanding,
+        query,
         skills=skills,
         interfaces=interfaces,
         candidate_pool=candidate_pool,
@@ -199,73 +172,8 @@ def _copy_candidate(item: RouterSkillCandidate) -> RouterSkillCandidate:
     )
 
 
-def _coverage_facet_ids(
-    understanding: TaskUnderstanding,
-    *,
-    skills: dict[str, SkillNode],
-    candidate_pool: dict[str, RouterSkillCandidate],
-    expanded_limit: int,
-    wiki_skills_dir: Path,
-    require_wiki_page: bool,
-    warnings: list[str],
-) -> list[tuple[str, str]]:
-    output: list[tuple[str, str]] = []
-    for requirement in understanding.coverage_requirements:
-        added = 0
-        budget = _coverage_budget(requirement.kind, expanded_limit)
-        for skill_id in _dedupe([*requirement.preferred_skill_ids, *requirement.acceptable_skill_ids]):
-            if skill_id not in skills or skill_id not in candidate_pool:
-                continue
-            if require_wiki_page and not _has_wiki_page(skill_id, wiki_skills_dir):
-                _warn_missing_wiki(skill_id, warnings)
-                continue
-            output.append((skill_id, f"coverage:{requirement.id}"))
-            added += 1
-            if added >= budget:
-                break
-    return output
-
-
-def _coverage_budget(kind: str, expanded_limit: int) -> int:
-    if expanded_limit < 12:
-        return 2
-    if kind == "intent":
-        return min(16, max(4, expanded_limit // 3))
-    return min(4, max(2, expanded_limit // 12))
-
-
-def _domain_facet_ids(
-    understanding: TaskUnderstanding,
-    *,
-    skills: dict[str, SkillNode],
-    interfaces: dict[str, SkillInterface],
-    candidate_pool: dict[str, RouterSkillCandidate],
-    wiki_skills_dir: Path,
-    require_wiki_page: bool,
-    warnings: list[str],
-) -> list[tuple[str, str]]:
-    output: list[tuple[str, str]] = []
-    for hint in understanding.domain_hints:
-        terms = _terms(hint)
-        if not terms:
-            continue
-        ranked = _rank_by_terms(
-            terms,
-            skills=skills,
-            interfaces=interfaces,
-            candidate_pool=candidate_pool,
-            wiki_skills_dir=wiki_skills_dir,
-            require_wiki_page=require_wiki_page,
-            warnings=warnings,
-            min_matches=1,
-        )
-        for skill_id, _score in ranked[:2]:
-            output.append((skill_id, f"facet:domain:{hint}"))
-    return output
-
-
 def _interface_text_facet_ids(
-    understanding: TaskUnderstanding,
+    query: str,
     *,
     skills: dict[str, SkillNode],
     interfaces: dict[str, SkillInterface],
@@ -274,16 +182,7 @@ def _interface_text_facet_ids(
     require_wiki_page: bool,
     warnings: list[str],
 ) -> list[tuple[str, str]]:
-    query_terms = _terms(
-        " ".join(
-            [
-                understanding.query,
-                " ".join(understanding.analysis_intents),
-                " ".join(understanding.domain_hints),
-                " ".join(item.label for item in understanding.required_deliverables),
-            ]
-        )
-    ) - _INTERFACE_LOW_VALUE_TERMS
+    query_terms = _terms(query) - _INTERFACE_LOW_VALUE_TERMS
     ranked = _rank_by_terms(
         query_terms,
         skills=skills,
@@ -467,7 +366,7 @@ def _has_candidate_evidence(candidate: RouterSkillCandidate) -> bool:
     if candidate.score > 0 or candidate.seed_score > 0 or candidate.ppr_score > 0:
         return True
     return any(
-        source.startswith(("bm25", "lexical", "embedding", "graph:", "ppr:", "coverage:", "facet:"))
+        source.startswith(("bm25", "lexical", "embedding", "interface:", "object:", "execution:", "graph:", "ppr:", "facet:"))
         for source in candidate.sources
     )
 

@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.search_index import load_page_index
 from skillfabric.wiki.loader import load_wiki_source
-from skillfabric.wiki.materializer import _deliverables_page, _resolver_page, build_wiki
+from skillfabric.wiki.materializer import _deliverables_page, build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
 
@@ -44,8 +44,10 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("\n```markdown\n", text)
             self.assertTrue((workspace / "wiki" / "communities").exists())
             self.assertTrue((workspace / "wiki" / "overview.md").exists())
-            self.assertTrue((workspace / "wiki" / "resolver.md").exists())
+            self.assertFalse((workspace / "wiki" / "resolver.md").exists())
             self.assertTrue((workspace / "wiki" / "deliverables.md").exists())
+            overview_text = (workspace / "wiki" / "overview.md").read_text(encoding="utf-8")
+            self.assertNotIn("resolver.md", overview_text)
             self.assertFalse((workspace / "wiki" / "artifacts").exists())
             self.assertFalse((workspace / "wiki" / "scenarios").exists())
             self.assertTrue((workspace / "wiki" / "workflows").exists())
@@ -95,6 +97,19 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertFalse(stale_hot.exists())
             self.assertFalse(any(page.path == "hot.md" for page in load_page_index(workspace)))
 
+    def test_build_wiki_removes_stale_resolver_page_and_excludes_it_from_index(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            stale_resolver = workspace / "wiki" / "resolver.md"
+            stale_resolver.parent.mkdir(parents=True, exist_ok=True)
+            stale_resolver.write_text("# Legacy Resolver\n", encoding="utf-8")
+
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+
+            self.assertFalse(stale_resolver.exists())
+            self.assertFalse(any(page.path == "resolver.md" for page in load_page_index(workspace)))
+
     def test_source_excerpt_uses_fence_that_survives_nested_code_blocks(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
@@ -115,21 +130,18 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("````markdown", text)
             self.assertIn("```python", text)
 
-    def test_resolver_and_deliverables_are_concept_and_interface_based(self) -> None:
+    def test_deliverables_are_interface_based(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace_path)
             workspace = Workspace(workspace_path)
             source = load_wiki_source(workspace)
 
-            resolver_text = _resolver_page(source, workspace).text
             deliverables_text = _deliverables_page(source, workspace).text
 
-            self.assertIn("Deliverable Concept Aliases", resolver_text)
-            self.assertIn("Resolve concrete skills from skill interface", resolver_text)
-            self.assertNotIn("skill:", resolver_text)
             self.assertIn("Producer Index", deliverables_text)
-            self.assertIn("deliverable:pptx", deliverables_text)
+            self.assertNotIn("Canonical Deliverable Requirements", deliverables_text)
+            self.assertNotIn("deliverable:pptx", deliverables_text)
 
 
 if __name__ == "__main__":

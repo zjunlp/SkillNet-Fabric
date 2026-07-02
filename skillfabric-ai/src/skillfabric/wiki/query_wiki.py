@@ -11,8 +11,8 @@ from typing import Any
 
 from skillfabric.compiled_graph.models import Edge
 from skillfabric.router.assembly import _load_graph
-from skillfabric.router.coverage import load_execution_index
 from skillfabric.router.models import RouterBundle
+from skillfabric.router.sidecars import load_execution_index
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.prompting import render_query_wiki_explorer_md
 from skillfabric.wiki.explorer.search_index import _split_frontmatter, _stable_id
@@ -258,8 +258,6 @@ def materialize_query_wiki(
         "missing_pages": missing_pages,
         "bridge_edges": bridge_edge_rows,
         "frontier_edges": frontier_edge_rows,
-        "task_understanding": bundle.task_understanding.to_dict(),
-        "coverage_diagnostics": bundle.coverage_diagnostics,
     }
     manifest = _explorer_manifest(debug_manifest)
     atomic_write_text(
@@ -543,26 +541,11 @@ def _sanitize_edge_row(
 
 
 def _explorer_manifest(debug_manifest: dict[str, Any]) -> dict[str, Any]:
-    manifest = {
+    return {
         key: value
         for key, value in debug_manifest.items()
-        if key not in {"source_wiki", "excluded_workflows", "coverage_diagnostics"}
+        if key not in {"source_wiki", "excluded_workflows"}
     }
-    if "task_understanding" in manifest:
-        manifest["task_understanding"] = _prune_explorer_debug_fields(manifest["task_understanding"])
-    return manifest
-
-
-def _prune_explorer_debug_fields(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _prune_explorer_debug_fields(item)
-            for key, item in value.items()
-            if key not in {"acceptable_skill_ids", "preferred_skill_ids", "coverage_diagnostics"}
-        }
-    if isinstance(value, list):
-        return [_prune_explorer_debug_fields(item) for item in value]
-    return value
 
 
 def _write_page_index(query_root: Path) -> None:

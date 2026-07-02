@@ -9,31 +9,12 @@ from typing import Any
 from skillfabric.router.bundle import RouterBundle, RouterSkillCandidate
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.router.selection import _select_fallback_candidates
-from skillfabric.task_understanding import TaskUnderstanding, analyze_task
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import route_from_skill_package
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.test_wiki_explorer import _StubSdkRuntime
 from tests.unit.wiki_helpers import build_fixture_workspace
-
-
-def _resolved_penguin_understanding(query: str) -> TaskUnderstanding:
-    understanding = analyze_task(query)
-    resolved = {
-        "deliverable:png": (["skill:data-visualization"], ["skill:data-visualization"]),
-        "deliverable:docx": (["skill:docx"], ["skill:docx"]),
-        "deliverable:pptx": (["skill:pptx"], ["skill:pptx"]),
-        "intent:tabular_or_statistical_analysis": (
-            ["skill:xlsx"],
-            ["skill:xlsx", "skill:data-visualization"],
-        ),
-    }
-    for requirement in understanding.coverage_requirements:
-        preferred, acceptable = resolved.get(requirement.id, ([], []))
-        requirement.preferred_skill_ids = list(preferred)
-        requirement.acceptable_skill_ids = list(acceptable)
-    return understanding
 
 
 class RouterRouteTests(unittest.TestCase):
@@ -44,7 +25,7 @@ class RouterRouteTests(unittest.TestCase):
             RouterSkillCandidate("skill:core-c", "core-c", 1.1, sources=["embedding"], score_breakdown={"embedding": 0.3}),
             RouterSkillCandidate("skill:weak-lexical", "weak-lexical", 0.3, sources=["lexical"], score_breakdown={"lexical": 0.1}),
             RouterSkillCandidate("skill:weak-ppr", "weak-ppr", 0.28, sources=["ppr:similar_to"], ppr_score=0.02),
-            RouterSkillCandidate("skill:coverage", "coverage", 0.2, sources=["coverage:intent:pdf"]),
+            RouterSkillCandidate("skill:object", "object", 0.2, sources=["object:produces"]),
             RouterSkillCandidate("skill:facet", "facet", 0.15, sources=["facet:interface_text"]),
         ]
 
@@ -53,7 +34,7 @@ class RouterRouteTests(unittest.TestCase):
 
         self.assertEqual(
             selected_ids,
-            ["skill:core-a", "skill:core-b", "skill:core-c", "skill:coverage", "skill:facet"],
+            ["skill:core-a", "skill:core-b", "skill:core-c", "skill:facet"],
         )
 
     def test_strict_explorer_raises_on_partial_validation_errors(self) -> None:
@@ -242,7 +223,6 @@ class RouterRouteTests(unittest.TestCase):
                 communities=[],
                 workflow_hints=[],
                 wiki_pages=[],
-                task_understanding=_resolved_penguin_understanding(query),
             )
             package = SkillPackage.from_dict(
                 {
@@ -312,7 +292,7 @@ class RouterRouteTests(unittest.TestCase):
             self.assertNotIn(("skill:pptx", "skill:data-storytelling"), required_pairs)
             self.assertTrue(any("dropped conflicting LLM required edge" in warning for warning in warnings))
 
-    def test_route_reports_missing_tabular_coverage_without_injecting_skill(self) -> None:
+    def test_route_result_omits_removed_task_coverage_fields(self) -> None:
         with TemporaryDirectory() as tmp:
             query = (
                 "Analyze artifacts/penguins.csv with statistical tests, generate at least 4 PNG figures, "
@@ -330,7 +310,6 @@ class RouterRouteTests(unittest.TestCase):
                 communities=[],
                 workflow_hints=[],
                 wiki_pages=[],
-                task_understanding=_resolved_penguin_understanding(query),
             )
             package = SkillPackage.from_dict(
                 {
@@ -361,8 +340,9 @@ class RouterRouteTests(unittest.TestCase):
 
             selected_ids = [item.skill_id for item in route.selected_skills]
             self.assertNotIn("skill:xlsx", selected_ids)
-            missing_ids = {item["id"] for item in route.coverage_diagnostics["missing"]}
-            self.assertIn("intent:tabular_or_statistical_analysis", missing_ids)
+            payload = route.to_dict()
+            self.assertNotIn("task_understanding", payload)
+            self.assertNotIn("coverage_diagnostics", payload)
 
 
 if __name__ == "__main__":

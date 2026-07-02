@@ -139,47 +139,12 @@ def _overview_page(source: WikiSource, workspace: Workspace) -> WikiPage:
             + bullet_list(
                 [
                     "Use skill pages for routing fit, produces, required deliverables, and workflow hints.",
-                    "Use resolver.md for deterministic deliverable and intent aliases.",
                     "Use deliverables.md to find skills by output artifact family.",
                 ]
             ),
         ]
     ) + "\n"
     return WikiPage(workspace.wiki_dir / "overview.md", "overview", "overview", "SkillFabric Overview", text)
-
-
-def _resolver_page(source: WikiSource, workspace: Workspace) -> WikiPage:
-    deliverable_rows = [
-        "pptx: powerpoint, presentation, slide deck, slides",
-        "docx: word document, report document",
-        "xlsx: excel, spreadsheet, workbook, tabular data",
-        "pdf: pdf document",
-        "md: markdown document",
-        "png: image asset, figure, chart, plot",
-    ]
-    intent_rows = [
-        "tabular_or_statistical_analysis: csv, spreadsheet, dataframe, descriptive statistics",
-        "data_storytelling: narrative, presentation, report story",
-        "financial_statement_analysis: financial statement, kpi, year-over-year trend",
-    ]
-    text = "\n\n".join(
-        [
-            frontmatter({"type": "resolver", "tags": ["skillfabric", "resolver"]}),
-            "# Resolver",
-            "## Deliverable Concept Aliases\n\n" + bullet_list(deliverable_rows),
-            "## Intent Concept Aliases\n\n" + bullet_list(intent_rows),
-            "## Resolution Rules\n\n"
-            + bullet_list(
-                [
-                    "Resolve concrete skills from skill interface produces/requires fields, execution hints, and skill text.",
-                    "Prefer explicit deliverable producers over fuzzy similarity when a task names an output file type.",
-                    "Treat docx and pptx as distinct deliverables; do not satisfy presentation.pptx with a generic document skill.",
-                    "Use tabular/statistical intent skills when a task asks for CSV analysis, descriptive statistics, tests, or spreadsheet work.",
-                ]
-            ),
-        ]
-    ) + "\n"
-    return WikiPage(workspace.wiki_dir / "resolver.md", "resolver", "resolver", "Resolver", text)
 
 
 def _deliverables_page(source: WikiSource, workspace: Workspace) -> WikiPage:
@@ -203,17 +168,6 @@ def _deliverables_page(source: WikiSource, workspace: Workspace) -> WikiPage:
             frontmatter({"type": "deliverables", "tags": ["skillfabric", "deliverables"]}),
             "# Deliverables",
             "## Producer Index\n\n" + bullet_list(rows),
-            "## Canonical Deliverable Requirements\n\n"
-            + bullet_list(
-                [
-                    "deliverable:pptx: presentation document",
-                    "deliverable:docx: word/report document",
-                    "deliverable:xlsx: spreadsheet workbook",
-                    "deliverable:pdf: pdf document",
-                    "deliverable:md: markdown document",
-                    "deliverable:png: image asset",
-                ]
-            ),
         ]
     ) + "\n"
     return WikiPage(workspace.wiki_dir / "deliverables.md", "deliverables", "deliverables", "Deliverables", text)

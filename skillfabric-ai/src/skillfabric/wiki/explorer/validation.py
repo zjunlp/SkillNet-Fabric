@@ -7,14 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skillfabric.router.models import RouteEdge, RouterBundle, RouteResult, RouteSelectedSkill
+from skillfabric.router.models import (
+    RouteEdge,
+    RouterBundle,
+    RouteResult,
+    RouteSelectedSkill,
+)
 from skillfabric.router.route_edges import (
     _edges_from_ordered_skill_ids,
     _edges_from_workflow_hints,
     _merge_edges,
     _reconcile_route_edges,
 )
-from skillfabric.task_understanding import coverage_diagnostics
 from skillfabric.wiki.explorer.skill_package import (
     SkillPackage,
     SkillPackageNearMiss,
@@ -189,8 +193,6 @@ def route_from_skill_package(
         ordered_hints=ordered_hints,
         near_misses=[item.to_dict() for item in package.near_misses],
         wiki_pages_read=[evidence for skill in selected for evidence in skill.evidence],
-        task_understanding=bundle.task_understanding,
-        coverage_diagnostics=coverage_diagnostics(bundle.task_understanding, selected_ids),
         rationale=package.rationale,
         provenance="claude_code",
         warnings=warnings,

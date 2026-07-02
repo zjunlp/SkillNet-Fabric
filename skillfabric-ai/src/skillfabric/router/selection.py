@@ -11,7 +11,6 @@ from skillfabric.router.models import (
     RouteSelectedSkill,
 )
 from skillfabric.router.route_edges import _edges_from_workflow_hints
-from skillfabric.task_understanding import coverage_diagnostics
 
 
 def _fallback_route(
@@ -46,8 +45,6 @@ def _fallback_route(
         ordered_hints=list(required_edges),
         near_misses=[],
         wiki_pages_read=list(bundle.wiki_pages),
-        task_understanding=bundle.task_understanding,
-        coverage_diagnostics=coverage_diagnostics(bundle.task_understanding, selected_ids),
         rationale="Deterministic fallback selected high-scoring query-local skills while preserving task-facet specialists.",
         provenance="deterministic_fallback",
         warnings=warnings,
@@ -139,7 +136,8 @@ def _is_facet_candidate(candidate: RouterSkillCandidate) -> bool:
 
 
 def _is_protected_candidate(candidate: RouterSkillCandidate) -> bool:
-    return any(source.startswith("coverage:") for source in candidate.sources)
+    del candidate
+    return False
 
 
 def _has_strong_evidence(candidate: RouterSkillCandidate) -> bool:

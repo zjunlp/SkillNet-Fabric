@@ -12,11 +12,10 @@ def _expand_seed_skills(
     skills: dict[str, SkillNode],
     seeds: dict[str, RouterSkillCandidate],
     *,
-    hard_include_ids: set[str],
     seed_limit: int,
     expanded_limit: int,
 ) -> list[RouterSkillCandidate]:
-    ranked_seeds = _ranked_seeds_with_hard_includes(seeds, hard_include_ids, seed_limit)
+    ranked_seeds = _ranked_seeds(seeds, seed_limit)
     selected = {item.skill_id: item for item in ranked_seeds}
     seed_ids = set(selected)
     for edge in edges:
@@ -26,7 +25,7 @@ def _expand_seed_skills(
             _add_graph_expansion(selected, seeds, skills[edge.target], selected[edge.source], edge)
         if edge.target in seed_ids and edge.source in skills:
             _add_graph_expansion(selected, seeds, skills[edge.source], selected[edge.target], edge)
-    return _limit_candidates_with_hard_includes(selected, hard_include_ids, expanded_limit)
+    return _limit_candidates(selected, expanded_limit)
 
 
 def _add_graph_expansion(
@@ -82,7 +81,6 @@ def _expand_seed_skills_ppr(
     skills: dict[str, SkillNode],
     seeds: dict[str, RouterSkillCandidate],
     *,
-    hard_include_ids: set[str],
     seed_limit: int,
     expanded_limit: int,
     alpha: float,
@@ -91,7 +89,7 @@ def _expand_seed_skills_ppr(
 ) -> list[RouterSkillCandidate]:
     if expanded_limit <= 0:
         return []
-    ranked_seeds = _ranked_seeds_with_hard_includes(seeds, hard_include_ids, seed_limit)
+    ranked_seeds = _ranked_seeds(seeds, seed_limit)
     if not ranked_seeds:
         return []
     seed_ids = {item.skill_id for item in ranked_seeds}
@@ -140,32 +138,23 @@ def _expand_seed_skills_ppr(
         candidate.graph_depth = min(candidate.graph_depth, depths.get(skill_id, candidate.graph_depth))
         for source in support_sources.get(skill_id, []):
             candidate.sources.append(source)
-    return _limit_candidates_with_hard_includes(candidates, hard_include_ids, expanded_limit)
+    return _limit_candidates(candidates, expanded_limit)
 
 
-def _ranked_seeds_with_hard_includes(
+def _ranked_seeds(
     seeds: dict[str, RouterSkillCandidate],
-    hard_include_ids: set[str],
     seed_limit: int,
 ) -> list[RouterSkillCandidate]:
     ranked = sorted(seeds.values(), key=lambda item: (-item.score, item.skill_id))
-    hard = [item for item in ranked if item.skill_id in hard_include_ids]
-    hard_seen = {item.skill_id for item in hard}
-    remaining = [item for item in ranked if item.skill_id not in hard_seen]
-    return [*hard, *remaining[: max(seed_limit, 0)]]
+    return ranked[: max(seed_limit, 0)]
 
 
-def _limit_candidates_with_hard_includes(
+def _limit_candidates(
     candidates: dict[str, RouterSkillCandidate],
-    hard_include_ids: set[str],
     expanded_limit: int,
 ) -> list[RouterSkillCandidate]:
     ranked = sorted(candidates.values(), key=lambda item: (-item.score, item.graph_depth, item.skill_id))
-    hard = [item for item in ranked if item.skill_id in hard_include_ids]
-    hard_seen = {item.skill_id for item in hard}
-    remaining = [item for item in ranked if item.skill_id not in hard_seen]
-    limit = max(expanded_limit, len(hard))
-    return [*hard, *remaining[: max(0, limit - len(hard))]]
+    return ranked[: max(expanded_limit, 0)]
 
 
 def _ppr_adjacency(edges: list[Edge], skills: dict[str, SkillNode]) -> dict[str, dict[str, float]]:
