@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-from skillfabric.router.atomizer import atomize_task
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.config import RouterConfig, RouterSdkRuntime
 from skillfabric.router.models import RouteResult
@@ -24,16 +23,10 @@ def route_task(config: RouterConfig, *, sdk_runtime: RouterSdkRuntime | None = N
     trace_id = config.trace_id or _new_trace_id(config.query)
     trace_dir = workspace.runs_dir / trace_id
     trace_dir.mkdir(parents=True, exist_ok=True)
-    task_atoms = config.task_atoms or atomize_task(config.query, env_file=config.env_file)
-    atomic_write_text(
-        trace_dir / "task_atoms.json",
-        json.dumps(task_atoms.to_dict(), ensure_ascii=False, indent=2) + "\n",
-    )
     bundle = build_router_bundle(
         RouterBundleConfig(
             workspace=workspace.root,
             query=config.query,
-            task_atoms=task_atoms,
             env_file=config.env_file,
             seed_limit=config.seed_limit,
             expanded_limit=config.expanded_limit,

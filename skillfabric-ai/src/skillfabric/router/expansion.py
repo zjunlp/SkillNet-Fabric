@@ -51,7 +51,6 @@ def _add_graph_expansion(
                 seed_score=seed_candidate.seed_score,
                 ppr_score=0.0,
                 score_breakdown=dict(seed_candidate.score_breakdown),
-                atom_coverage={key: list(value) for key, value in seed_candidate.atom_coverage.items()},
             )
         else:
             candidate = RouterSkillCandidate(
@@ -64,7 +63,6 @@ def _add_graph_expansion(
                 seed_score=0.0,
                 ppr_score=0.0,
                 score_breakdown={},
-                atom_coverage={},
             )
         selected[skill.id] = candidate
     if candidate.graph_depth > 0:
@@ -112,7 +110,6 @@ def _expand_seed_skills_ppr(
             seed_score=seed.seed_score,
             ppr_score=ppr_scores.get(seed.skill_id, 0.0),
             score_breakdown=dict(seed.score_breakdown),
-            atom_coverage={key: list(value) for key, value in seed.atom_coverage.items()},
         )
     for skill_id, ppr_score in ppr_scores.items():
         if skill_id not in skills or ppr_score <= 0:
@@ -131,10 +128,6 @@ def _expand_seed_skills_ppr(
                 seed_score=seed_candidate.seed_score if seed_candidate is not None else 0.0,
                 ppr_score=ppr_score,
                 score_breakdown=dict(seed_candidate.score_breakdown) if seed_candidate is not None else {},
-                atom_coverage={
-                    key: list(value)
-                    for key, value in (seed_candidate.atom_coverage.items() if seed_candidate is not None else [])
-                },
             )
             candidates[skill_id] = candidate
         else:

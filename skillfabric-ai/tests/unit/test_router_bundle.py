@@ -10,7 +10,6 @@ from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import build_embedding_store
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
-from skillfabric.router.task_atoms import TaskAtom, TaskDecomposition
 from skillfabric.storage import Workspace
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 
@@ -52,115 +51,9 @@ def _interface(
     ).to_dict()
 
 
-def _task_atoms(*atoms: TaskAtom) -> TaskDecomposition:
-    return TaskDecomposition(atoms=list(atoms))
-
-
 class RouterBundleTests(unittest.TestCase):
-    def test_task_atoms_preserve_lower_scored_specialist_candidate(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Workspace(Path(tmp) / ".skillfabric")
-            workspace.ensure()
-            skills = [
-                _skill(
-                    "skill:noisy-high-score",
-                    "noisy-high-score",
-                    "Repeated presentation pdf chart report analysis slides output.",
-                    "presentation presentation pdf pdf chart chart report report analysis analysis slides slides.",
-                ),
-                _skill(
-                    "skill:pptx",
-                    "pptx",
-                    "Create and validate PowerPoint files.",
-                    "Inspect presentation layouts and export slides.",
-                ),
-                _skill(
-                    "skill:academic-seminar-slides",
-                    "academic-seminar-slides",
-                    "Specialized academic research seminar slide workflow.",
-                    "Use for PhD seminar presentations, critical literature reviews, references, argument structure, and scientific visuals.",
-                ),
-            ]
-            graph = GraphDocument(
-                schema_version="1.0",
-                build_id="task-atoms-pptx-test",
-                nodes=skills,
-                edges=[],
-                stats={},
-                config_digest="task-atoms-pptx-test",
-            )
-            workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
-            workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
-                [skill.to_dict(include_raw_text=True) for skill in skills],
-            )
-            workspace.write_jsonl(
-                workspace.interfaces_dir / "skill_interfaces.jsonl",
-                [
-                    _interface(
-                        "skill:noisy-high-score",
-                        produces=["analysis_output"],
-                        summary="Generic presentation pdf chart report analysis output.",
-                    ),
-                    _interface(
-                        "skill:pptx",
-                        produces=["presentation_document"],
-                        summary="Create and validate PowerPoint presentations.",
-                    ),
-                    _interface(
-                        "skill:academic-seminar-slides",
-                        produces=["presentation_document"],
-                        summary="Create polished academic seminar slide decks with research narrative and scientific visuals.",
-                        when_to_use="Use for PhD seminars, critical research reviews, scientific presentations, references, and academic argument structure.",
-                        execution_role="transformer",
-                    ),
-                ],
-            )
-            build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
-            for skill in skills:
-                page = workspace.wiki_skills_dir / f"{skill.name}.md"
-                page.parent.mkdir(parents=True, exist_ok=True)
-                page.write_text(f"# {skill.name}\n", encoding="utf-8")
-
-            bundle = build_router_bundle(
-                RouterBundleConfig(
-                    workspace=workspace.root,
-                    query=(
-                        "Create a polished academic seminar presentation for a PhD research review. "
-                        "The deck needs a clear scientific argument, references, and rich visuals. "
-                        "Output presentation.pdf."
-                    ),
-                    task_atoms=_task_atoms(
-                        TaskAtom(
-                            id="a1",
-                            kind="artifact",
-                            text="polished academic seminar presentation for a PhD research review",
-                            evidence="polished academic seminar presentation for a PhD research review",
-                        ),
-                        TaskAtom(
-                            id="a2",
-                            kind="constraint",
-                            text="clear scientific argument, references, and rich visuals",
-                            evidence="clear scientific argument, references, and rich visuals",
-                        ),
-                    ),
-                    seed_limit=1,
-                    expanded_limit=2,
-                )
-            )
-            selected = {item.skill_id: item for item in bundle.selected_skills}
-
-            self.assertIn("skill:academic-seminar-slides", selected)
-            self.assertTrue(
-                any(
-                    source.startswith(("atom:a1:", "atom:a2:", "interface:", "object:", "execution:"))
-                    for source in selected["skill:academic-seminar-slides"].sources
-                )
-            )
-            self.assertTrue(selected["skill:academic-seminar-slides"].atom_coverage)
-            self.assertFalse(
-                any(source.startswith(("facet:", "coverage:")) for item in selected.values() for source in item.sources)
-            )
+    def test_router_bundle_defaults_to_top_100_candidates(self) -> None:
+        self.assertEqual(RouterBundleConfig().expanded_limit, 100)
 
     def test_object_and_interface_scores_softly_recall_deliverable_skills(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -316,33 +209,7 @@ class RouterBundleTests(unittest.TestCase):
                         "Analyze artifacts/penguins.csv with statistical tests, generate at least "
                         "4 PNG figures, write report.docx, and create presentation.pptx."
                     ),
-                    task_atoms=_task_atoms(
-                        TaskAtom(
-                            id="a1",
-                            kind="action",
-                            text="Analyze artifacts/penguins.csv with statistical tests",
-                            evidence="Analyze artifacts/penguins.csv with statistical tests",
-                        ),
-                        TaskAtom(
-                            id="a2",
-                            kind="artifact",
-                            text="generate at least 4 PNG figures",
-                            evidence="4 PNG figures",
-                        ),
-                        TaskAtom(
-                            id="a3",
-                            kind="artifact",
-                            text="write report.docx",
-                            evidence="report.docx",
-                        ),
-                        TaskAtom(
-                            id="a4",
-                            kind="artifact",
-                            text="create presentation.pptx",
-                            evidence="presentation.pptx",
-                        ),
-                    ),
-                    seed_limit=1,
+                    seed_limit=4,
                     expanded_limit=4,
                 )
             )

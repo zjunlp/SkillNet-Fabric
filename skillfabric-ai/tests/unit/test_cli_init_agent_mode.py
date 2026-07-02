@@ -16,39 +16,6 @@ from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
-def _task_atoms_file(root: str | Path) -> Path:
-    path = Path(root) / "task_atoms.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0",
-                "atoms": [
-                    {
-                        "id": "a1",
-                        "kind": "action",
-                        "text": "extract financial KPIs",
-                        "evidence": "extract financial KPIs",
-                        "required": True,
-                        "depends_on": [],
-                    },
-                    {
-                        "id": "a2",
-                        "kind": "artifact",
-                        "text": "PDF report",
-                        "evidence": "PDF report",
-                        "required": True,
-                        "depends_on": [],
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return path
-
-
 class InitAndAgentModeCliTests(unittest.TestCase):
     def test_init_check_json_reports_missing_config_without_secrets(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -136,7 +103,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
 
             prepare_output = io.StringIO()
             with contextlib.redirect_stdout(prepare_output):
@@ -150,8 +116,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "agent-route",
                         "--agent-mode",
                         "prepare",
-                        "--task-atoms-file",
-                        str(atoms_file),
                     ]
                 )
 
@@ -161,7 +125,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertEqual(prepared["trace_id"], "agent-route")
             self.assertTrue(query_wiki_root.exists())
             self.assertTrue((trace_dir / "router_bundle.json").exists())
-            self.assertTrue((trace_dir / "task_atoms.json").exists())
             self.assertTrue((trace_dir / "agent_route_request.json").exists())
             self.assertIn("selected_skills", prepared["expected_schema"]["properties"])
 
@@ -219,7 +182,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
             prepare_output = io.StringIO()
             with contextlib.redirect_stdout(prepare_output):
                 cli_main(
@@ -232,8 +194,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "card-helper",
                         "--agent-mode",
                         "prepare",
-                        "--task-atoms-file",
-                        str(atoms_file),
                     ]
                 )
             prepared = json.loads(prepare_output.getvalue())
@@ -253,7 +213,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
             prepare_output = io.StringIO()
             with contextlib.redirect_stdout(prepare_output):
                 cli_main(
@@ -266,8 +225,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "agent-stdin",
                         "--agent-mode",
                         "prepare",
-                        "--task-atoms-file",
-                        str(atoms_file),
                     ]
                 )
 
@@ -324,7 +281,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
             prepare_output = io.StringIO()
             with contextlib.redirect_stdout(prepare_output):
                 cli_main(
@@ -337,8 +293,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "agent-outside",
                         "--agent-mode",
                         "prepare",
-                        "--task-atoms-file",
-                        str(atoms_file),
                     ]
                 )
             prepared = json.loads(prepare_output.getvalue())
@@ -387,7 +341,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
             cli_main(
                 [
                     "route",
@@ -398,8 +351,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                     "agent-invalid",
                     "--agent-mode",
                     "prepare",
-                    "--task-atoms-file",
-                    str(atoms_file),
                 ]
             )
             package_file = workspace / "runs" / "agent-invalid" / "bad_skill_package.json"
@@ -446,11 +397,9 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            atoms_file = _task_atoms_file(tmp)
             client = SkillFabric(workspace=workspace)
             route = client.route(
                 "extract financial KPIs from a PDF report",
-                task_atoms_file=atoms_file,
                 use_llm_router=False,
                 explorer_backend="fallback",
             )

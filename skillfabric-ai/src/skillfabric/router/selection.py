@@ -47,7 +47,6 @@ def _fallback_route(
         wiki_pages_read=list(bundle.wiki_pages),
         rationale="Deterministic fallback selected the highest-scoring query-local skills from the router bundle.",
         provenance="deterministic_fallback",
-        task_atoms=bundle.task_atoms,
         warnings=warnings,
     )
 

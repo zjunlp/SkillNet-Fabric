@@ -9,26 +9,12 @@ from typing import Any
 from skillfabric.router.bundle import RouterBundle, RouterSkillCandidate
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.router.selection import _select_fallback_candidates
-from skillfabric.router.task_atoms import TaskAtom, TaskDecomposition
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import route_from_skill_package
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.test_wiki_explorer import _StubSdkRuntime
 from tests.unit.wiki_helpers import build_fixture_workspace
-
-
-def _route_test_atoms() -> TaskDecomposition:
-    return TaskDecomposition(
-        atoms=[
-            TaskAtom(
-                id="a1",
-                kind="action",
-                text="parse pdf tables",
-                evidence="pdf",
-            )
-        ]
-    )
 
 
 class RouterRouteTests(unittest.TestCase):
@@ -40,7 +26,7 @@ class RouterRouteTests(unittest.TestCase):
             RouterSkillCandidate("skill:weak-lexical", "weak-lexical", 0.3, sources=["lexical"], score_breakdown={"lexical": 0.1}),
             RouterSkillCandidate("skill:weak-ppr", "weak-ppr", 0.28, sources=["ppr:similar_to"], ppr_score=0.02),
             RouterSkillCandidate("skill:object", "object", 0.2, sources=["object:produces"]),
-            RouterSkillCandidate("skill:atom", "atom", 0.15, sources=["atom:a1:interface"]),
+            RouterSkillCandidate("skill:interface", "interface", 0.15, sources=["interface:field"]),
         ]
 
         selected = _select_fallback_candidates(candidates, max_selected_skills=8)
@@ -82,7 +68,6 @@ class RouterRouteTests(unittest.TestCase):
                     RouterConfig(
                         workspace=workspace,
                         query="extract financial KPIs from a PDF report",
-                        task_atoms=_route_test_atoms(),
                         trace_id="strict-partial-invalid",
                         explorer_backend="claude-code",
                         strict_explorer=True,
@@ -139,7 +124,6 @@ class RouterRouteTests(unittest.TestCase):
                     workspace=workspace,
                     query="extract financial KPIs from a PDF report",
                     env_file=".env",
-                    task_atoms=_route_test_atoms(),
                     use_llm_router=True,
                     max_selected_skills=4,
                     workflow_confidence_threshold=0.9,
@@ -180,7 +164,6 @@ class RouterRouteTests(unittest.TestCase):
                 RouterConfig(
                     workspace=workspace,
                     query="parse pdf tables",
-                    task_atoms=_route_test_atoms(),
                     use_llm_router=True,
                     max_selected_skills=3,
                     trace_id="route-fallback",
@@ -210,7 +193,6 @@ class RouterRouteTests(unittest.TestCase):
                     RouterConfig(
                         workspace=workspace,
                         query="parse pdf tables",
-                        task_atoms=_route_test_atoms(),
                         trace_id="old-removed-mode",
                         explorer_backend="single" + "-shot",
                     )

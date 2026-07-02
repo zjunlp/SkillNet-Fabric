@@ -51,47 +51,12 @@ Preparation:
 5. If configuration is incomplete, stop and give
    `skillfabric init --env-file $env_file`.
 6. Run `skillfabric build` when needed.
-7. Generate `task_atoms.json` in a temporary file under the workspace or trace
-   parent, using the TaskAtoms schema below. Do this yourself as the current
-   Claude agent; do not ask SkillFabric to infer atoms unless the CLI is used
-   outside the plugin.
-8. Run `skillfabric route --agent-mode prepare --task-atoms-file $task_atoms_json`.
-9. Launch `skillfabric-query-wiki-explorer`.
-10. Run `skillfabric route --agent-mode finalize --skill-package-file -`.
-11. Run `skillfabric plan --agent-mode prepare --route-file $final_route_json`.
-12. Launch `skillfabric-workflow-planner`.
-13. Run `skillfabric plan --agent-mode finalize --package-root $package_root --planner-output-file -`.
-
-## TaskAtoms Schema
-
-Write strict JSON only:
-
-```json
-{
-  "schema_version": "1.0",
-  "atoms": [
-    {
-      "id": "a1",
-      "kind": "action",
-      "text": "short atomic requirement",
-      "evidence": "exact short substring from the user task",
-      "required": true,
-      "depends_on": []
-    }
-  ]
-}
-```
-
-Rules:
-
-- `kind` must be exactly `action`, `artifact`, or `constraint`.
-- Create at most 12 atoms and merge duplicates.
-- Every `evidence` value must be copied from the user's task text.
-- Do not output `skill_id`, `intent`, `domain_hints`, `deliverable`, or graph vocabulary.
-- Do not recommend, rank, or name skills.
-- Do not map vague words to fixed formats. For example, do not turn
-  `slides` into `.pptx` unless the task explicitly says `.pptx` or PowerPoint.
-- Use `depends_on` only when the user states ordering or a clear prerequisite.
+7. Run `skillfabric route --agent-mode prepare`.
+8. Launch `skillfabric-query-wiki-explorer`.
+9. Run `skillfabric route --agent-mode finalize --skill-package-file -`.
+10. Run `skillfabric plan --agent-mode prepare --route-file $final_route_json`.
+11. Launch `skillfabric-workflow-planner`.
+12. Run `skillfabric plan --agent-mode finalize --package-root $package_root --planner-output-file -`.
 
 Execution:
 

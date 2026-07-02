@@ -15,34 +15,6 @@ from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
-def _write_task_atoms(path: Path, query: str) -> Path:
-    payload = {
-        "schema_version": "1.0",
-        "atoms": [
-            {
-                "id": "a1",
-                "kind": "action",
-                "text": "extract financial KPIs",
-                "evidence": "extract financial KPIs",
-                "required": True,
-                "depends_on": [],
-            },
-            {
-                "id": "a2",
-                "kind": "artifact",
-                "text": "PDF report",
-                "evidence": "PDF report",
-                "required": True,
-                "depends_on": [],
-            },
-        ],
-    }
-    assert payload["atoms"][0]["evidence"].lower() in query.lower()
-    assert payload["atoms"][1]["evidence"].lower() in query.lower()
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
-
-
 class RoutePlanCliTests(unittest.TestCase):
     def test_public_cli_surface_only_exposes_core_commands(self) -> None:
         help_output = io.StringIO()
@@ -124,7 +96,6 @@ class RoutePlanCliTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             query = "extract financial KPIs from a PDF report"
-            task_atoms_path = _write_task_atoms(Path(tmp) / "task_atoms.json", query)
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
@@ -139,8 +110,6 @@ class RoutePlanCliTests(unittest.TestCase):
                         "--skip-llm-router",
                         "--explorer-backend",
                         "fallback",
-                        "--task-atoms-file",
-                        str(task_atoms_path),
                     ]
                 )
             route_payload = json.loads(route_output.getvalue())
@@ -177,7 +146,6 @@ class RoutePlanCliTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             query = "extract financial KPIs from a PDF report"
-            task_atoms_path = _write_task_atoms(Path(tmp) / "task_atoms.json", query)
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
@@ -194,8 +162,6 @@ class RoutePlanCliTests(unittest.TestCase):
                         "fallback",
                         "--renderer",
                         "claude-code",
-                        "--task-atoms-file",
-                        str(task_atoms_path),
                     ]
                 )
 

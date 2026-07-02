@@ -26,7 +26,7 @@ class RouterOptions:
     explorer_backend: str = "claude-code"
     max_selected_skills: int = 8
     seed_limit: int = 8
-    expanded_limit: int = 50
+    expanded_limit: int = 100
 
 
 def default_build_options() -> BuildOptions:

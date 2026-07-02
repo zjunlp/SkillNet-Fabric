@@ -19,7 +19,6 @@ from skillfabric.indexing.embeddings import (
 )
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterSkillCandidate
-from skillfabric.router.task_atoms import TaskAtom, TaskDecomposition
 from skillfabric.storage import Workspace
 
 _RRF_K = 60
@@ -34,7 +33,6 @@ def _seed_scores(
     *,
     warnings: list[str],
     env_file: str | Path | None = None,
-    task_atoms: TaskDecomposition | None = None,
 ) -> dict[str, RouterSkillCandidate]:
     seeds: dict[str, RouterSkillCandidate] = {}
     bm25_hits = search_bm25(workspace.index_dir / "bm25.sqlite", query, limit=max(len(skills), 10))
@@ -67,41 +65,10 @@ def _seed_scores(
                 if score > 0:
                     embedding_scores[skill_id] = score
             _add_rrf_channel(seeds, skills, _rank_scores(embedding_scores), "embedding")
-            for atom in _required_atoms(task_atoms):
-                atom_query = _atom_query(atom)
-                atom_vector = embed_query(provider, atom_query)
-                atom_embedding_scores: dict[str, float] = {}
-                for skill_id, vector in embeddings.items():
-                    score = max(cosine_similarity(atom_vector, vector), 0.0)
-                    if score > 0:
-                        atom_embedding_scores[skill_id] = score
-                _add_rrf_channel(
-                    seeds,
-                    skills,
-                    _rank_scores(atom_embedding_scores),
-                    f"atom:{atom.id}:embedding",
-                    atom_id=atom.id,
-                )
         except (json.JSONDecodeError, OSError, RuntimeError, ValueError) as exc:
             warnings.append(f"embedding search skipped: {exc}")
     else:
         warnings.append(f"embedding store not found: {embeddings_path}")
-    for atom in _required_atoms(task_atoms):
-        atom_query = _atom_query(atom)
-        _add_rrf_channel(
-            seeds,
-            skills,
-            search_bm25(workspace.index_dir / "bm25.sqlite", atom_query, limit=max(len(skills), 10)),
-            f"atom:{atom.id}:bm25",
-            atom_id=atom.id,
-        )
-        _add_rrf_channel(
-            seeds,
-            skills,
-            _rank_scores(_lexical_scores(atom_query, skills)),
-            f"atom:{atom.id}:lexical",
-            atom_id=atom.id,
-        )
     return seeds
 
 
@@ -142,7 +109,6 @@ def apply_graph_grounded_scores(
     *,
     interfaces: dict[str, SkillInterface],
     execution_index: list[ExecutionIndexRecord],
-    task_atoms: TaskDecomposition | None = None,
 ) -> None:
     """Add soft seed scores from compiled interfaces, canonical objects, and execution objects."""
 
@@ -163,33 +129,6 @@ def apply_graph_grounded_scores(
             _execution_object_scores(query_terms, skills, execution_index),
             "execution:object",
         )
-    for atom in _required_atoms(task_atoms):
-        atom_terms = set(_tokens(_atom_query(atom)))
-        if not atom_terms:
-            continue
-        _add_soft_ranked_scores(
-            seeds,
-            skills,
-            _interface_scores(atom_terms, skills, interfaces),
-            f"atom:{atom.id}:interface",
-            atom_id=atom.id,
-        )
-        object_hits = _object_hits(workspace, atom_terms)
-        for source, scores in object_hits.items():
-            _add_soft_ranked_scores(
-                seeds,
-                skills,
-                scores,
-                f"atom:{atom.id}:{source}",
-                atom_id=atom.id,
-            )
-        _add_soft_ranked_scores(
-            seeds,
-            skills,
-            _execution_object_scores(atom_terms, skills, execution_index),
-            f"atom:{atom.id}:execution",
-            atom_id=atom.id,
-        )
 
 
 def _add_soft_ranked_scores(
@@ -197,14 +136,12 @@ def _add_soft_ranked_scores(
     skills: dict[str, SkillNode],
     scores: dict[str, float],
     source: str,
-    *,
-    atom_id: str = "",
 ) -> None:
     for rank, (skill_id, raw_score) in enumerate(_rank_scores(scores), start=1):
         if raw_score <= 0:
             continue
         score = _GRAPH_GROUNDED_SCORE_SCALE / (_RRF_K + rank)
-        _add_seed_score(seeds, skills, skill_id, score, source, atom_id=atom_id)
+        _add_seed_score(seeds, skills, skill_id, score, source)
 
 
 def _interface_scores(
@@ -352,14 +289,12 @@ def _add_rrf_channel(
     skills: dict[str, SkillNode],
     ranked_items: list[tuple[str, float]],
     source: str,
-    *,
-    atom_id: str = "",
 ) -> None:
     for rank, (skill_id, raw_score) in enumerate(ranked_items, start=1):
         if raw_score <= 0:
             continue
         score = _RRF_SCORE_SCALE / (_RRF_K + rank)
-        _add_seed_score(seeds, skills, skill_id, score, source, atom_id=atom_id)
+        _add_seed_score(seeds, skills, skill_id, score, source)
 
 
 def _stem_token(token: str) -> str:
@@ -383,8 +318,6 @@ def _add_seed_score(
     skill_id: str,
     score: float,
     source: str,
-    *,
-    atom_id: str = "",
 ) -> None:
     skill = skills.get(skill_id)
     if skill is None:
@@ -404,18 +337,3 @@ def _add_seed_score(
     candidate.seed_score += score
     candidate.score_breakdown[source] = candidate.score_breakdown.get(source, 0.0) + score
     candidate.sources.append(source)
-    if atom_id:
-        candidate.atom_coverage.setdefault(atom_id, [])
-        candidate.atom_coverage[atom_id].append(source)
-
-
-def _required_atoms(task_atoms: TaskDecomposition | None) -> list[TaskAtom]:
-    if task_atoms is None:
-        return []
-    return [atom for atom in task_atoms.atoms if atom.required]
-
-
-def _atom_query(atom: TaskAtom) -> str:
-    if atom.evidence and atom.evidence.lower() not in atom.text.lower():
-        return f"{atom.text} {atom.evidence}"
-    return atom.text
