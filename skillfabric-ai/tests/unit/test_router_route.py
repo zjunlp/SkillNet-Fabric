@@ -48,15 +48,13 @@ class RouterRouteTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:pdf-table-parser",
-                            "scope": "core",
                             "role": "Needed to parse PDF tables.",
-                            "evidence": [{"path": "skills/core/pdf-table-parser.md", "reason": "valid"}],
+                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "valid"}],
                         },
                         {
                             "skill_id": "skill:not-real",
-                            "scope": "core",
                             "role": "Invalid skill should make strict mode fail.",
-                            "evidence": [{"path": "skills/core/pdf-table-parser.md", "reason": "wrong"}],
+                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "wrong"}],
                         },
                     ],
                     "rationale": "One valid, one invalid.",
@@ -85,29 +83,26 @@ class RouterRouteTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:pdf-table-parser",
-                            "scope": "core",
                             "role": "Needed to parse PDF tables.",
                             "evidence": [
                                 {
-                                    "path": "skills/core/pdf-table-parser.md",
+                                    "path": "skills/pdf-table-parser.md",
                                     "reason": "PDF table parser page.",
                                 }
                             ],
                         },
                         {
                             "skill_id": "skill:financial-kpi-extractor",
-                            "scope": "core",
                             "role": "Needed to extract KPI values.",
                             "evidence": [
                                 {
-                                    "path": "skills/core/financial-kpi-extractor.md",
+                                    "path": "skills/financial-kpi-extractor.md",
                                     "reason": "KPI extractor page.",
                                 }
                             ],
                         },
                         {
                             "skill_id": "skill:not-real",
-                            "scope": "core",
                             "role": "Invalid skill must be dropped.",
                             "evidence": [],
                         },
@@ -138,7 +133,7 @@ class RouterRouteTests(unittest.TestCase):
             self.assertEqual(selected_ids, ["skill:pdf-table-parser", "skill:financial-kpi-extractor"])
             self.assertTrue(any("not in query_wiki manifest" in warning for warning in payload["warnings"]))
             self.assertEqual(payload["provenance"], "claude_code")
-            self.assertIn("skills/core/pdf-table-parser.md", payload["wiki_pages_read"])
+            self.assertIn("skills/pdf-table-parser.md", payload["wiki_pages_read"])
             self.assertTrue((workspace / "runs" / "route-test" / "route.json").exists())
             self.assertTrue((workspace / "runs" / "route-test" / "query_wiki" / "manifest.json").exists())
             self.assertTrue((workspace / "runs" / "route-test" / "cc_explorer" / "skill_package.json").exists())
@@ -227,18 +222,16 @@ class RouterRouteTests(unittest.TestCase):
             package = SkillPackage.from_dict(
                 {
                     "selected_skills": [
-                        {"skill_id": "skill:xlsx", "scope": "core", "role": "Analyze CSV.", "evidence": []},
+                        {"skill_id": "skill:xlsx", "role": "Analyze CSV.", "evidence": []},
                         {
                             "skill_id": "skill:data-visualization",
-                            "scope": "core",
                             "role": "Generate PNG figures.",
                             "evidence": [],
                         },
-                        {"skill_id": "skill:docx", "scope": "core", "role": "Write report.docx.", "evidence": []},
-                        {"skill_id": "skill:pptx", "scope": "core", "role": "Create presentation.pptx.", "evidence": []},
+                        {"skill_id": "skill:docx", "role": "Write report.docx.", "evidence": []},
+                        {"skill_id": "skill:pptx", "role": "Create presentation.pptx.", "evidence": []},
                         {
                             "skill_id": "skill:data-storytelling",
-                            "scope": "core",
                             "role": "Build the narrative before report/deck authoring.",
                             "evidence": [],
                         },
@@ -286,11 +279,66 @@ class RouterRouteTests(unittest.TestCase):
             )
 
             required_pairs = {(edge.before_skill, edge.after_skill) for edge in route.required_edges}
-            self.assertIn(("skill:data-storytelling", "skill:docx"), required_pairs)
-            self.assertIn(("skill:docx", "skill:pptx"), required_pairs)
+            hint_pairs = {(edge.before_skill, edge.after_skill) for edge in route.ordered_hints}
+            self.assertIn(("skill:data-storytelling", "skill:docx"), hint_pairs)
+            self.assertIn(("skill:docx", "skill:pptx"), hint_pairs)
             self.assertNotIn(("skill:docx", "skill:data-storytelling"), required_pairs)
             self.assertNotIn(("skill:pptx", "skill:data-storytelling"), required_pairs)
+            self.assertNotIn(("skill:data-storytelling", "skill:docx"), required_pairs)
+            self.assertNotIn(("skill:docx", "skill:pptx"), required_pairs)
             self.assertTrue(any("dropped conflicting LLM required edge" in warning for warning in warnings))
+
+    def test_ordered_hints_remain_soft_route_hints(self) -> None:
+        with TemporaryDirectory() as tmp:
+            query = "Create a literature review and then add a trend timeline."
+            selected = [
+                RouterSkillCandidate("skill:literature-review", "literature-review", 2.0),
+                RouterSkillCandidate("skill:trend-report", "trend-report", 1.8),
+            ]
+            bundle = RouterBundle(
+                query=query,
+                selected_skills=selected,
+                communities=[],
+                workflow_hints=[],
+                wiki_pages=[],
+            )
+            package = SkillPackage.from_dict(
+                {
+                    "selected_skills": [
+                        {
+                            "skill_id": "skill:literature-review",
+                            "role": "Build the paper corpus and thematic synthesis.",
+                            "evidence": [],
+                        },
+                        {
+                            "skill_id": "skill:trend-report",
+                            "role": "Add recent-development and timeline analysis.",
+                            "evidence": [],
+                        },
+                    ],
+                    "required_edges": [],
+                    "ordered_hints": [
+                        {"skill_id": "skill:literature-review"},
+                        {"skill_id": "skill:trend-report"},
+                    ],
+                    "rationale": "The trend report is useful after the review, but not a hard dependency.",
+                }
+            )
+
+            route = route_from_skill_package(
+                package,
+                bundle,
+                query=query,
+                trace_id="soft-hints",
+                trace_dir=Path(tmp) / ".skillfabric" / "runs" / "soft-hints",
+                warnings=[],
+            )
+
+            self.assertEqual(route.required_edges, [])
+            self.assertEqual(len(route.ordered_hints), 1)
+            self.assertEqual(route.ordered_hints[0].before_skill, "skill:literature-review")
+            self.assertEqual(route.ordered_hints[0].after_skill, "skill:trend-report")
+            self.assertEqual(route.ordered_hints[0].edge_type, "hint")
 
     def test_route_result_omits_removed_task_coverage_fields(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -316,12 +364,11 @@ class RouterRouteTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:data-visualization",
-                            "scope": "core",
                             "role": "Generate figures.",
                             "evidence": [],
                         },
-                        {"skill_id": "skill:docx", "scope": "core", "role": "Write report.", "evidence": []},
-                        {"skill_id": "skill:pptx", "scope": "core", "role": "Create deck.", "evidence": []},
+                        {"skill_id": "skill:docx", "role": "Write report.", "evidence": []},
+                        {"skill_id": "skill:pptx", "role": "Create deck.", "evidence": []},
                     ],
                     "rationale": "Explorer covered deliverables but omitted the analysis skill.",
                 }

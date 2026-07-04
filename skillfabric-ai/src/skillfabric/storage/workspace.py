@@ -18,23 +18,35 @@ class Workspace:
 
     @property
     def registry_dir(self) -> Path:
-        return self.root / "registry"
+        return self.graph_dir
 
     @property
     def index_dir(self) -> Path:
-        return self.root / "index"
+        return self.graph_dir
 
     @property
     def graph_dir(self) -> Path:
         return self.root / "graph"
 
     @property
+    def cache_dir(self) -> Path:
+        return self.root / "cache"
+
+    @property
+    def reports_dir(self) -> Path:
+        return self.root / "reports"
+
+    @property
+    def wiki_debug_dir(self) -> Path:
+        return self.reports_dir / "wiki-debug"
+
+    @property
     def interfaces_dir(self) -> Path:
-        return self.root / "interfaces"
+        return self.graph_dir
 
     @property
     def execution_dir(self) -> Path:
-        return self.root / "execution_graph"
+        return self.graph_dir
 
     @property
     def wiki_dir(self) -> Path:
@@ -53,8 +65,12 @@ class Workspace:
         return self.wiki_dir / "workflows"
 
     @property
-    def wiki_debug_dir(self) -> Path:
-        return self.wiki_dir / "debug"
+    def wiki_references_dir(self) -> Path:
+        return self.wiki_dir / "references"
+
+    @property
+    def wiki_skill_sources_dir(self) -> Path:
+        return self.wiki_skills_dir / "source"
 
     @property
     def wiki_debug_raw_artifacts_dir(self) -> Path:
@@ -85,12 +101,16 @@ class Workspace:
             self.registry_dir,
             self.index_dir,
             self.graph_dir,
+            self.cache_dir,
+            self.reports_dir,
             self.interfaces_dir,
             self.execution_dir,
             self.wiki_dir,
             self.wiki_skills_dir,
             self.wiki_communities_dir,
             self.wiki_workflows_dir,
+            self.wiki_references_dir,
+            self.wiki_skill_sources_dir,
             self.runs_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)

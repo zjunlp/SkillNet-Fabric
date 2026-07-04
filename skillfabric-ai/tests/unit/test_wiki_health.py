@@ -20,10 +20,7 @@ class WikiHealthTests(unittest.TestCase):
 
             page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
             page.write_text(
-                page.read_text(encoding="utf-8").replace(
-                    "## Source",
-                    "[[skills/missing-skill]]\nraw_output should not be present\n\n## Source",
-                ),
+                page.read_text(encoding="utf-8") + "\n[[skills/missing-skill]]\nraw_output should not be present\n",
                 encoding="utf-8",
             )
 
@@ -41,11 +38,12 @@ class WikiHealthTests(unittest.TestCase):
 
             page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
             page.write_text(
-                page.read_text(encoding="utf-8").replace(
-                    "## Source",
-                    "```markdown\n[[skills/not-a-generated-link]]\n```\n\n"
-                    "## Source\n\n[[skills/source-example-link]]",
-                ),
+                page.read_text(encoding="utf-8") + "\n```markdown\n[[skills/not-a-generated-link]]\n```\n",
+                encoding="utf-8",
+            )
+            source_page = workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+            source_page.write_text(
+                source_page.read_text(encoding="utf-8") + "\n[[skills/source-example-link]]\n",
                 encoding="utf-8",
             )
 

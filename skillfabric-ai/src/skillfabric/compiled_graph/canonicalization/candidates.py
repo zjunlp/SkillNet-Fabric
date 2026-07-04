@@ -13,9 +13,7 @@ from typing import Any, Protocol
 
 from skillfabric.compiled_graph.canonicalization.models import RawContractObject
 from skillfabric.indexing.embeddings import (
-    DEFAULT_EMBEDDING_MODEL_ID,
     EmbeddingProvider,
-    SentenceTransformerEmbeddingProvider,
     default_embedding_provider,
 )
 
@@ -93,39 +91,6 @@ class CanonicalSemanticEmbedder(Protocol):
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Return dense vectors for candidate texts."""
-
-
-class SentenceTransformerCanonicalEmbedder:
-    """SentenceTransformers-backed canonical object embedder."""
-
-    def __init__(
-        self,
-        model_name: str | Path | None = None,
-        *,
-        model_id: str = DEFAULT_EMBEDDING_MODEL_ID,
-    ) -> None:
-        self.model_name = str(model_name or SentenceTransformerEmbeddingProvider().model_path)
-        self._model_id = model_id
-        self._model: Any | None = None
-
-    @property
-    def model_id(self) -> str:
-        return self._model_id
-
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except Exception as exc:  # pragma: no cover - dependency smoke covers this path.
-                raise RuntimeError(f"sentence-transformers unavailable: {exc}") from exc
-            try:
-                self._model = SentenceTransformer(self.model_name, local_files_only=True)
-            except TypeError:  # pragma: no cover - older sentence-transformers compatibility.
-                self._model = SentenceTransformer(self.model_name)
-            except Exception as exc:
-                raise RuntimeError(f"sentence-transformer model unavailable locally: {exc}") from exc
-        vectors = self._model.encode(texts, normalize_embeddings=True)
-        return [list(map(float, vector)) for vector in vectors]
 
 
 class HashingCanonicalEmbedder:

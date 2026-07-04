@@ -35,14 +35,14 @@ def _route(workspace: Path) -> RouteResult:
                 name="data-visualization",
                 rank=1,
                 reason="Create requested PNG figures.",
-                evidence=["skills/core/data-visualization.md"],
+                evidence=["skills/data-visualization.md"],
             ),
             RouteSelectedSkill(
                 skill_id="skill:docx",
                 name="docx",
                 rank=2,
                 reason="Write the requested Word report.",
-                evidence=["skills/core/docx.md"],
+                evidence=["skills/docx.md"],
             ),
         ],
         required_edges=[
@@ -113,7 +113,8 @@ class OrchestratorPackageTests(unittest.TestCase):
                     for item in payload["execution_strategy"]["operations"]
                 )
             )
-            self.assertIn("delegate", payload["execution_strategy"]["delegation_policy"])
+            self.assertIn("main Claude Code session", payload["execution_strategy"]["delegation_policy"])
+            self.assertNotIn("subagent", payload["execution_strategy"]["delegation_policy"].lower())
 
     def test_agent_run_spec_phases_are_topologically_ordered(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -197,7 +198,8 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertIn("Do not execute the task", planner_prompt)
             self.assertIn("required_edges are hard ordering constraints", planner_prompt)
             self.assertIn("ordered_hints are soft ordering guidance", planner_prompt)
-            self.assertIn("bounded subagent", planner_prompt)
+            self.assertIn("main Claude Code session should execute the task directly", planner_prompt)
+            self.assertNotIn("subagent", planner_prompt.lower())
             self.assertNotIn("workflow_plan", planner_prompt)
             self.assertNotIn("Skill tool", planner_prompt)
 

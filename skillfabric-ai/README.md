@@ -36,21 +36,19 @@ Plain route/plan uses fallback routing unless you explicitly request the Claude
 Code explorer.
 
 ```bash
-skillfabric build --skill-root examples/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
-skillfabric build --skill-root examples/skills --embedding-provider local --embedding-model-path /path/to/bge-large-en-v1.5
+skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
 ```
 
 ```python
 from skillfabric import SkillFabric
 
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
-sf.build("examples/skills")
-route = sf.route("extract financial KPIs from a PDF report")
+sf.build("/path/to/skills")
+route = sf.route("summarize this repository and identify release risks")
 plan = sf.plan(route=route)
 print(plan.prompt_path)
 ```
 
-The package does not include embedding model weights. API embeddings are the
-default. Local SentenceTransformer embeddings are available through the
-`local-embeddings` extra with `--embedding-provider local` and
-`--embedding-model-path`.
+The public package uses API embeddings through LiteLLM. Use
+`--embedding-provider disabled` only for deterministic smoke checks that should
+avoid embedding API calls.

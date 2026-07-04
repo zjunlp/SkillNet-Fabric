@@ -20,8 +20,8 @@ from skillfabric.compiled_graph.relations.validation import (
     summarize_relation_validation_records,
     validate_relation_candidates,
 )
-from skillfabric.llm import LLMConfig
-from skillfabric.llm_jobs import LLMJobOptions
+from skillfabric.runtime.jobs import LLMJobOptions
+from skillfabric.runtime.llm import LLMConfig
 from tests.unit.relation_helpers import make_skill
 
 

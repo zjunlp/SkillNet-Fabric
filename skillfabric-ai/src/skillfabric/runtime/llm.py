@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from skillfabric.llm_usage import LLMUsageTracker
+from skillfabric.runtime.usage import LLMUsageTracker
 
 # Keep default offline test/build paths from making LiteLLM fetch pricing metadata.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")

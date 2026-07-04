@@ -13,8 +13,8 @@ from skillfabric.compiled_graph.communities.providers import (
 from skillfabric.compiled_graph.communities.refinement import refine_communities
 from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.compiled_graph.models import CommunityNode, Edge
-from skillfabric.llm_jobs import LLMJobOptions
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.jobs import LLMJobOptions
 
 
 def assign_final_communities(

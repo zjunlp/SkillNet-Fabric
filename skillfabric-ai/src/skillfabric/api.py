@@ -10,10 +10,7 @@ from skillfabric.compiled_graph.builder import BuildConfig, BuildResult, build_g
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
     DisabledEmbeddingProvider,
-    SentenceTransformerEmbeddingProvider,
 )
-from skillfabric.llm import llm_usage_context
-from skillfabric.metrics import merge_wiki_metrics
 from skillfabric.orchestrator.package import (
     ExecutionPackageResult,
     PreparedExecutionPackageResult,
@@ -23,7 +20,9 @@ from skillfabric.orchestrator.package import (
 from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
-from skillfabric.runtime_defaults import default_build_options, default_router_options
+from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.llm import llm_usage_context
+from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.storage import Workspace
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
@@ -49,23 +48,18 @@ class SkillFabric:
         skip_wiki = bool(overrides.pop("skip_wiki", False))
         skip_llm_validation = bool(overrides.pop("skip_llm_validation", defaults.skip_llm_validation))
         embedding_model = overrides.pop("embedding_model", None)
-        embedding_model_path = overrides.pop("embedding_model_path", None)
         embedding_provider = overrides.pop("embedding_provider", None)
-        if embedding_provider is None and embedding_model_path:
-            embedding_provider = "local"
         if embedding_provider is None:
             embedding_provider = _embedding_provider_for_name(
                 defaults.embedding_provider,
                 env_file=env_file,
                 model_id=embedding_model,
-                model_path=embedding_model_path,
             )
         elif isinstance(embedding_provider, str):
             embedding_provider = _embedding_provider_for_name(
                 embedding_provider,
                 env_file=env_file,
                 model_id=embedding_model,
-                model_path=embedding_model_path,
             )
         wiki_summary_mode = str(overrides.pop("wiki_summary_mode", defaults.wiki_summary_mode))
         llm_concurrency = int(overrides.get("llm_concurrency", defaults.llm_concurrency) or defaults.llm_concurrency)
@@ -85,7 +79,7 @@ class SkillFabric:
         result = build_graph(config)
         if not skip_wiki:
             with llm_usage_context(
-                log_path=self.workspace.root / "llm_usage.jsonl",
+                log_path=self.workspace.reports_dir / "llm_usage.jsonl",
                 metadata={"build_id": result.graph.build_id},
             ):
                 wiki_result = build_wiki(
@@ -183,20 +177,16 @@ def _embedding_provider_for_name(
     *,
     env_file: str | Path,
     model_id: object = None,
-    model_path: object = None,
 ):
     normalized = provider.strip().lower()
-    if normalized in {"disabled", "none", "off"}:
+    if normalized == "disabled":
         return DisabledEmbeddingProvider()
-    if normalized in {"local", "sentence-transformers", "sentence_transformers"}:
-        return SentenceTransformerEmbeddingProvider(
-            model_path=Path(model_path) if model_path else None,
-            model_id=str(model_id) if model_id else "BAAI/bge-large-en-v1.5",
+    if normalized == "api":
+        return ApiEmbeddingProvider.from_env(
+            env_path=env_file,
+            model_id=str(model_id) if model_id else None,
         )
-    return ApiEmbeddingProvider.from_env(
-        env_path=env_file,
-        model_id=str(model_id) if model_id else None,
-    )
+    raise ValueError(f"unsupported embedding provider: {provider}. Use 'api' or 'disabled'.")
 
 
 def _reject_removed_profile(overrides: dict[str, object]) -> None:

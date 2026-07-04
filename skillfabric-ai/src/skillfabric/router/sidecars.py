@@ -14,7 +14,7 @@ from skillfabric.storage import Workspace
 def load_interfaces(workspace: Workspace) -> dict[str, SkillInterface]:
     """Load skill interface sidecars if present."""
 
-    path = workspace.interfaces_dir / "skill_interfaces.jsonl"
+    path = _first_existing(workspace.graph_dir / "contracts.jsonl", workspace.graph_dir / "skill_interfaces.jsonl")
     if not path.exists():
         return {}
     return _load_interfaces_cached(*_file_cache_key(path))
@@ -51,3 +51,10 @@ def _load_execution_index_cached(path: str, _mtime_ns: int, _size: int) -> list[
 def _file_cache_key(path: Path) -> tuple[str, int, int]:
     stat = path.stat()
     return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def _first_existing(*paths: Path) -> Path:
+    for path in paths:
+        if path.exists():
+            return path
+    return paths[0]

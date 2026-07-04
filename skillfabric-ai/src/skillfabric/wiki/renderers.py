@@ -26,29 +26,40 @@ def _skill_page(
     summary = summaries[("skill", skill.id)]
     core_links = source.skill_core_links(skill.id)
     execution_links = source.skill_execution_links(skill.id)
+    source_slug = f"source/{page_path(workspace.wiki_dir, 'skills', skill.id).name}"
+    tags = _skill_tags(interface)
     text = "\n\n".join(
         [
             frontmatter(
                 {
-                    "type": "skill",
+                    "type": "Skill",
+                    "title": skill.name,
+                    "description": _one_line(summary.routing_summary or summary.summary or skill.description),
                     "skill_id": skill.id,
-                    "name": skill.name,
-                    "content_hash": skill.content_hash,
-                    "tags": ["skillfabric", "skill"],
+                    "selectable": True,
+                    "source": source_slug,
+                    "tags": tags,
                 }
             ),
-            f"# {skill.name}",
-            "## Routing Summary\n\n" + (summary.routing_summary or summary.summary),
-            "## Routing Fit\n\n" + _render_routing_fit(skill, interface, summary),
-            "## When To Use\n\n" + (summary.workflow_summary or summary.routing_summary or summary.summary),
-            "## Produces\n\n" + _render_produces(interface),
-            "## Capability Contract\n\n" + _render_interface(interface),
-            "## Works With\n\n" + _render_core_links(source, [edge for edge in core_links if edge.type in {"compose_with", "similar_to", "member_of"}], current_skill_id=skill.id, limit=config.max_neighbors_per_section),
-            "## Depends On\n\n" + _render_core_links(source, [edge for edge in core_links if edge.type == "depend_on"], current_skill_id=skill.id, limit=config.max_neighbors_per_section),
-            "## Workflow Hints\n\n" + _render_workflow_hints(source, execution_links.get("workflow_hints", [])),
+            "# Skill Card",
+            f"Skill: {skill.name}",
+            "## Purpose\n\n" + _one_line(summary.routing_summary or summary.summary or skill.description),
+            "## Use When\n\n" + _render_use_when(interface, summary),
+            "## Do Not Use When\n\n" + _render_do_not_use(interface),
+            "## Inputs\n\n" + _render_field_bullets(interface.requires if interface else []),
+            "## Outputs\n\n" + _render_field_bullets(interface.produces if interface else []),
+            "## Tools And Dependencies\n\n" + _render_field_bullets(interface.uses_tools if interface else []),
+            "## Composition Notes\n\n"
+            + _render_composition_notes(
+                source,
+                core_links,
+                execution_links.get("workflow_hints", []),
+                current_skill_id=skill.id,
+                limit=config.max_neighbors_per_section,
+            ),
             "## Failure Modes\n\n" + _render_failure_modes(interface),
-            "## Evidence\n\n" + _render_skill_evidence(skill, core_links),
-            "## Source\n\n" + _render_source(skill, config),
+            "## Read Full Source\n\n"
+            + f"Open [full SKILL.md]({source_slug}) when the card is insufficient to decide routing boundaries or execution requirements.",
         ]
     ) + "\n"
     return WikiPage(
@@ -80,7 +91,15 @@ def _community_page(
     ]
     text = "\n\n".join(
         [
-            frontmatter({"type": "community", "community_id": community_id, "tags": ["skillfabric", "community"]}),
+            frontmatter(
+                {
+                    "type": "Community",
+                    "title": community.name,
+                    "description": _one_line(summary.summary or community.summary),
+                    "community_id": community_id,
+                    "tags": ["community"],
+                }
+            ),
             f"# {community.name}",
             "## Capability Cluster Summary\n\n" + (summary.summary or community.summary),
             "## Representative Skills\n\n" + bullet_list([wiki_link("skills", item, source.skills[item].name) for item in community.representative_skill_ids if item in source.skills]),
@@ -106,7 +125,15 @@ def _workflow_page(
     title = f"{source_label} -> {target_label}"
     text = "\n\n".join(
         [
-            frontmatter({"type": "workflow", "workflow_id": entity_id, "tags": ["skillfabric", "workflow"]}),
+            frontmatter(
+                {
+                    "type": "Workflow",
+                    "title": title,
+                    "description": f"{record.relation_type} via {record.canonical_object}.",
+                    "workflow_id": entity_id,
+                    "tags": ["workflow"],
+                }
+            ),
             f"# {title}",
             "## Summary\n\n" + f"{record.relation_type} via `{record.canonical_object}`.",
             "## Skills\n\n" + bullet_list(
@@ -116,61 +143,37 @@ def _workflow_page(
                 ]
             ),
             "## Ordering Hint\n\n" + bullet_list([f"{source_label} -> {target_label}"]),
-            "## Evidence\n\n" + bullet_list([f"{item.skill}:{item.line} - {item.text}" for item in record.evidence[:8]]),
         ]
     ) + "\n"
     return WikiPage(page_path(workspace.wiki_dir, "workflows", entity_id), "workflow", entity_id, title, text)
 
 
-def _overview_page(source: WikiSource, workspace: Workspace) -> WikiPage:
+def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
+    """Render the full original SKILL.md as the authoritative skill source."""
+
+    source_filename = page_path(workspace.wiki_dir, "skills", skill.id).name
     text = "\n\n".join(
         [
-            frontmatter({"type": "overview", "tags": ["skillfabric", "overview"]}),
-            "# SkillFabric Overview",
-            "## Counts\n\n"
-            + bullet_list(
-                [
-                    f"skills: {len(source.skills)}",
-                    f"communities: {len(source.communities)}",
-                    f"workflow hints: {len(source.execution_index)}",
-                ]
+            frontmatter(
+                {
+                    "type": "Skill Source",
+                    "title": f"{skill.name} Source",
+                    "description": f"Full original SKILL.md for {skill.id}.",
+                    "skill_id": skill.id,
+                    "resource": f"skill://{skill.id.removeprefix('skill:')}/SKILL.md",
+                }
             ),
-            "## Primary Views\n\n"
-            + bullet_list(
-                [
-                    "Use skill pages for routing fit, produces, required deliverables, and workflow hints.",
-                    "Use deliverables.md to find skills by output artifact family.",
-                ]
-            ),
+            "# Full SKILL.md",
+            skill.raw_text.rstrip() or skill.description,
         ]
     ) + "\n"
-    return WikiPage(workspace.wiki_dir / "overview.md", "overview", "overview", "SkillFabric Overview", text)
-
-
-def _deliverables_page(source: WikiSource, workspace: Workspace) -> WikiPage:
-    by_produce: dict[str, list[str]] = {}
-    for skill_id, interface in source.interfaces.items():
-        for field in interface.produces:
-            if not field.name:
-                continue
-            by_produce.setdefault(field.name, []).append(skill_id)
-    rows: list[str] = []
-    for produce_name, skill_ids in sorted(by_produce.items()):
-        links = [
-            wiki_link("skills", skill_id, source.skills[skill_id].name)
-            for skill_id in sorted(skill_ids)
-            if skill_id in source.skills
-        ]
-        if links:
-            rows.append(f"{produce_name}: {', '.join(links)}")
-    text = "\n\n".join(
-        [
-            frontmatter({"type": "deliverables", "tags": ["skillfabric", "deliverables"]}),
-            "# Deliverables",
-            "## Producer Index\n\n" + bullet_list(rows),
-        ]
-    ) + "\n"
-    return WikiPage(workspace.wiki_dir / "deliverables.md", "deliverables", "deliverables", "Deliverables", text)
+    return WikiPage(
+        path=workspace.wiki_skill_sources_dir / source_filename,
+        page_type="skill",
+        entity_id=skill.id,
+        title=f"{skill.name} Source",
+        text=text,
+    )
 
 
 def _debug_pages(source: WikiSource, workspace: Workspace) -> list[WikiPage]:
@@ -210,56 +213,64 @@ def _debug_pages(source: WikiSource, workspace: Workspace) -> list[WikiPage]:
     return pages
 
 
-def _render_interface(interface: SkillInterface | None) -> str:
-    if interface is None:
-        return "- No interface extracted."
-    rows = [
-        ("Capability Summary", interface.capability_summary),
-        ("When To Use", interface.when_to_use),
-        ("Granularity", interface.granularity),
-        ("Execution Role", interface.execution_role),
-        ("Requires", _field_text(interface.requires)),
-        ("Produces", _field_text(interface.produces)),
-        ("Uses tools", _field_text(interface.uses_tools)),
-    ]
-    return bullet_list([f"{label}: {value}" for label, value in rows if value])
-
-
-def _render_routing_fit(
-    skill: SkillNode,
-    interface: SkillInterface | None,
-    summary: WikiSummaryRecord,
-) -> str:
-    items = [
-        f"Skill id: `{skill.id}`",
-        f"Primary fit: {summary.routing_summary or summary.summary or skill.description}",
-    ]
-    if interface is not None:
-        if interface.when_to_use:
-            items.append(f"When to route here: {interface.when_to_use}")
-        if interface.requires:
-            items.append(f"Requires: {_field_text(interface.requires)}")
-        if interface.produces:
-            items.append(f"Produces: {_field_text(interface.produces)}")
-    return bullet_list(items)
-
-
-def _render_produces(interface: SkillInterface | None) -> str:
-    if interface is None or not interface.produces:
-        return "- No explicit produced artifacts extracted."
-    items = []
-    for field in interface.produces:
-        text = field.name
-        if field.description:
-            text = f"{text}: {field.description}"
-        items.append(text)
-    return bullet_list(items)
-
-
 def _render_failure_modes(interface: SkillInterface | None) -> str:
     if interface is None:
         return "- None"
     return bullet_list(_field_names(interface.failure_modes))
+
+
+def _render_use_when(interface: SkillInterface | None, summary: WikiSummaryRecord) -> str:
+    values = []
+    if interface is not None and interface.when_to_use:
+        values.append(interface.when_to_use)
+    values.append(summary.workflow_summary or summary.routing_summary or summary.summary)
+    return bullet_list([_one_line(value) for value in values if value])
+
+
+def _render_do_not_use(interface: SkillInterface | None) -> str:
+    if interface is None:
+        return "- When the task does not match this skill's inputs, outputs, or declared tools."
+    values = [
+        field.description or field.name
+        for field in interface.failure_modes
+        if field.name or field.description
+    ]
+    if values:
+        return bullet_list([_one_line(value) for value in values])
+    return "- When the task requires unrelated inputs, outputs, tools, or execution responsibilities."
+
+
+def _render_field_bullets(fields: list[InterfaceField]) -> str:
+    values = []
+    for field in fields:
+        if field.name and field.description:
+            values.append(f"{field.name}: {_one_line(field.description)}")
+        elif field.name:
+            values.append(field.name)
+    return bullet_list(values)
+
+
+def _render_composition_notes(
+    source: WikiSource,
+    core_links: list[Edge],
+    workflow_hints: list,
+    *,
+    current_skill_id: str,
+    limit: int,
+) -> str:
+    values: list[str] = []
+    relation_text = _render_core_links(
+        source,
+        [edge for edge in core_links if edge.type in {"compose_with", "depend_on", "member_of"}],
+        current_skill_id=current_skill_id,
+        limit=limit,
+    )
+    if relation_text != "- None":
+        values.extend(relation_text.splitlines())
+    workflow_text = _render_workflow_hints(source, workflow_hints)
+    if workflow_text != "- None":
+        values.extend(workflow_text.splitlines())
+    return "\n".join(dict.fromkeys(values)) if values else "- None"
 
 
 def _render_workflow_hints(source: WikiSource, records: list) -> str:
@@ -320,24 +331,6 @@ def _format_core_link(label: str, edge: Edge, target: str) -> str:
     return f"{label}: {target}{suffix}"
 
 
-def _render_skill_evidence(skill: SkillNode, core_links: list[Edge]) -> str:
-    values = [f"source_path: `{skill.source_path}`", f"content_hash: `{skill.content_hash}`"]
-    for edge in core_links[:5]:
-        if edge.reason:
-            values.append(f"{edge.type}: {edge.reason}")
-        for evidence in edge.evidence[:2]:
-            values.append(f"{evidence.skill}:{evidence.line} - {evidence.text}")
-    return bullet_list(values)
-
-
-def _render_source(skill: SkillNode, config: WikiBuildConfig) -> str:
-    if not config.include_raw_skill_excerpt:
-        return f"- Source path: `{skill.source_path}`"
-    excerpt = skill.raw_text[: config.raw_excerpt_chars]
-    fence = _markdown_fence(excerpt)
-    return f"- Source path: `{skill.source_path}`\n\n{fence}markdown\n{excerpt}\n{fence}"
-
-
 def _skill_summary_payload(skill: SkillNode, interface: SkillInterface | None) -> dict[str, object]:
     return {
         "name": skill.name,
@@ -349,12 +342,24 @@ def _skill_summary_payload(skill: SkillNode, interface: SkillInterface | None) -
     }
 
 
+def _skill_tags(interface: SkillInterface | None) -> list[str]:
+    tags = ["skill"]
+    if interface is not None:
+        tags.extend(name for name in _field_names(interface.produces)[:4] if name)
+        tags.extend(name for name in _field_names(interface.uses_tools)[:4] if name)
+    return list(dict.fromkeys(_safe_tag(item) for item in tags if item))
+
+
+def _safe_tag(value: str) -> str:
+    return value.strip().lower().replace(" ", "-")
+
+
+def _one_line(value: str) -> str:
+    return " ".join(str(value).split())
+
+
 def _field_names(fields: list[InterfaceField]) -> list[str]:
     return [field.name for field in fields if field.name]
-
-
-def _field_text(fields: list[InterfaceField]) -> str:
-    return ", ".join(_field_names(fields))
 
 
 def _directed_link_label(edge: Edge, current_skill_id: str) -> tuple[str, str]:
@@ -388,18 +393,6 @@ def _content_hash(values: list[str]) -> str:
         digest.update(value.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
-
-
-def _markdown_fence(text: str) -> str:
-    longest = 0
-    current = 0
-    for char in text:
-        if char == "`":
-            current += 1
-            longest = max(longest, current)
-            continue
-        current = 0
-    return "`" * max(3, longest + 1)
 
 
 def _first_paragraph(text: str) -> str:

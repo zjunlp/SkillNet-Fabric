@@ -28,8 +28,8 @@ from skillfabric.compiled_graph.interface.providers import (
     SkillInterfaceExtractor,
     _provenance,
 )
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 
 
 def extract_skill_interfaces(

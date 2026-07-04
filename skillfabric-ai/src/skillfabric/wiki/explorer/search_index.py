@@ -15,7 +15,7 @@ def build_wiki_page_index(workspace: Workspace) -> dict[str, int]:
     """Build wiki_page_index.jsonl from generated markdown pages."""
 
     pages = _collect_pages(workspace)
-    _write_jsonl(workspace.wiki_dir / "wiki_page_index.jsonl", [page.to_dict() for page in pages])
+    _write_jsonl(workspace.graph_dir / "wiki_page_index.jsonl", [page.to_dict() for page in pages])
     return {"page_count": len(pages)}
 
 
@@ -23,7 +23,9 @@ def load_page_index(workspace: Workspace | str | Path) -> list[WikiPageEntry]:
     """Load page-level wiki index."""
 
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
-    path = workspace.wiki_dir / "wiki_page_index.jsonl"
+    path = workspace.graph_dir / "wiki_page_index.jsonl"
+    if not path.exists():
+        path = workspace.wiki_dir / "wiki_page_index.jsonl"
     if not path.exists():
         return []
     return [
@@ -62,12 +64,18 @@ def _skip_page(workspace: Workspace, path: Path) -> bool:
     rel = path.relative_to(workspace.wiki_dir).as_posix()
     if rel.startswith("debug/"):
         return True
+    if rel.startswith("references/skill-sources/"):
+        return True
+    if rel.startswith("skills/source/"):
+        return True
     if rel in {"hot.md", "log.md", "wiki_health_report.md"}:
         return True
     return False
 
 
 def _page_identity(rel_path: str, metadata: dict[str, str]) -> tuple[str, str]:
+    if rel_path.endswith("/index.md"):
+        return "index", rel_path.removesuffix("/index.md").replace("/", "-") + "-index"
     if rel_path.startswith("skills/"):
         return "skill", metadata.get("skill_id", f"skill:{Path(rel_path).stem}")
     if rel_path.startswith("communities/"):

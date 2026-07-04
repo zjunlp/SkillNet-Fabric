@@ -26,6 +26,8 @@ FORBIDDEN_EXECUTION_PROMPT_FRAGMENTS = (
     "missing_dependency",
     "execution_report.json",
     "completion_report_schema.json",
+    "subagent",
+    "sub-agent",
 )
 
 
@@ -300,12 +302,12 @@ def _planner_prompt(route: RouteResult, package_root: Path, renderer: str) -> st
         "- ordered_hints are soft ordering guidance; use them only when consistent with the task and required_edges.\n"
         "- near_misses explain capabilities that looked plausible but should not be introduced as selected roles.\n"
         "- coverage notes, warnings, and route rationale are risk metadata; surface relevant gaps in the final prompt as cautions or verification checks.\n"
-        "- Prefer the simplest effective workflow. Do not force parallelism, subagents, or complex staging for simple single-agent tasks.\n\n"
+        "- Prefer the simplest effective workflow. Do not force parallelism or complex staging for simple tasks.\n\n"
         "# Claude Code Execution Capabilities\n\n"
-        "- The main task agent can work serially in one session when the task is small or tightly coupled.\n"
-        "- It can parallelize independent inspection, generation, or verification when outputs and file edits are disjoint.\n"
-        "- It can create a bounded subagent for independent research, file inspection, artifact validation, or a disjoint implementation slice when that reduces context load or latency.\n"
-        "- It should aggregate parallel or subagent results before final verification.\n"
+        "- The main Claude Code session should execute the task directly after this package is finalized.\n"
+        "- It can perform bounded active-workspace inspection before editing when the task needs project context.\n"
+        "- It can parallelize independent inspection, generation, or verification only when outputs and file edits are disjoint.\n"
+        "- It should aggregate any parallel work before final verification.\n"
         "- It must verify requested deliverables with task-appropriate file, schema, render, test, or inspection checks before reporting completion.\n\n"
         "# Output Contract\n\n"
         "Return one strict JSON object with exactly one top-level key:\n\n"
@@ -316,7 +318,7 @@ def _planner_prompt(route: RouteResult, package_root: Path, renderer: str) -> st
         "The final `execution_prompt` must include:\n\n"
         "- Objective: restate the user task and concrete deliverables, including exact filenames, formats, and output locations stated by the task.\n"
         "- Selected capability roles: name only the selected skills that materially help, and explain when to apply each role.\n"
-        "- Execution strategy: give a concise ordered workflow; mention serial execution, safe parallel work, or bounded subagent use only when appropriate for this task.\n"
+        "- Execution strategy: give a concise ordered workflow; mention serial execution or safe parallel work only when appropriate for this task.\n"
         "- Dependency handling: encode required_edges as hard ordering and any useful ordered_hints as non-mandatory sequencing guidance.\n"
         "- Verification: specify concrete checks for the requested files/artifacts and any known coverage risks.\n"
         "- Final response: ask the main agent to summarize deliverables, verification evidence, deviations, and blockers.\n\n"
@@ -329,7 +331,7 @@ def _planner_prompt(route: RouteResult, package_root: Path, renderer: str) -> st
         "- JSON parses as an object and contains only `execution_prompt`.\n"
         "- The prompt is self-contained and directly executable in the active workspace.\n"
         "- The prompt preserves all hard required_edges.\n"
-        "- Optional parallelism or bounded subagent use is justified by independent work, not forced.\n"
+        "- Optional parallelism is justified by independent work, not forced.\n"
         "- The prompt names concrete deliverables and concrete verification checks.\n"
         "- The prompt does not leak package paths, route evidence paths, planner artifacts, or SkillFabric runtime mechanics.\n"
     )

@@ -22,7 +22,7 @@ def _load_graph(workspace: Workspace) -> GraphDocument:
 
 
 def _load_registry_skills(workspace: Workspace) -> dict[str, SkillNode]:
-    path = workspace.registry_dir / "skills.jsonl"
+    path = _first_existing(workspace.graph_dir / "registry.jsonl", workspace.graph_dir / "skills.jsonl")
     if not path.exists():
         return {}
     return _load_registry_skills_cached(*_file_cache_key(path))
@@ -46,6 +46,13 @@ def _load_registry_skills_cached(path: str, _mtime_ns: int, _size: int) -> dict[
 def _file_cache_key(path: Path) -> tuple[str, int, int]:
     stat = path.stat()
     return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def _first_existing(*paths: Path) -> Path:
+    for path in paths:
+        if path.exists():
+            return path
+    return paths[0]
 
 
 def _communities(graph: GraphDocument) -> dict[str, CommunityNode]:

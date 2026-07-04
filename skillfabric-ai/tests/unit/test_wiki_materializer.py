@@ -4,10 +4,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.search_index import load_page_index
-from skillfabric.wiki.loader import load_wiki_source
-from skillfabric.wiki.materializer import _deliverables_page, build_wiki
+from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
 
@@ -24,30 +22,51 @@ class WikiMaterializerTests(unittest.TestCase):
             skill_page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
             self.assertTrue(skill_page.exists())
             text = skill_page.read_text(encoding="utf-8")
-            self.assertIn("type: skill", text)
-            self.assertIn("## Routing Summary", text)
-            self.assertIn("## Routing Fit", text)
-            self.assertIn("## When To Use", text)
-            self.assertIn("## Produces", text)
-            self.assertIn("## Capability Contract", text)
-            self.assertIn("Granularity:", text)
-            self.assertIn("Execution Role:", text)
-            self.assertIn("## Works With", text)
-            self.assertIn("## Depends On", text)
-            self.assertIn("confidence=0.92", text)
-            self.assertIn("## Workflow Hints", text)
+            self.assertIn("type: Skill", text)
+            self.assertIn("title: pdf-table-parser", text)
+            self.assertIn("skill_id: skill:pdf-table-parser", text)
+            self.assertIn("source: source/pdf-table-parser.md", text)
+            self.assertIn("# Skill Card", text)
+            self.assertIn("## Purpose", text)
+            self.assertIn("## Use When", text)
+            self.assertIn("## Do Not Use When", text)
+            self.assertIn("## Inputs", text)
+            self.assertIn("## Outputs", text)
+            self.assertIn("## Tools And Dependencies", text)
+            self.assertIn("## Composition Notes", text)
             self.assertIn("## Failure Modes", text)
-            self.assertIn("## Evidence", text)
+            self.assertIn("## Read Full Source", text)
+            self.assertNotIn("## Evidence", text)
+            self.assertNotIn("## Source", text)
+            self.assertNotIn("content_hash", text)
+            self.assertNotIn("skillfabric", text.lower())
+            self.assertNotIn("/Users/", text)
             self.assertNotIn("[[artifacts/", text)
             self.assertNotIn("[[scenarios/", text)
             self.assertNotIn("raw_output", text)
-            self.assertIn("\n```markdown\n", text)
+            self.assertNotIn("\n```markdown\n", text)
+            source_page = workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+            self.assertTrue(source_page.exists())
+            source_text = source_page.read_text(encoding="utf-8")
+            self.assertIn("type: Skill Source", source_text)
+            self.assertIn("# Full SKILL.md", source_text)
+            self.assertIn("Extract tables", source_text)
+            self.assertNotIn("/Users/", source_text)
+            self.assertTrue((workspace / "wiki" / "skills" / "index.md").exists())
+            skills_index_text = (workspace / "wiki" / "skills" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("[pdf-table-parser](pdf-table-parser.md)", skills_index_text)
+            self.assertNotIn("Extract tables from PDF files and save structured CSV output.", skills_index_text)
+            self.assertNotIn("pdf-table-parser Source", skills_index_text)
+            self.assertNotIn("type: Skill Source", skills_index_text)
+            self.assertLess(len(skills_index_text), 6000)
             self.assertTrue((workspace / "wiki" / "communities").exists())
-            self.assertTrue((workspace / "wiki" / "overview.md").exists())
+            self.assertTrue((workspace / "wiki" / "communities" / "index.md").exists())
+            self.assertTrue((workspace / "wiki" / "workflows" / "index.md").exists())
+            self.assertTrue((workspace / "wiki" / "references" / "index.md").exists())
+            self.assertTrue((workspace / "wiki" / "skills" / "source" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "overview.md").exists())
             self.assertFalse((workspace / "wiki" / "resolver.md").exists())
-            self.assertTrue((workspace / "wiki" / "deliverables.md").exists())
-            overview_text = (workspace / "wiki" / "overview.md").read_text(encoding="utf-8")
-            self.assertNotIn("resolver.md", overview_text)
+            self.assertFalse((workspace / "wiki" / "deliverables.md").exists())
             self.assertFalse((workspace / "wiki" / "artifacts").exists())
             self.assertFalse((workspace / "wiki" / "scenarios").exists())
             self.assertTrue((workspace / "wiki" / "workflows").exists())
@@ -65,8 +84,9 @@ class WikiMaterializerTests(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(list((workspace / "wiki" / "debug" / "raw_artifacts").glob("*.md")))
-            self.assertTrue((workspace / "wiki" / "debug" / "extraction_report.md").exists())
+            self.assertFalse((workspace / "wiki" / "debug").exists())
+            self.assertTrue(list((workspace / "reports" / "wiki-debug" / "raw_artifacts").glob("*.md")))
+            self.assertTrue((workspace / "reports" / "wiki-debug" / "extraction_report.md").exists())
 
     def test_build_wiki_removes_stale_artifact_and_scenario_directories(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -114,7 +134,7 @@ class WikiMaterializerTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
-            skills_path = workspace / "registry" / "skills.jsonl"
+            skills_path = workspace / "graph" / "registry.jsonl"
             rows = skills_path.read_text(encoding="utf-8").splitlines()
             patched = []
             for row in rows:
@@ -127,22 +147,11 @@ class WikiMaterializerTests(unittest.TestCase):
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
             text = (workspace / "wiki" / "skills" / "pdf-table-parser.md").read_text(encoding="utf-8")
-            self.assertIn("````markdown", text)
-            self.assertIn("```python", text)
-
-    def test_deliverables_are_interface_based(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace_path)
-            workspace = Workspace(workspace_path)
-            source = load_wiki_source(workspace)
-
-            deliverables_text = _deliverables_page(source, workspace).text
-
-            self.assertIn("Producer Index", deliverables_text)
-            self.assertNotIn("Canonical Deliverable Requirements", deliverables_text)
-            self.assertNotIn("deliverable:pptx", deliverables_text)
-
+            self.assertNotIn("````markdown", text)
+            source_text = (
+                workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("```python", source_text)
 
 if __name__ == "__main__":
     unittest.main()

@@ -105,15 +105,13 @@ class WikiExplorerTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:pdf-table-parser",
-                            "scope": "core",
                             "role": "Parse PDF tables.",
-                            "evidence": [{"path": "skills/core/pdf-table-parser.md", "reason": "core page"}],
+                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "skill card"}],
                         },
                         {
                             "skill_id": "skill:financial-kpi-extractor",
-                            "scope": "core",
                             "role": "Extract financial KPIs.",
-                            "evidence": [{"path": "skills/core/financial-kpi-extractor.md", "reason": "core page"}],
+                            "evidence": [{"path": "skills/financial-kpi-extractor.md", "reason": "skill card"}],
                         },
                     ],
                     "required_edges": [
@@ -156,8 +154,8 @@ class WikiExplorerTests(unittest.TestCase):
             schema = runtime.options.output_format["schema"]
             selected_item_schema = schema["properties"]["selected_skills"]["items"]
             self.assertFalse(selected_item_schema["additionalProperties"])
-            self.assertIn("scope", selected_item_schema["required"])
-            self.assertEqual(selected_item_schema["properties"]["scope"]["enum"], ["core", "workflow_bridge", "graph_frontier"])
+            self.assertNotIn("scope", selected_item_schema["required"])
+            self.assertNotIn("scope", selected_item_schema["properties"])
             self.assertIn("Allowed tools: Read, LS, Glob, Grep.", runtime.options.system_prompt)
             self.assertTrue((trace_dir / "query_wiki" / "manifest.json").exists())
             self.assertTrue((trace_dir / "cc_explorer" / "agent_events.jsonl").exists())
@@ -383,9 +381,8 @@ class WikiExplorerTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:pdf-table-parser",
-                            "scope": "core",
                             "role": "Parse PDF tables.",
-                            "evidence": [{"path": "skills/core/pdf-table-parser.md", "reason": "core page"}],
+                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "skill card"}],
                         }
                     ],
                     "rationale": "Parser is sufficient.",
@@ -427,7 +424,7 @@ class WikiExplorerTests(unittest.TestCase):
     def test_claude_code_sdk_normalizes_absolute_evidence_to_query_wiki_relative_paths(self) -> None:
         with TemporaryDirectory() as tmp:
             query_wiki_root = Path(tmp) / "query_wiki"
-            skill_page = query_wiki_root / "skills" / "core" / "pdf-table-parser.md"
+            skill_page = query_wiki_root / "skills" / "pdf-table-parser.md"
             workflow_page = query_wiki_root / "workflows" / "parser-to-kpi.md"
             skill_page.parent.mkdir(parents=True)
             workflow_page.parent.mkdir(parents=True)
@@ -439,9 +436,9 @@ class WikiExplorerTests(unittest.TestCase):
                         "skills": [
                             {
                                 "skill_id": "skill:pdf-table-parser",
-                                "scope": "core",
                                 "selectable": True,
-                                "page_path": "skills/core/pdf-table-parser.md",
+                                "card_path": "skills/pdf-table-parser.md",
+                                "source_path": "skills/source/pdf-table-parser.md",
                             }
                         ]
                     }
@@ -455,7 +452,6 @@ class WikiExplorerTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": "skill:pdf-table-parser",
-                            "scope": "core",
                             "role": "Parse PDF tables.",
                             "evidence": [{"path": str(skill_page), "reason": "absolute path from SDK"}],
                         }
@@ -477,7 +473,7 @@ class WikiExplorerTests(unittest.TestCase):
                 trace_dir=trace_dir,
             )
 
-            self.assertEqual(package.selected_skills[0].evidence[0].path, "skills/core/pdf-table-parser.md")
+            self.assertEqual(package.selected_skills[0].evidence[0].path, "skills/pdf-table-parser.md")
             self.assertEqual(package.required_edges[0].evidence_path, "workflows/parser-to-kpi.md")
 
     def test_claude_code_wrapper_json_result_is_unwrapped(self) -> None:
@@ -492,12 +488,12 @@ class WikiExplorerTests(unittest.TestCase):
                             "selected_skills": [
                                 {
                                     "skill_id": "skill:pdf-table-parser",
-                                    "evidence_paths": ["skills/core/pdf-table-parser.md"],
+                                    "evidence_paths": ["skills/pdf-table-parser.md"],
                                     "selection_reason": "Provides the PDF table extraction prerequisite.",
                                 },
                                 {
                                     "skill_id": "skill:financial-kpi-extractor",
-                                    "evidence_paths": ["skills/core/financial-kpi-extractor.md"],
+                                    "evidence_paths": ["skills/financial-kpi-extractor.md"],
                                     "selection_reason": "Direct match for financial KPI extraction.",
                                 },
                             ],
@@ -550,12 +546,11 @@ class WikiExplorerTests(unittest.TestCase):
                                         "selected_skills": [
                                             {
                                                 "skill_id": "skill:pdf-table-parser",
-                                                "scope": "core",
                                                 "role": "Parse PDF tables.",
                                                 "evidence": [
                                                     {
-                                                        "path": "skills/core/pdf-table-parser.md",
-                                                        "reason": "core page",
+                                                        "path": "skills/pdf-table-parser.md",
+                                                        "reason": "skill card",
                                                     }
                                                 ],
                                             }

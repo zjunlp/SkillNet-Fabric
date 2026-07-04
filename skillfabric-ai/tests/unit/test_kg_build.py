@@ -31,6 +31,18 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
 
 
+def fake_litellm_embedding(**kwargs):
+    inputs = kwargs.get("input", [])
+    if isinstance(inputs, str):
+        inputs = [inputs]
+    return {
+        "data": [
+            {"index": index, "embedding": [1.0, 0.0] if index % 2 == 0 else [0.0, 1.0]}
+            for index, _text in enumerate(inputs)
+        ]
+    }
+
+
 class StaticCommunityRefinementProvider:
     model_id = "static-community-refiner"
 
@@ -178,41 +190,37 @@ class KGBuildTests(unittest.TestCase):
 
             self.assertEqual(result.graph.schema_version, "1.0")
             self.assertEqual(result.stats["skill_count"], 8)
-            self.assertTrue((workspace / "registry" / "skills.jsonl").exists())
-            self.assertTrue((workspace / "registry" / "skill_sources.jsonl").exists())
-            self.assertTrue((workspace / "index" / "bm25.sqlite").exists())
-            self.assertTrue((workspace / "index" / "embeddings.json").exists())
-            self.assertTrue((workspace / "index" / "embedding_meta.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "skill_sources.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "bm25.sqlite").exists())
+            self.assertTrue((workspace / "graph" / "embeddings.json").exists())
+            self.assertTrue((workspace / "graph" / "embedding_meta.jsonl").exists())
             self.assertTrue((workspace / "graph" / "graph.json").exists())
             self.assertTrue((workspace / "graph" / "communities.json").exists())
             self.assertTrue((workspace / "graph" / "edge_evidence.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "relation_validation_audit.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "relation_validation_audit.jsonl").exists())
             self.assertTrue((workspace / "graph" / "relation_validation_summary.json").exists())
             self.assertTrue((workspace / "graph" / "graph_health_report.md").exists())
-            self.assertTrue((workspace / "interfaces" / "skill_interfaces.jsonl").exists())
-            self.assertTrue((workspace / "interfaces" / "interface_cache.json").exists())
-            self.assertTrue((workspace / "interfaces" / "interface_evidence.jsonl").exists())
-            self.assertTrue((workspace / "interfaces" / "interface_health_report.md").exists())
-            self.assertTrue((workspace / "execution_graph" / "canonical_objects.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "canonical_aliases.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "canonicalization_evidence.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "canonicalization_health_report.md").exists())
-            self.assertTrue((workspace / "execution_graph" / "canonicalization_cache.json").exists())
-            self.assertTrue((workspace / "execution_graph" / "execution_index.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "artifact_nodes.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "scenario_nodes.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "skill_artifact_edges.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "skill_scenario_edges.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "artifact_flows.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph" / "scenario_transitions.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "raw_artifact_nodes.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "raw_scenario_nodes.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "execution_evidence.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "execution_validation_audit.jsonl").exists())
-            self.assertTrue((workspace / "execution_graph" / "execution_validation_summary.json").exists())
-            self.assertTrue((workspace / "execution_graph" / "execution_health_report.md").exists())
-            self.assertTrue((workspace / "graph" / "compiled_skill_graph.json").exists())
-            self.assertTrue((workspace / "build_metrics.json").exists())
+            self.assertTrue((workspace / "graph" / "contracts.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "interface_evidence.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "interface_health_report.md").exists())
+            self.assertTrue((workspace / "graph" / "canonical_objects.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "canonical_aliases.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "canonicalization_evidence.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "canonicalization_health_report.md").exists())
+            self.assertTrue((workspace / "cache" / "interface_cache.json").exists())
+            self.assertTrue((workspace / "cache" / "canonicalization_cache.json").exists())
+            self.assertTrue((workspace / "graph" / "execution_index.jsonl").exists())
+            self.assertFalse((workspace / "execution_graph").exists())
+            self.assertFalse((workspace / "interfaces").exists())
+            self.assertFalse((workspace / "registry").exists())
+            self.assertFalse((workspace / "index").exists())
+            self.assertTrue((workspace / "graph" / "execution_evidence.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "execution_validation_audit.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "execution_validation_summary.json").exists())
+            self.assertTrue((workspace / "graph" / "execution_health_report.md").exists())
+            self.assertTrue((workspace / "graph" / "compiled.json").exists())
+            self.assertTrue((workspace / "reports" / "build_summary.json").exists())
             self.assertEqual(result.stats["interface_count"], 8)
             self.assertEqual(len(result.interfaces), 8)
             self.assertGreater(result.stats["execution_candidate_count"], 0)
@@ -237,7 +245,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertIn("compose_with", edge_types)
             self.assertGreater(result.stats["execution_projected_edge_count"], 0)
             self.assertTrue(any(edge["provenance"] == "deterministic_accept" for edge in graph_data["edges"]))
-            compiled_graph = json.loads((workspace / "graph" / "compiled_skill_graph.json").read_text())
+            compiled_graph = json.loads((workspace / "graph" / "compiled.json").read_text())
             self.assertIn("core_graph", compiled_graph)
             self.assertIn("interfaces", compiled_graph)
             self.assertIn("canonicalization", compiled_graph)
@@ -247,7 +255,7 @@ class KGBuildTests(unittest.TestCase):
             execution_index = compiled_graph["execution_graph"]["execution_index"]
             self.assertEqual(len(execution_index), result.stats["execution_accepted_flow_count"])
             self.assertTrue(all(row["projected_edge_type"] in {"depend_on", "compose_with"} for row in execution_index))
-            build_metrics = json.loads((workspace / "build_metrics.json").read_text())
+            build_metrics = json.loads((workspace / "reports" / "build_summary.json").read_text())
             self.assertEqual(build_metrics["skill_count"], 8)
             self.assertIn("relation_validation", build_metrics)
             self.assertIn("execution_validation", build_metrics)
@@ -292,11 +300,11 @@ class KGBuildTests(unittest.TestCase):
             neighbor_ids = {item["skill_id"] for item in neighbors}
             self.assertIn("skill:pdf-table-parser", neighbor_ids)
 
-            stale_obsolete_artifact = workspace / "execution_graph" / "artifact_nodes.jsonl"
+            stale_obsolete_artifact = workspace / "graph" / "artifact_nodes.jsonl"
             stale_obsolete_artifact.write_text("{}\n", encoding="utf-8")
-            stale_predicate_inventory = workspace / "execution_graph" / "predicate_inventory.json"
+            stale_predicate_inventory = workspace / "graph" / "predicate_inventory.json"
             stale_predicate_inventory.write_text("{}\n", encoding="utf-8")
-            stale_workflow_compatibility = workspace / "execution_graph" / "workflow_compatibility.jsonl"
+            stale_workflow_compatibility = workspace / "graph" / "workflow_compatibility.jsonl"
             stale_workflow_compatibility.write_text("{}\n", encoding="utf-8")
 
             second = build_graph(
@@ -589,8 +597,8 @@ class KGBuildTests(unittest.TestCase):
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["skill_count"], 8)
-            self.assertTrue((workspace / "registry" / "skills.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "compiled_skill_graph.json").exists())
+            self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "compiled.json").exists())
             self.assertTrue((workspace / "status.json").exists())
             self.assertTrue((workspace / "wiki" / "index.md").exists())
             self.assertIn("wiki", payload["artifacts"])
@@ -672,6 +680,8 @@ class KGBuildTests(unittest.TestCase):
             }
 
         fake_litellm.completion = fake_completion
+
+        fake_litellm.embedding = fake_litellm_embedding
         original = sys.modules.get("litellm")
         sys.modules["litellm"] = fake_litellm
         try:
@@ -782,6 +792,8 @@ class KGBuildTests(unittest.TestCase):
             }
 
         fake_litellm.completion = fake_completion
+
+        fake_litellm.embedding = fake_litellm_embedding
         original = sys.modules.get("litellm")
         sys.modules["litellm"] = fake_litellm
         try:
@@ -796,10 +808,7 @@ class KGBuildTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 stdout = io.StringIO()
-                with contextlib.redirect_stdout(stdout), patch(
-                    "skillfabric.cli.SentenceTransformerEmbeddingProvider",
-                    return_value=FakeEmbeddingProvider(),
-                ):
+                with contextlib.redirect_stdout(stdout):
                     cli_main(
                         [
                             "build",
@@ -813,10 +822,6 @@ class KGBuildTests(unittest.TestCase):
                             "1",
                             "--env-file",
                             str(env_path),
-                            "--embedding-provider",
-                            "local",
-                            "--embedding-model-path",
-                            str(Path(tmp) / "fake-model"),
                             "--skip-wiki",
                         ]
                     )

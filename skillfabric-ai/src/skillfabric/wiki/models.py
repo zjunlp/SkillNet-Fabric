@@ -17,8 +17,6 @@ class WikiBuildConfig:
     env_file: str | Path = ".env"
     use_llm_summaries: bool = True
     max_neighbors_per_section: int = 10
-    include_raw_skill_excerpt: bool = True
-    raw_excerpt_chars: int = 6000
     include_debug_pages: bool = False
     llm_concurrency: int | None = None
     llm_rate_limit_per_minute: float | None = None

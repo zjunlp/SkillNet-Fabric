@@ -80,8 +80,6 @@ def _embedding_store_is_reconstructable(provider: str) -> bool:
         "api",
         "litellm",
         "openai",
-        "sentence-transformers",
-        "sentencetransformerembeddingprovider",
         "disabled",
     }
 

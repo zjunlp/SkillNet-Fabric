@@ -32,8 +32,8 @@ from skillfabric.compiled_graph.canonicalization.prompts import (
     build_canonicalization_messages,
 )
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 CANONICALIZATION_CACHE_ID = CANONICALIZATION_PROMPT_ID
 

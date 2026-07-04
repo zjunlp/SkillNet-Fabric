@@ -9,8 +9,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from skillfabric.cli import main as cli_main
-from skillfabric.progress import ProgressReporter
-from skillfabric.runtime_defaults import default_build_options, default_router_options
+from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.progress import ProgressReporter
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
@@ -68,6 +68,35 @@ class RuntimeControlsTests(unittest.TestCase):
                     )
 
             self.assertTrue(build_graph_mock.called)
+
+    def test_build_rejects_unknown_embedding_provider_from_shell(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "API_KEY=sk-test\n"
+                "BASE_URL=https://api.example.test/v1\n"
+                "MODEL=openai/test-model\n"
+                "EMBEDDING_MODEL=openai/text-embedding-3-small\n",
+                encoding="utf-8",
+            )
+            workspace = Path(tmp) / ".skillfabric"
+
+            with patch.dict("os.environ", {"EMBEDDING_PROVIDER": "custom-provider"}, clear=False):
+                with patch("skillfabric.cli.build_graph") as build_graph_mock:
+                    with self.assertRaisesRegex(SystemExit, "unsupported embedding provider"):
+                        cli_main(
+                            [
+                                "build",
+                                "--skill-root",
+                                str(FIXTURE_SKILLS),
+                                "--workspace",
+                                str(workspace),
+                                "--env-file",
+                                str(env_file),
+                            ]
+                        )
+
+            self.assertFalse(build_graph_mock.called)
 
     def test_build_failure_writes_status_for_plugin_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -139,7 +168,7 @@ class RuntimeControlsTests(unittest.TestCase):
 
         self.assertEqual(stderr.getvalue(), "")
 
-    def test_build_help_exposes_local_embedding_options(self) -> None:
+    def test_build_help_exposes_api_only_embedding_options(self) -> None:
         stdout = io.StringIO()
         with self.assertRaises(SystemExit) as raised:
             with contextlib.redirect_stdout(stdout):
@@ -149,8 +178,9 @@ class RuntimeControlsTests(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertIn("--embedding-provider", help_text)
         self.assertIn("--embedding-model", help_text)
-        self.assertIn("--embedding-model-path", help_text)
-        self.assertIn("local", help_text)
+        self.assertIn("{api,disabled}", help_text)
+        self.assertIn("api", help_text)
+        self.assertIn("disabled", help_text)
 
 
 if __name__ == "__main__":

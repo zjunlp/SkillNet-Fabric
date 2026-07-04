@@ -11,7 +11,7 @@ from skillfabric.compiled_graph.interface.extraction import (
     extract_skill_interfaces,
 )
 from skillfabric.compiled_graph.interface.prompts import build_interface_extraction_messages
-from skillfabric.llm import LLMConfig
+from skillfabric.runtime.llm import LLMConfig
 from tests.unit.relation_helpers import make_skill
 
 
@@ -361,15 +361,15 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertNotIn("log", field_names)
 
-    def test_deterministic_fallback_adds_data_storytelling_semantics_when_artifacts_are_ambiguous(self) -> None:
+    def test_deterministic_fallback_does_not_invent_fields_from_ambiguous_text(self) -> None:
         skill = make_skill(
-            "skill:data-storytelling",
-            "data-storytelling",
+            "skill:ambiguous-communication",
+            "ambiguous-communication",
             "\n".join(
                 [
-                    "Transform data into compelling narratives using visualization, context, and persuasive structure.",
-                    "Use when presenting analytics to stakeholders, creating data reports, or building executive presentations.",
-                    "| Visuals | Clarity | Charts, diagrams, highlights |",
+                    "Transform source material into a clear communication plan.",
+                    "Use when the task needs audience context, structure, and verification notes.",
+                    "| Input | Output | Notes |",
                     "```markdown",
                 ]
             ),
@@ -378,31 +378,8 @@ class InterfaceExtractionTests(unittest.TestCase):
         records = extract_skill_interfaces([skill], extractor=DeterministicInterfaceExtractor())
         interface = records[0].interface
 
-        self.assertIn("source_data_context", {field.name for field in interface.requires})
-        self.assertIn("content_requirements", {field.name for field in interface.requires})
-        self.assertEqual({field.name for field in interface.produces}, {"data_narrative"})
-        self.assertTrue(all(field.inferred for field in interface.requires + interface.produces))
-        self.assertTrue(all(field.evidence for field in interface.requires + interface.produces))
-
-    def test_deterministic_fallback_adds_employment_document_semantics_when_artifacts_are_ambiguous(self) -> None:
-        skill = make_skill(
-            "skill:employment-contract-templates",
-            "employment-contract-templates",
-            "\n".join(
-                [
-                    "Create employment contracts, offer letters, and HR policy documents following legal best practices.",
-                    "Use when drafting employment agreements, creating HR policies, or standardizing employment documentation.",
-                    "```markdown",
-                ]
-            ),
-        )
-
-        records = extract_skill_interfaces([skill], extractor=DeterministicInterfaceExtractor())
-        interface = records[0].interface
-
-        self.assertEqual({field.name for field in interface.requires}, {"employment_terms"})
-        self.assertEqual({field.name for field in interface.produces}, {"employment_document"})
-        self.assertTrue(all(field.inferred for field in interface.requires + interface.produces))
+        self.assertEqual(interface.requires, [])
+        self.assertEqual(interface.produces, [])
 
     def test_prompt_contains_full_skill_md(self) -> None:
         skill = make_skill("skill:pdf", "pdf", "Line one.\nFULL_SKILL_LINE")

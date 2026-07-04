@@ -56,7 +56,7 @@ class WikiSource:
 def load_wiki_source(workspace: Workspace) -> WikiSource:
     """Read compiled graph artifacts and return a wiki-oriented view."""
 
-    compiled_path = workspace.graph_dir / "compiled_skill_graph.json"
+    compiled_path = workspace.graph_dir / "compiled.json"
     if not compiled_path.exists():
         raise FileNotFoundError(f"compiled skill graph not found: {compiled_path}; run `skillfabric build` first")
     payload = json.loads(compiled_path.read_text(encoding="utf-8"))
@@ -123,7 +123,7 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
 
 
 def _merge_raw_skills(workspace: Workspace, skills: dict[str, SkillNode]) -> None:
-    registry_path = workspace.registry_dir / "skills.jsonl"
+    registry_path = workspace.graph_dir / "registry.jsonl"
     if not registry_path.exists():
         return
     for line in registry_path.read_text(encoding="utf-8").splitlines():
@@ -152,8 +152,8 @@ def _load_evidence_lookup(workspace: Workspace) -> dict[tuple[str, str, str], li
     lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for path in (
         workspace.graph_dir / "edge_evidence.jsonl",
-        workspace.interfaces_dir / "interface_evidence.jsonl",
-        workspace.execution_dir / "execution_evidence.jsonl",
+        workspace.graph_dir / "interface_evidence.jsonl",
+        workspace.graph_dir / "execution_evidence.jsonl",
     ):
         if not path.exists():
             continue

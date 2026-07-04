@@ -68,7 +68,7 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                     "ANTHROPIC_AUTH_TOKEN": "sk-cc-token",
                     "ANTHROPIC_BASE_URL": "http://gateway.example",
                     "ANTHROPIC_MODEL": "gpt-5.4-mini",
-                    "EMBEDDING_MODEL": "BAAI/bge-large-en-v1.5",
+                    "EMBEDDING_MODEL": "openai/text-embedding-3-small",
                 },
                 clear=True,
             ):
@@ -137,9 +137,8 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "selected_skills": [
                             {
                                 "skill_id": selected["skill_id"],
-                                "scope": selected["scope"],
                                 "role": "Use this skill for the main task capability.",
-                                "evidence": [{"path": selected["page_path"], "reason": "Selected from query wiki."}],
+                                "evidence": [{"path": selected["card_path"], "reason": "Selected from query wiki."}],
                             }
                         ],
                         "required_edges": [],
@@ -205,7 +204,7 @@ class InitAndAgentModeCliTests(unittest.TestCase):
 
             text = card_output.getvalue()
             self.assertIn("# skill:pdf-table-parser", text)
-            self.assertIn("## Card", text)
+            self.assertIn("## Skill Card", text)
             self.assertNotIn("## Source", text)
 
     def test_agent_mode_finalize_accepts_skill_package_from_stdin(self) -> None:
@@ -238,9 +237,8 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                     "selected_skills": [
                         {
                             "skill_id": selected["skill_id"],
-                            "scope": selected["scope"],
                             "role": "Use this skill for the main task capability.",
-                            "evidence": [{"path": selected["page_path"], "reason": "Selected from query wiki."}],
+                            "evidence": [{"path": selected["card_path"], "reason": "Selected from query wiki."}],
                         }
                     ],
                     "required_edges": [],
@@ -306,9 +304,8 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "selected_skills": [
                             {
                                 "skill_id": selected["skill_id"],
-                                "scope": selected["scope"],
                                 "role": "Use this skill for the main task capability.",
-                                "evidence": [{"path": selected["page_path"], "reason": "Selected from query wiki."}],
+                                "evidence": [{"path": selected["card_path"], "reason": "Selected from query wiki."}],
                             }
                         ],
                     },
@@ -360,7 +357,6 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "selected_skills": [
                             {
                                 "skill_id": "skill:not-in-manifest",
-                                "scope": "core",
                                 "role": "Invalid.",
                                 "evidence": [{"path": "../outside.md", "reason": "bad"}],
                             }

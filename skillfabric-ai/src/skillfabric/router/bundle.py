@@ -32,7 +32,7 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
     communities = _communities(graph)
     warnings: list[str] = []
     if not skills:
-        warnings.append(f"registry skills not found: {workspace.registry_dir / 'skills.jsonl'}")
+        warnings.append(f"registry skills not found: {workspace.graph_dir / 'registry.jsonl'}")
     interfaces = load_interfaces(workspace)
     execution_index = load_execution_index(workspace)
     seed_scores = _seed_scores(

@@ -48,7 +48,6 @@ from skillfabric.compiled_graph.execution.validation import (
     DeterministicExecutionFlowValidator,
     ExecutionFlowValidator,
     LiteLLMExecutionFlowValidator,
-    execution_validation_audit_rows,
     summarize_execution_validation_records,
     validate_execution_flow_candidates,
 )
@@ -72,7 +71,6 @@ from skillfabric.compiled_graph.relations.validation import (
     LiteLLMPairValidator,
     NoopPairValidator,
     PairValidator,
-    relation_validation_audit_rows,
     summarize_relation_validation_records,
     validate_relation_candidates,
 )
@@ -84,11 +82,11 @@ from skillfabric.indexing.embeddings import (
     default_embedding_provider,
 )
 from skillfabric.indexing.neighbors import build_neighbor_scores
-from skillfabric.llm import llm_usage_context
-from skillfabric.llm_jobs import LLMJobOptions
-from skillfabric.llm_usage import load_usage_records, summarize_usage
 from skillfabric.registry.models import SkillNode
 from skillfabric.registry.scanner import scan_and_parse
+from skillfabric.runtime.jobs import LLMJobOptions
+from skillfabric.runtime.llm import llm_usage_context
+from skillfabric.runtime.usage import load_usage_records, summarize_usage
 from skillfabric.storage import Workspace, atomic_write_text
 
 
@@ -183,7 +181,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
     llm_job_options = _llm_job_options(config)
     config_digest = _config_digest(config)
     stage_timer = _StageTimer()
-    usage_log_path = workspace.root / "llm_usage.jsonl"
+    usage_log_path = workspace.reports_dir / "llm_usage.jsonl"
     workspace.ensure()
 
     with workspace.lock(), llm_usage_context(log_path=usage_log_path, metadata={"build_id": build_id}):
@@ -254,7 +252,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
         interface_records = extract_skill_interfaces(
             skills,
             extractor=interface_extractor,
-            cache_path=workspace.interfaces_dir / "interface_cache.json",
+            cache_path=workspace.cache_dir / "interface_cache.json",
             job_options=llm_job_options,
         )
         interfaces = {record.interface.skill_id: record.interface for record in interface_records}
@@ -268,7 +266,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
         canonicalization = canonicalize_contract_objects(
             interfaces,
             provider=canonicalization_provider,
-            cache_path=workspace.execution_dir / "canonicalization_cache.json",
+            cache_path=workspace.cache_dir / "canonicalization_cache.json",
             job_options=llm_job_options,
             semantic_embedder=EmbeddingProviderCanonicalEmbedder(embedding_provider),
         )
@@ -293,7 +291,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 skills,
                 interfaces=interfaces,
                 validator=execution_validator,
-                cache_path=workspace.execution_dir / "execution_validation_cache.json",
+                cache_path=workspace.cache_dir / "execution_validation_cache.json",
                 job_options=llm_job_options,
             )
             execution_graph.execution_index = execution_index_from_validation_records(execution_records)
@@ -316,7 +314,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
             relation_candidates,
             skills,
             validator=validator,
-            cache_path=workspace.graph_dir / "pair_validation_cache.json",
+            cache_path=workspace.cache_dir / "relation_validation_cache.json",
             interfaces=interfaces,
             execution_records=execution_records,
             job_options=llm_job_options,
@@ -334,7 +332,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
         communities, member_edges, _membership, community_stats = assign_final_communities(
             skills,
             provider=community_refinement_provider,
-            refinement_cache_path=workspace.graph_dir / "community_refinement_cache.json",
+            refinement_cache_path=workspace.cache_dir / "community_refinement_cache.json",
             similar_edges=similar_edges,
             relation_edges=relation_edges_for_assignment,
             interfaces=interfaces,
@@ -476,34 +474,23 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "skill_hashes": {skill.id: skill.content_hash for skill in skills},
                 "artifacts": {
                     "graph": str(workspace.graph_dir / "graph.json"),
-                    "compiled_skill_graph": str(workspace.graph_dir / "compiled_skill_graph.json"),
+                    "compiled_skill_graph": str(workspace.graph_dir / "compiled.json"),
                     "communities": str(workspace.graph_dir / "communities.json"),
                     "edge_evidence": str(workspace.graph_dir / "edge_evidence.jsonl"),
                     "health_report": str(workspace.graph_dir / "graph_health_report.md"),
-                    "skill_interfaces": str(workspace.interfaces_dir / "skill_interfaces.jsonl"),
-                    "interface_evidence": str(workspace.interfaces_dir / "interface_evidence.jsonl"),
-                    "interface_health_report": str(workspace.interfaces_dir / "interface_health_report.md"),
-                    "community_refinement_cache": str(workspace.graph_dir / "community_refinement_cache.json"),
+                    "skill_interfaces": str(workspace.graph_dir / "contracts.jsonl"),
+                    "interface_evidence": str(workspace.graph_dir / "interface_evidence.jsonl"),
+                    "interface_health_report": str(workspace.graph_dir / "interface_health_report.md"),
+                    "community_refinement_cache": str(workspace.cache_dir / "community_refinement_cache.json"),
                     "canonical_objects": str(workspace.execution_dir / "canonical_objects.jsonl"),
                     "canonical_aliases": str(workspace.execution_dir / "canonical_aliases.jsonl"),
-                    "canonicalization_evidence": str(workspace.execution_dir / "canonicalization_evidence.jsonl"),
-                    "canonicalization_cache": str(workspace.execution_dir / "canonicalization_cache.json"),
+                    "canonicalization_cache": str(workspace.cache_dir / "canonicalization_cache.json"),
                     "canonicalization_health_report": str(workspace.execution_dir / "canonicalization_health_report.md"),
                     "execution_index": str(workspace.execution_dir / "execution_index.jsonl"),
                     "canonicalization_aliases": str(workspace.execution_dir / "canonicalization_aliases.json"),
-                    "raw_artifact_nodes": str(workspace.execution_dir / "raw_artifact_nodes.jsonl"),
-                    "raw_scenario_nodes": str(workspace.execution_dir / "raw_scenario_nodes.jsonl"),
-                    "raw_skill_artifact_edges": str(workspace.execution_dir / "raw_skill_artifact_edges.jsonl"),
-                    "raw_skill_scenario_edges": str(workspace.execution_dir / "raw_skill_scenario_edges.jsonl"),
                     "execution_evidence": str(workspace.execution_dir / "execution_evidence.jsonl"),
                     "execution_health_report": str(workspace.execution_dir / "execution_health_report.md"),
-                    "execution_validation_audit": str(
-                        workspace.execution_dir / "execution_validation_audit.jsonl"
-                    ),
-                    "relation_validation_audit": str(
-                        workspace.graph_dir / "relation_validation_audit.jsonl"
-                    ),
-                    "build_metrics": str(workspace.root / "build_metrics.json"),
+                    "build_metrics": str(workspace.reports_dir / "build_summary.json"),
                 },
             },
         )
@@ -560,7 +547,7 @@ def get_skill_neighbors(
 
 def _write_registry(workspace: Workspace, skills: list[SkillNode]) -> None:
     workspace.write_jsonl(
-        workspace.registry_dir / "skills.jsonl",
+        workspace.graph_dir / "registry.jsonl",
         [skill.to_dict(include_raw_text=True) for skill in skills],
     )
     workspace.write_jsonl(
@@ -605,10 +592,6 @@ def _write_graph_artifacts(
         },
     )
     workspace.write_jsonl(workspace.graph_dir / "edge_evidence.jsonl", edge_evidence_rows)
-    workspace.write_jsonl(
-        workspace.graph_dir / "relation_validation_audit.jsonl",
-        relation_validation_audit_rows(validation_records),
-    )
     workspace.write_json(
         workspace.graph_dir / "relation_validation_summary.json",
         summarize_relation_validation_records(validation_records),
@@ -620,7 +603,7 @@ def _write_interface_artifacts(
     records: list[InterfaceExtractionRecord],
 ) -> None:
     workspace.write_jsonl(
-        workspace.interfaces_dir / "skill_interfaces.jsonl",
+        workspace.graph_dir / "contracts.jsonl",
         [record.interface.to_dict() for record in records],
     )
     workspace.write_jsonl(
@@ -646,21 +629,15 @@ def _write_canonicalization_artifacts(
         workspace.execution_dir / "canonical_aliases.jsonl",
         [item.to_dict() for item in build.assignments],
     )
-    workspace.write_jsonl(
-        workspace.execution_dir / "canonicalization_evidence.jsonl",
-        _canonicalization_evidence_rows(build),
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "canonical_candidates.jsonl",
-        [item.to_dict() for item in build.candidate_edges],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "canonical_components.jsonl",
-        [item.to_dict() for item in build.candidate_components],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "canonical_merge_audit.jsonl",
-        build.merge_audit,
+    workspace.write_json(
+        workspace.graph_dir / "canonicalization_aliases.json",
+        {
+            "schema_version": "1.0",
+            "aliases": {item.raw_key: item.canonical_id for item in build.assignments},
+            "alias_count": len(build.assignments),
+            "canonical_count": len({item.canonical_id for item in build.assignments}),
+            "alias_merge_ratio": _canonicalization_alias_merge_ratio(build),
+        },
     )
     health = analyze_canonicalization_health(build)
     atomic_write_text(
@@ -690,28 +667,8 @@ def _write_execution_artifacts(
         },
     )
     workspace.write_jsonl(
-        workspace.execution_dir / "raw_artifact_nodes.jsonl",
-        [node.to_dict() for node in build.raw_artifact_nodes],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "raw_scenario_nodes.jsonl",
-        [node.to_dict() for node in build.raw_scenario_nodes],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "raw_skill_artifact_edges.jsonl",
-        [edge.to_dict() for edge in build.raw_skill_artifact_edges],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "raw_skill_scenario_edges.jsonl",
-        [edge.to_dict() for edge in build.raw_skill_scenario_edges],
-    )
-    workspace.write_jsonl(
         workspace.execution_dir / "execution_evidence.jsonl",
         [record.to_record() for record in records],
-    )
-    workspace.write_jsonl(
-        workspace.execution_dir / "execution_validation_audit.jsonl",
-        execution_validation_audit_rows(records),
     )
     workspace.write_json(
         workspace.execution_dir / "execution_validation_summary.json",
@@ -757,7 +714,7 @@ def _write_compiled_graph_artifact(
     config_digest: str,
 ) -> None:
     workspace.write_json(
-        workspace.graph_dir / "compiled_skill_graph.json",
+        workspace.graph_dir / "compiled.json",
         {
             "schema_version": "1.0",
             "core_graph": graph.to_dict(),
@@ -801,10 +758,10 @@ def _write_build_metrics(
     config_digest: str,
     build_id: str,
 ) -> None:
-    usage_log_path = workspace.root / "llm_usage.jsonl"
+    usage_log_path = workspace.reports_dir / "llm_usage.jsonl"
     llm_usage = summarize_usage(load_usage_records(usage_log_path)).to_dict() if usage_log_path.exists() else {}
     workspace.write_json(
-        workspace.root / "build_metrics.json",
+        workspace.reports_dir / "build_summary.json",
         {
             "schema_version": "1.0",
             "build_id": build_id,

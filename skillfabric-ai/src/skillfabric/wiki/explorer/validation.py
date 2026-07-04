@@ -17,6 +17,7 @@ from skillfabric.router.route_edges import (
     _edges_from_ordered_skill_ids,
     _edges_from_workflow_hints,
     _merge_edges,
+    _reconcile_ordered_hints,
     _reconcile_route_edges,
 )
 from skillfabric.wiki.explorer.skill_package import (
@@ -71,16 +72,12 @@ def validate_skill_package(package: SkillPackage, query_wiki_root: Path) -> Skil
         if not row.get("selectable", False):
             errors.append(f"selected skill is not selectable: {skill.skill_id}")
             continue
-        if skill.scope != row.get("scope"):
-            errors.append(f"selected skill scope mismatch: {skill.skill_id}")
-            continue
         if not valid_evidence:
             errors.append(f"selected skill has no valid evidence: {skill.skill_id}")
             continue
         selected.append(
             SkillPackageSelectedSkill(
                 skill_id=skill.skill_id,
-                scope=skill.scope,
                 role=skill.role,
                 evidence=valid_evidence,
             )
@@ -183,7 +180,7 @@ def route_from_skill_package(
         hint_edges,
         warnings=warnings,
     )
-    ordered_hints = _merge_edges([*hint_edges, *required_edges])
+    ordered_hints = _reconcile_ordered_hints(hint_edges, required_edges, warnings=warnings)
     return RouteResult(
         query=query,
         trace_id=trace_id,

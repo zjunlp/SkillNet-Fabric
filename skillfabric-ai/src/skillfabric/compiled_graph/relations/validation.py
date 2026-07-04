@@ -24,9 +24,9 @@ from skillfabric.compiled_graph.relations.prompts import (
     build_compact_pair_validation_messages,
     build_pair_validation_messages,
 )
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 
 class PairValidator(Protocol):

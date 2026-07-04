@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from skillfabric.llm import read_env_file
+from skillfabric.runtime.llm import read_env_file
 
 
 def build_claude_code_sdk_env(

@@ -8,55 +8,100 @@ from pathlib import Path
 from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.loader import WikiSource
 from skillfabric.wiki.models import WikiBuildResult
-from skillfabric.wiki.pages import bullet_list, slug, wiki_link
+from skillfabric.wiki.pages import slug
 
 
-def render_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
-    """Render the content-oriented wiki index."""
+def render_index(
+    source: WikiSource,
+    page_summaries: dict[str, str],
+    *,
+    section: str = "root",
+) -> str:
+    """Render lightweight directory indexes for progressive reading."""
 
-    community_sections = []
-    for community_id, members in sorted(source.community_members.items()):
-        community = source.communities.get(community_id)
-        label = community.name if community else community_id
-        links = [
-            wiki_link("skills", skill_id, source.skills[skill_id].name)
-            for skill_id in members
-            if skill_id in source.skills
-        ]
-        community_sections.append(f"### {wiki_link('communities', community_id, label)}\n\n{bullet_list(links)}")
+    if section == "skills":
+        return _skills_index(source, page_summaries)
+    if section == "communities":
+        return _communities_index(source, page_summaries)
+    if section == "workflows":
+        return _workflows_index(source)
+    if section == "references":
+        return _references_index()
+    if section == "skill-sources":
+        return _skill_sources_index(source)
+    return _root_index(source)
 
-    pages = [
-        f"{wiki_link('skills', skill_id, skill.name)}: {page_summaries.get(skill_id, skill.description)}"
-        for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name)
-    ]
-    workflow_links = [
-        f"{wiki_link('workflows', f'{record.source_skill}__{record.target_skill}__{record.relation_type}', record.canonical_object)}: "
-        f"{record.source_skill} -> {record.target_skill}"
-        for record in source.execution_index[:20]
-    ]
-    return "\n\n".join(
+
+def _root_index(source: WikiSource) -> str:
+    return "\n".join(
         [
             "# SkillFabric Wiki",
-            "Clean skill-level wiki materialized from the compiled skill knowledge bundle.",
-            "## Counts",
-            bullet_list(
-                [
-                    f"Skills: {len(source.skills)}",
-                    f"Communities: {len(source.communities)}",
-                    f"Core links: {len(source.core_edges)}",
-                    f"Execution compatibility records: {len(source.execution_index)}",
-                    f"Raw artifacts: {source.stats.get('raw_artifact_count', len(source.raw_artifacts))}",
-                    f"Raw scenarios: {source.stats.get('raw_scenario_count', len(source.raw_scenarios))}",
-                ]
-            ),
-            "## Skills by Community",
-            "\n\n".join(community_sections) or "- None",
-            "## Workflow Recipes",
-            bullet_list(workflow_links),
-            "## Pages",
-            bullet_list(pages),
+            "",
+            "Start here. Use directory indexes for navigation, then open individual skill cards to evaluate candidates.",
+            "",
+            "## Directories",
+            f"* [Skills](skills/) - routing cards for {len(source.skills)} skills.",
+            f"* [Communities](communities/) - capability clusters for {len(source.communities)} groups.",
+            f"* [Workflows](workflows/) - validated ordering and handoff hints.",
+            "* [Skill Sources](skills/source/) - authoritative SKILL.md files for second-stage reading.",
+            "",
+            "## Reading Order",
+            "* Read [Skills](skills/) to find skill pages.",
+            "* Open skill cards to evaluate routing fit.",
+            "* Read full source under skills/source/ when the card is insufficient for final routing or execution.",
         ]
     ) + "\n"
+
+
+def _skills_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
+    del page_summaries
+    lines = ["# Skills", "", "Skill directory. Open a card to evaluate routing fit.", ""]
+    for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
+        lines.append(f"* [{skill.name}]({slug(skill_id)}.md)")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _communities_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
+    lines = ["# Communities", "", "Capability clusters that group related skills.", ""]
+    for community_id, community in sorted(source.communities.items(), key=lambda item: item[1].name):
+        summary = page_summaries.get(community_id, community.summary)
+        lines.append(f"* [{community.name}]({slug(community_id)}.md) - {_clean_summary(summary)}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _workflows_index(source: WikiSource) -> str:
+    lines = ["# Workflows", "", "Validated handoff and ordering hints between skills.", ""]
+    for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
+        entity_id = f"{record.source_skill}__{record.target_skill}__{record.relation_type}"
+        title = f"{record.source_skill} -> {record.target_skill}"
+        lines.append(f"* [{title}]({slug(entity_id)}.md) - {record.relation_type} via {record.canonical_object}.")
+    if len(lines) == 4:
+        lines.append("* None")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _references_index() -> str:
+    return "\n".join(
+        [
+            "# References",
+            "",
+            "Reference pages are supplementary material. Full skill source files live under skills/source/.",
+            "",
+            "* [Skill Sources](../skills/source/) - authoritative original SKILL.md files.",
+        ]
+    ) + "\n"
+
+
+def _skill_sources_index(source: WikiSource) -> str:
+    lines = ["# Skill Sources", "", "Full original SKILL.md files. Prefer skill cards before opening these.", ""]
+    for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
+        lines.append(f"* [{skill.name}]({slug(skill_id)}.md) - full source for {skill_id}.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _clean_summary(value: str) -> str:
+    text = " ".join(str(value).split())
+    return text[:240].rstrip() if len(text) > 240 else text
 
 
 def append_log(path: Path, *, result: WikiBuildResult, build_id: str) -> None:

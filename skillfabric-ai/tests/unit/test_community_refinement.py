@@ -13,7 +13,7 @@ from skillfabric.compiled_graph.communities.providers import LiteLLMCommunityRef
 from skillfabric.compiled_graph.communities.refinement import refine_communities
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge
-from skillfabric.llm import LLMConfig
+from skillfabric.runtime.llm import LLMConfig
 from tests.unit.relation_helpers import make_skill
 
 

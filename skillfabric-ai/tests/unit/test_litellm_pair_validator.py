@@ -13,8 +13,8 @@ from skillfabric.compiled_graph.relations.validation import (
     LiteLLMPairValidator,
     validate_relation_candidates,
 )
-from skillfabric.llm import LLMConfig
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.llm import LLMConfig
 
 
 def _skill(

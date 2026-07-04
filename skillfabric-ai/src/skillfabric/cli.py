@@ -16,27 +16,26 @@ from skillfabric.compiled_graph.builder import BuildConfig, BuildResult, build_g
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
     DisabledEmbeddingProvider,
-    SentenceTransformerEmbeddingProvider,
     default_embedding_provider,
 )
-from skillfabric.llm import (
-    DEFAULT_API_BASE,
-    DEFAULT_MODEL,
-    llm_usage_context,
-    read_env_file,
-)
-from skillfabric.metrics import merge_wiki_metrics
 from skillfabric.orchestrator.package import (
     ExecutionPackageResult,
     finalize_execution_package,
     prepare_execution_package,
 )
-from skillfabric.progress import ProgressReporter
 from skillfabric.router.bundle import build_router_bundle
 from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouteResult
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.router.traces import _new_trace_id as _new_agent_trace_id
-from skillfabric.runtime_defaults import BuildOptions, default_build_options, default_router_options
+from skillfabric.runtime.defaults import BuildOptions, default_build_options, default_router_options
+from skillfabric.runtime.llm import (
+    DEFAULT_API_BASE,
+    DEFAULT_MODEL,
+    llm_usage_context,
+    read_env_file,
+)
+from skillfabric.runtime.metrics import merge_wiki_metrics
+from skillfabric.runtime.progress import ProgressReporter
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
@@ -65,11 +64,6 @@ Embedding API:
   EMBEDDING_API_KEY   Optional override when embeddings use a different key.
   EMBEDDING_BASE_URL  Optional override when embeddings use a different endpoint.
 
-Local embeddings:
-  EMBEDDING_PROVIDER=local
-  EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
-  EMBEDDING_MODEL_PATH=/path/to/local/sentence-transformer
-
 Standard fallbacks:
   OPENAI_API_KEY
   OPENAI_BASE_URL or OPENAI_API_BASE
@@ -95,7 +89,7 @@ WORKFLOW_HELP = """Recommended SkillFabric workflow
    skillfabric build --skill-root skills --workspace .skillfabric --env-file .env
 
 3. Route a task to the relevant skills:
-   skillfabric route "extract financial KPIs from a PDF report" --workspace .skillfabric
+   skillfabric route "summarize this repository and identify release risks" --workspace .skillfabric
 
 4. Prepare and finalize a prompt-only execution package through an agent planner:
    skillfabric plan --agent-mode prepare --route-file .skillfabric/runs/<trace>/route.json --workspace .skillfabric
@@ -157,22 +151,15 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--llm-batch-size", type=int)
     build_parser.add_argument(
         "--embedding-provider",
-        choices=["api", "local", "disabled"],
+        choices=["api", "disabled"],
         help=(
             "Embedding provider for dense retrieval. Use api for OpenAI-compatible "
-            "embeddings, local for SentenceTransformers, or disabled for deterministic smoke checks."
+            "embeddings, or disabled for deterministic smoke checks."
         ),
     )
     build_parser.add_argument(
         "--embedding-model",
-        help=(
-            "Embedding model id. Defaults to env EMBEDDING_MODEL for api, or "
-            "BAAI/bge-large-en-v1.5 for local embeddings."
-        ),
-    )
-    build_parser.add_argument(
-        "--embedding-model-path",
-        help="Local SentenceTransformers model path. Implies --embedding-provider local.",
+        help="OpenAI-compatible embedding model id. Defaults to env EMBEDDING_MODEL.",
     )
     build_parser.set_defaults(handler=_build)
     command_parsers["build"] = build_parser
@@ -402,7 +389,7 @@ def _build(args: argparse.Namespace) -> None:
             wiki_result: WikiBuildResult | None = None
             if not args.skip_wiki:
                 with llm_usage_context(
-                    log_path=graph_result.workspace.root / "llm_usage.jsonl",
+                    log_path=graph_result.workspace.reports_dir / "llm_usage.jsonl",
                     metadata={"build_id": graph_result.graph.build_id},
                 ):
                     wiki_result = build_wiki(
@@ -449,7 +436,7 @@ def _safe_error_summary(exc: Exception, *, limit: int = 500) -> str:
 def _preflight_build_api_config(args: argparse.Namespace, *, options: BuildOptions) -> None:
     effective_embedding = options.embedding_provider
     effective_skip_llm = options.skip_llm_validation
-    if effective_skip_llm and effective_embedding in {"disabled", "local"}:
+    if effective_skip_llm and effective_embedding == "disabled":
         return
     payload = _init_check_payload(args.env_file)
     required = ["API_KEY", "BASE_URL"]
@@ -471,14 +458,14 @@ def _build_summary(
 ) -> dict[str, object]:
     workspace = graph_result.workspace
     artifacts: dict[str, object] = {
-        "registry": str(workspace.registry_dir / "skills.jsonl"),
-        "graph": str(workspace.graph_dir / "compiled_skill_graph.json"),
+        "registry": str(workspace.graph_dir / "registry.jsonl"),
+        "graph": str(workspace.graph_dir / "compiled.json"),
         "status": str(workspace.status_path),
     }
     if wiki_result is not None:
         artifacts["wiki"] = {
             "index": str(workspace.wiki_dir / "index.md"),
-            "health_report": str(workspace.wiki_dir / "wiki_health_report.md"),
+            "health_report": str(workspace.reports_dir / "wiki_health_report.md"),
             "pages_written": wiki_result.pages_written,
         }
     warnings = [
@@ -727,17 +714,10 @@ def _router_config_from_args(args: argparse.Namespace, *, query: str) -> RouterC
 
 def _embedding_provider_from_args(args: argparse.Namespace, *, options: BuildOptions):
     provider = options.embedding_provider
-    if not provider and args.embedding_model_path:
-        provider = "local"
     if provider == "api":
         return ApiEmbeddingProvider.from_env(
             env_path=args.env_file,
             model_id=args.embedding_model,
-        )
-    if provider == "local":
-        return SentenceTransformerEmbeddingProvider(
-            model_path=args.embedding_model_path,
-            model_id=args.embedding_model or "BAAI/bge-large-en-v1.5",
         )
     if provider == "disabled":
         return DisabledEmbeddingProvider()
@@ -746,7 +726,23 @@ def _embedding_provider_from_args(args: argparse.Namespace, *, options: BuildOpt
 
 def _build_options_from_args(args: argparse.Namespace) -> BuildOptions:
     defaults = default_build_options()
-    embedding_provider = args.embedding_provider or ("local" if args.embedding_model_path else defaults.embedding_provider)
+    env_values = read_env_file(args.env_file)
+    env_embedding_provider = (
+        args.embedding_provider
+        or os.environ.get("EMBEDDING_PROVIDER", "")
+        or env_values.get("EMBEDDING_PROVIDER")
+        or ""
+    ).strip().lower()
+    if env_embedding_provider and env_embedding_provider not in {"api", "disabled"}:
+        raise SystemExit(
+            "unsupported embedding provider: "
+            f"{env_embedding_provider}. Use 'api' or 'disabled'."
+        )
+    embedding_provider = (
+        args.embedding_provider
+        or env_embedding_provider
+        or defaults.embedding_provider
+    )
     return BuildOptions(
         skip_llm_validation=bool(args.skip_llm_validation or defaults.skip_llm_validation),
         embedding_provider=embedding_provider,

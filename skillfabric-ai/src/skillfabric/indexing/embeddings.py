@@ -11,17 +11,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from skillfabric.indexing.canonical import canonical_skill_text
-from skillfabric.llm import DEFAULT_API_BASE, read_env_file
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.llm import DEFAULT_API_BASE, read_env_file
 
 DEFAULT_EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSION = 1536
-LOCAL_SENTENCE_TRANSFORMER_MODEL_ID = "BAAI/bge-large-en-v1.5"
-LOCAL_SENTENCE_TRANSFORMER_DIMENSION = 1024
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
 DEFAULT_EMBEDDING_TEXT_CHARS = 4_000
-BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
-_MODEL_CACHE: dict[str, Any] = {}
 
 
 class EmbeddingProvider(Protocol):
@@ -128,98 +124,16 @@ class ApiEmbeddingProvider:
         return rows
 
 
-@dataclass(slots=True)
-class SentenceTransformerEmbeddingProvider:
-    """Optional SentenceTransformers provider for users who opt into local embeddings."""
-
-    model_path: str | Path | None = None
-    model_id: str = LOCAL_SENTENCE_TRANSFORMER_MODEL_ID
-    dimension: int = LOCAL_SENTENCE_TRANSFORMER_DIMENSION
-    normalize_embeddings: bool = True
-    batch_size: int = field(default_factory=lambda: _int_env("EMBEDDING_BATCH_SIZE", 4))
-    max_text_chars: int = field(default_factory=lambda: _int_env("EMBEDDING_TEXT_CHARS", DEFAULT_EMBEDDING_TEXT_CHARS))
-    provider_name: str = "sentence-transformers"
-    _resolved_model_name: str = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self._resolved_model_name = str(self.model_path or default_embedding_model_path())
-        self.model_path = self._resolved_model_name
-
-    def embed(self, text: str) -> list[float]:
-        return self.embed_many([text])[0]
-
-    def embed_query(self, query: str) -> list[float]:
-        return self.embed(f"{BGE_QUERY_INSTRUCTION}{query}")
-
-    def embed_many(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        model = self._model()
-        rows: list[list[float]] = []
-        batch_size = max(1, int(self.batch_size))
-        prepared = [_truncate_embedding_text(text, self.max_text_chars) for text in texts]
-        for start in range(0, len(prepared), batch_size):
-            vectors = model.encode(
-                prepared[start : start + batch_size],
-                batch_size=batch_size,
-                normalize_embeddings=self.normalize_embeddings,
-                show_progress_bar=False,
-            )
-            rows.extend(list(map(float, vector)) for vector in vectors)
-        if rows:
-            self.dimension = len(rows[0])
-        return rows
-
-    def _model(self) -> Any:
-        cache_key = self._resolved_model_name
-        cached = _MODEL_CACHE.get(cache_key)
-        if cached is not None:
-            return cached
-        try:
-            from sentence_transformers import SentenceTransformer
-        except Exception as exc:  # pragma: no cover - dependency smoke covers this path.
-            raise RuntimeError(
-                "sentence-transformers is not installed. Install skillfabric-ai[local-embeddings] "
-                "to use --embedding-provider local."
-            ) from exc
-        model_path = Path(self._resolved_model_name)
-        try:
-            if model_path.exists():
-                model = SentenceTransformer(str(model_path), local_files_only=True)
-            else:
-                model = SentenceTransformer(self._resolved_model_name)
-        except Exception as exc:
-            raise RuntimeError(
-                f"local embedding model is unavailable: {self._resolved_model_name}. "
-                "Set EMBEDDING_MODEL_PATH or pass --embedding-model-path."
-            ) from exc
-        _MODEL_CACHE[cache_key] = model
-        return model
-
-
-def default_embedding_model_path() -> str:
-    """Return the configured local SentenceTransformers model name or path."""
-
-    override = os.environ.get("EMBEDDING_MODEL_PATH")
-    if override:
-        return override
-    return LOCAL_SENTENCE_TRANSFORMER_MODEL_ID
-
-
 def default_embedding_provider(*, env_path: str | Path | None = ".env") -> EmbeddingProvider:
     """Return the default embedding provider for public SkillFabric builds."""
 
     values = read_env_file(env_path)
     provider = _first_value(values, "EMBEDDING_PROVIDER", default="api").strip().lower()
-    if provider in {"", "api", "litellm", "openai"}:
+    if provider in {"", "api"}:
         return ApiEmbeddingProvider.from_env(env_path=env_path)
-    if provider in {"local", "sentence-transformers", "sentence_transformers"}:
-        return SentenceTransformerEmbeddingProvider(
-            model_path=_first_value(values, "EMBEDDING_MODEL_PATH", default="") or None,
-        )
-    if provider in {"disabled", "none", "off"}:
+    if provider == "disabled":
         return DisabledEmbeddingProvider()
-    raise ValueError(f"unsupported embedding provider: {provider}")
+    raise ValueError(f"unsupported embedding provider: {provider}. Use 'api' or 'disabled'.")
 
 
 @dataclass(slots=True)
@@ -248,12 +162,6 @@ def embedding_provider_for_model(
 
     if model_id in {"", "disabled"}:
         return DisabledEmbeddingProvider()
-    if model_id == LOCAL_SENTENCE_TRANSFORMER_MODEL_ID:
-        values = read_env_file(env_path)
-        return SentenceTransformerEmbeddingProvider(
-            model_path=_first_value(values, "EMBEDDING_MODEL_PATH", default="") or None,
-            dimension=dimension or LOCAL_SENTENCE_TRANSFORMER_DIMENSION,
-        )
     return ApiEmbeddingProvider.from_env(
         env_path=env_path,
         model_id=model_id,

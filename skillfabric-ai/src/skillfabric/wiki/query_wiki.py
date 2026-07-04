@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.models import Edge
-from skillfabric.router.assembly import _load_graph
+from skillfabric.router.assembly import _load_graph, _load_registry_skills
 from skillfabric.router.models import RouterBundle
 from skillfabric.router.sidecars import load_execution_index
 from skillfabric.storage import Workspace, atomic_write_text
@@ -18,8 +18,8 @@ from skillfabric.wiki.explorer.prompting import render_query_wiki_explorer_md
 from skillfabric.wiki.explorer.search_index import _split_frontmatter, _stable_id
 from skillfabric.wiki.pages import slug
 
-SCOPE_ORDER = {
-    "core": 0,
+ORIGIN_ORDER = {
+    "router_bundle": 0,
     "workflow_bridge": 1,
     "graph_frontier": 2,
 }
@@ -58,36 +58,24 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
         raise KeyError(f"skill not found in query_wiki manifest: {skill_id}")
     if not row.get("selectable", True):
         raise ValueError(f"skill is not selectable in query_wiki: {skill_id}")
-    page_path = str(row.get("page_path", ""))
+    card_path = str(row.get("card_path", ""))
+    source_path = str(row.get("source_path", ""))
     lines = [
         f"# {skill_id}",
         "",
-        "## Card",
-        f"- scope: {row.get('scope', '')}",
+        "## Skill Card",
+        f"- origin: {row.get('origin', '')}",
         f"- route_score: {float(row.get('score', 0.0) or 0.0):.6f}",
         f"- sources: {_format_card_value(row.get('sources')) or 'none'}",
-        f"- page: {page_path}",
+        f"- card: {card_path}",
+        f"- source: {source_path}",
     ]
     introduced_by = _format_introduced_by(row.get("introduced_by", []))
     if introduced_by:
         lines.append(f"- introduced_by: {introduced_by}")
-    card = row.get("card", {}) if isinstance(row.get("card", {}), dict) else {}
-    for label, key in (
-        ("summary", "summary"),
-        ("use_when", "when_to_use"),
-        ("requires", "requires"),
-        ("produces", "produces"),
-        ("uses_tools", "uses_tools"),
-        ("related", "related"),
-        ("workflow_hints", "workflow_hints"),
-        ("failure_modes", "failure_modes"),
-    ):
-        value = _format_card_value(card.get(key))
-        if value:
-            lines.append(f"- {label}: {value}")
-    header = _skill_page_header(root, page_path)
+    header = _skill_page_header(root, card_path)
     if header:
-        lines.extend(["", "## Generated Header", "", header.rstrip()])
+        lines.extend(["", header.rstrip()])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -109,9 +97,8 @@ def materialize_query_wiki(
     if query_root.exists():
         shutil.rmtree(query_root)
     for path in (
-        query_root / "skills" / "core",
-        query_root / "skills" / "workflow_bridge",
-        query_root / "skills" / "graph_frontier",
+        query_root / "skills",
+        query_root / "skills" / "source",
         query_root / "communities",
         query_root / "workflows",
         query_root / "edges",
@@ -119,6 +106,7 @@ def materialize_query_wiki(
         path.mkdir(parents=True, exist_ok=True)
 
     graph = _load_graph(workspace)
+    registry_skills = _load_registry_skills(workspace)
     execution_index = load_execution_index(workspace)
     core_ids = [item.skill_id for item in bundle.selected_skills]
     core_set = set(core_ids)
@@ -158,48 +146,63 @@ def materialize_query_wiki(
         for edge in frontier_edges
     } - core_set - bridge_set
 
-    scopes: dict[str, str] = {}
+    origins: dict[str, str] = {}
     for skill_id in core_ids:
-        scopes[skill_id] = "core"
+        origins[skill_id] = "router_bundle"
     for skill_id in sorted(bridge_set):
-        scopes.setdefault(skill_id, "workflow_bridge")
+        origins.setdefault(skill_id, "workflow_bridge")
     for skill_id in sorted(frontier_set):
-        scopes.setdefault(skill_id, "graph_frontier")
-    included_skill_ids = set(scopes)
+        origins.setdefault(skill_id, "graph_frontier")
+    included_skill_ids = set(origins)
     all_skill_ids = _workspace_skill_ids(workspace) | included_skill_ids
     external_slug_pattern = _external_slug_pattern(all_skill_ids - included_skill_ids)
 
     copied_pages: list[str] = []
     missing_pages: list[dict[str, str]] = []
     skills_manifest = []
-    for skill_id, scope in sorted(scopes.items(), key=_scope_sort_key):
+    for skill_id, origin in sorted(origins.items(), key=_origin_sort_key):
         source = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
-        target = query_root / "skills" / scope / f"{slug(skill_id)}.md"
+        target = query_root / "skills" / f"{slug(skill_id)}.md"
+        description = ""
         if _copy_sanitized_page(source, target, included_skill_ids, external_slug_pattern):
             copied_pages.append(_rel(query_root, target))
-            page_path = _rel(query_root, target)
+            card_path = _rel(query_root, target)
+            description = (
+                registry_skills.get(skill_id).description
+                if skill_id in registry_skills
+                else _page_description(target)
+            )
+            source_target = query_root / "skills" / "source" / target.name
+            source_path = (
+                _rel(query_root, source_target)
+                if _copy_page(
+                    workspace.wiki_skill_sources_dir / target.name,
+                    source_target,
+                )
+                else ""
+            )
             selectable = True
-            card = _skill_card_from_page(target)
         else:
             missing_pages.append({"skill_id": skill_id, "source_path": str(source)})
-            page_path = ""
+            card_path = ""
+            source_path = ""
             selectable = False
-            card = {}
         skills_manifest.append(
             {
                 "skill_id": skill_id,
-                "scope": scope,
+                "origin": origin,
                 "selectable": selectable,
                 "score": score_lookup.get(skill_id, 0.0),
+                "description": description,
                 "sources": _manifest_sources(
                     skill_id,
-                    scope=scope,
+                    origin=origin,
                     source_lookup=source_lookup,
                     bridge_records=bridge_records,
                     frontier_edges=frontier_edges,
                 ),
-                "page_path": page_path,
-                "card": card,
+                "card_path": card_path,
+                "source_path": source_path,
                 "introduced_by": _introduced_by(skill_id, core_set, included_skill_ids, bridge_records, frontier_edges),
             }
         )
@@ -266,6 +269,7 @@ def materialize_query_wiki(
     )
     atomic_write_text(query_root / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     atomic_write_text(query_root / "index.md", _render_index(manifest))
+    atomic_write_text(query_root / "skills" / "index.md", _render_skills_index(manifest))
     atomic_write_text(query_root / "EXPLORER.md", _render_explorer_instructions())
     _write_page_index(query_root)
     return QueryWikiBuildResult(root=query_root, manifest=manifest)
@@ -406,26 +410,26 @@ def _introduced_by(
 def _manifest_sources(
     skill_id: str,
     *,
-    scope: str,
+    origin: str,
     source_lookup: dict[str, list[str]],
     bridge_records: list[Any],
     frontier_edges: list[Edge],
 ) -> list[str]:
     sources = list(source_lookup.get(skill_id, []))
-    if scope == "workflow_bridge":
+    if origin == "workflow_bridge":
         for record in bridge_records:
             if skill_id in {record.source_skill, record.target_skill}:
                 sources.append(f"query_wiki:workflow_bridge:{record.relation_type}")
-    if scope == "graph_frontier":
+    if origin == "graph_frontier":
         for edge in frontier_edges:
             if skill_id in {edge.source, edge.target}:
                 sources.append(f"query_wiki:graph_frontier:{edge.type}")
     return sorted(set(sources))
 
 
-def _scope_sort_key(item: tuple[str, str]) -> tuple[int, str, str]:
-    skill_id, scope = item
-    return (SCOPE_ORDER.get(scope, len(SCOPE_ORDER)), scope, skill_id)
+def _origin_sort_key(item: tuple[str, str]) -> tuple[int, str, str]:
+    skill_id, origin = item
+    return (ORIGIN_ORDER.get(origin, len(ORIGIN_ORDER)), origin, skill_id)
 
 
 def _copy_sanitized_page(
@@ -442,10 +446,22 @@ def _copy_sanitized_page(
     return True
 
 
+def _copy_page(source: Path, target: Path) -> bool:
+    if not source.exists():
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(target, source.read_text(encoding="utf-8"))
+    return True
+
+
 def _workspace_skill_ids(workspace: Workspace) -> set[str]:
     if not workspace.wiki_skills_dir.exists():
         return set()
-    return {f"skill:{path.stem}" for path in workspace.wiki_skills_dir.glob("*.md") if path.is_file()}
+    return {
+        f"skill:{path.stem}"
+        for path in workspace.wiki_skills_dir.glob("*.md")
+        if path.is_file() and path.name != "index.md"
+    }
 
 
 def _external_slug_pattern(external_skill_ids: set[str]) -> re.Pattern[str] | None:
@@ -544,7 +560,7 @@ def _explorer_manifest(debug_manifest: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in debug_manifest.items()
-        if key not in {"source_wiki", "excluded_workflows"}
+        if key not in {"source_wiki", "query_wiki", "excluded_workflows"}
     }
 
 
@@ -552,19 +568,15 @@ def _write_page_index(query_root: Path) -> None:
     rows: list[dict[str, Any]] = []
     for path in sorted(query_root.rglob("*.md")):
         rel = path.relative_to(query_root).as_posix()
+        if rel.startswith("skills/source/"):
+            continue
         if rel == "EXPLORER.md":
             page_type = "instructions"
             entity_id = "explorer"
         else:
             text = path.read_text(encoding="utf-8")
             metadata, body = _split_frontmatter(text)
-            page_type = str(metadata.get("type", rel.split("/", 1)[0].rstrip("s")))
-            entity_id = (
-                str(metadata.get("skill_id", ""))
-                or str(metadata.get("community_id", ""))
-                or str(metadata.get("workflow_id", ""))
-                or path.stem
-            )
+            page_type, entity_id = _page_identity(rel, metadata)
             title = _title(body) or path.stem
             rows.append(
                 {
@@ -590,53 +602,49 @@ def _write_page_index(query_root: Path) -> None:
     _write_jsonl(query_root / "page_index.jsonl", rows)
 
 
+def _page_identity(rel: str, metadata: dict[str, Any]) -> tuple[str, str]:
+    if rel == "index.md":
+        return "index", "index"
+    if rel.endswith("/index.md"):
+        return "index", rel.removesuffix("/index.md").replace("/", "-") + "-index"
+    if rel.startswith("skills/"):
+        return "skill", str(metadata.get("skill_id", f"skill:{Path(rel).stem}"))
+    if rel.startswith("communities/"):
+        return "community", str(metadata.get("community_id", Path(rel).stem))
+    if rel.startswith("workflows/"):
+        return "workflow", str(metadata.get("workflow_id", Path(rel).stem))
+    return str(metadata.get("type", "page")).lower(), Path(rel).stem
+
+
 def _render_index(manifest: dict[str, Any]) -> str:
     lines = [
         "# Query Wiki",
         "",
         "Read this file first. It is the compact routing map for the current task. "
-        "Open skill pages only for candidates that remain plausible after these cards.",
+        "Use it to locate candidate skill cards, then open cards for routing decisions, "
+        "then open full source only when the card is insufficient.",
         "",
         f"Query: {manifest['query']}",
         "",
-        "## Candidate Skill Cards",
+        "## Skill Cards",
     ]
     for skill in manifest["skills"]:
         if not skill.get("selectable", True):
             continue
-        card = skill.get("card", {}) if isinstance(skill.get("card", {}), dict) else {}
         lines.extend(
             [
-                f"### {skill['skill_id']}",
-                f"- scope: {skill['scope']}",
-                f"- route_score: {float(skill.get('score', 0.0)):.6f}",
-                f"- sources: {_format_card_value(skill.get('sources')) or 'none'}",
-                f"- page: {skill['page_path']}",
+                f"- {skill['skill_id']} | score={float(skill.get('score', 0.0)):.6f} "
+                f"| card: {skill.get('card_path', '')} | source: {skill.get('source_path', '')}",
             ]
         )
-        introduced_by = _format_introduced_by(skill.get("introduced_by", []))
-        if introduced_by:
-            lines.append(f"- introduced_by: {introduced_by}")
-        for label, key in (
-            ("summary", "summary"),
-            ("use_when", "when_to_use"),
-            ("requires", "requires"),
-            ("produces", "produces"),
-            ("uses_tools", "uses_tools"),
-            ("related", "related"),
-            ("workflow_hints", "workflow_hints"),
-            ("failure_modes", "failure_modes"),
-        ):
-            value = _format_card_value(card.get(key))
-            if value:
-                lines.append(f"- {label}: {value}")
-        lines.append("")
+    lines.append("")
     lines.append("## Skills")
     for skill in manifest["skills"]:
         status = "selectable" if skill.get("selectable", True) else "missing"
         lines.append(
-            f"- {skill['skill_id']} | {skill['scope']} | score={float(skill.get('score', 0.0)):.6f} "
-            f"| sources={_format_card_value(skill.get('sources')) or 'none'} | {status} | {skill['page_path']}"
+            f"- {skill['skill_id']} | score={float(skill.get('score', 0.0)):.6f} "
+            f"| sources={_format_card_value(skill.get('sources')) or 'none'} | {status} "
+            f"| card={skill.get('card_path', '')} | source={skill.get('source_path', '')}"
         )
     lines.append("")
     lines.append("## Communities")
@@ -651,6 +659,26 @@ def _render_index(manifest: dict[str, Any]) -> str:
     lines.append("- bridge_edges: edges/bridge_edges.jsonl")
     lines.append("- frontier_edges: edges/frontier_edges.jsonl")
     return "\n".join(lines) + "\n"
+
+
+def _render_skills_index(manifest: dict[str, Any]) -> str:
+    lines = [
+        "# Skills",
+        "",
+        "Skill directory. Open a card to evaluate routing fit.",
+        "",
+    ]
+    for skill in manifest["skills"]:
+        if not skill.get("selectable", True):
+            continue
+        lines.append(f"- [{skill['skill_id']}]({_relative_link_from_skills_index(skill.get('card_path', ''))})")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _relative_link_from_skills_index(path: Any) -> str:
+    value = str(path or "")
+    prefix = "skills/"
+    return value.removeprefix(prefix) if value.startswith(prefix) else value
 
 
 def _render_explorer_instructions() -> str:
@@ -676,27 +704,10 @@ def _summary(body: str) -> str:
     return ""
 
 
-def _skill_card_from_page(page_path: Path) -> dict[str, Any]:
+def _page_description(page_path: Path) -> str:
     text = page_path.read_text(encoding="utf-8")
-    _metadata, body = _split_frontmatter(text)
-    generated = body.split("\n## Source", 1)[0]
-    routing_fit = _section(generated, "Routing Fit")
-    capability = _section(generated, "Capability Contract")
-    return {
-        "summary": _truncate(_first_content_line(_section(generated, "Routing Summary")), 320),
-        "when_to_use": _truncate(
-            _field_value(routing_fit, "When to route here")
-            or _field_value(capability, "When To Use")
-            or _first_content_line(_section(generated, "When To Use")),
-            360,
-        ),
-        "requires": _split_field(_field_value(routing_fit, "Requires") or _field_value(capability, "Requires")),
-        "produces": _split_field(_field_value(routing_fit, "Produces") or _field_value(capability, "Produces")),
-        "uses_tools": _split_field(_field_value(capability, "Uses tools")),
-        "related": _section_items(_section(generated, "Works With"), limit=4),
-        "workflow_hints": _section_items(_section(generated, "Workflow Hints"), limit=3),
-        "failure_modes": _section_items(_section(generated, "Failure Modes"), limit=4),
-    }
+    metadata, _body = _split_frontmatter(text)
+    return str(metadata.get("description", "")).strip()
 
 
 def _skill_page_header(query_root: Path, page_path: str) -> str:
@@ -711,8 +722,7 @@ def _skill_page_header(query_root: Path, page_path: str) -> str:
         return ""
     text = candidate.read_text(encoding="utf-8")
     _metadata, body = _split_frontmatter(text)
-    generated = body.split("\n## Source", 1)[0].strip()
-    return generated
+    return body.strip()
 
 
 def _section(body: str, heading: str) -> str:

@@ -20,8 +20,8 @@ from skillfabric.compiled_graph.execution.validation import (
     validate_execution_flow_candidates,
 )
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
-from skillfabric.llm import LLMConfig
-from skillfabric.llm_jobs import LLMJobOptions
+from skillfabric.runtime.jobs import LLMJobOptions
+from skillfabric.runtime.llm import LLMConfig
 from tests.unit.relation_helpers import make_skill
 
 

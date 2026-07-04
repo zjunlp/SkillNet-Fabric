@@ -10,8 +10,8 @@ from typing import Any, Protocol
 
 from skillfabric.compiled_graph.interface.fallback import _fallback_interface
 from skillfabric.compiled_graph.interface.prompts import build_interface_extraction_messages
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 
 class InterfaceSchemaError(ValueError):

@@ -27,9 +27,9 @@ from skillfabric.compiled_graph.execution.prompts import (
     build_execution_validation_messages,
 )
 from skillfabric.compiled_graph.interface.models import SkillInterface
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.registry.models import SkillNode
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 
 class ExecutionFlowValidator(Protocol):

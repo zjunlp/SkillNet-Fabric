@@ -16,7 +16,7 @@ continues into final task execution.
 
 Treat `$ARGUMENTS` as task text plus optional workspace/build flags.
 
-- The task is all non-option text in `$ARGUMENTS`.
+- The task is all non-option text in `$ARGUMENTS`; preserve the user's wording.
 - Use `.skillfabric` when `--workspace` is omitted.
 - Use `.env` when `--env-file` is omitted.
 - `--skill-root` is optional; it is required only when the workspace has not
@@ -51,12 +51,40 @@ Preparation:
 5. If configuration is incomplete, stop and give
    `skillfabric init --env-file $env_file`.
 6. Run `skillfabric build` when needed.
-7. Run `skillfabric route --agent-mode prepare`.
-8. Launch `skillfabric-query-wiki-explorer`.
-9. Run `skillfabric route --agent-mode finalize --skill-package-file -`.
-10. Run `skillfabric plan --agent-mode prepare --route-file $final_route_json`.
-11. Launch `skillfabric-workflow-planner` as the prompt-only planner.
-12. Run `skillfabric plan --agent-mode finalize --package-root $package_root --planner-output-file -`.
+7. Run
+   `skillfabric route "$task" --workspace "$workspace" --env-file "$env_file" --agent-mode prepare`
+   with forwarded route flags.
+8. Read the returned JSON fields: `trace_id`, `query_wiki_root`,
+   `agent_route_request`, and `skill_package_file`.
+9. In the main Claude Code session, read `agent_route_request.json`,
+   `query_wiki/EXPLORER.md`, and `query_wiki/index.md`; then read only the
+   query-wiki skill, community, workflow, or edge pages needed to select an
+   evidence-backed SkillPackage. Do not inspect the active project workspace
+   during this route-selection step.
+10. Produce a single raw SkillPackage JSON object matching
+   `agent_route_request.json.expected_schema`; do not wrap it in Markdown fences,
+   comments, or explanatory text. Pass that JSON to
+   `skillfabric route "$task" --workspace "$workspace" --env-file "$env_file" --trace-id "$trace_id" --agent-mode finalize --skill-package-file -`.
+11. Read the finalized route JSON and use its `trace_dir/route.json` as
+    `$route_json`.
+12. Run
+    `skillfabric plan --workspace "$workspace" --agent-mode prepare --route-file "$route_json"`.
+13. Read the returned JSON fields: `root`, `planner_request_path`,
+    `planner_prompt_path`, and `planner_output_path`.
+14. In the main Claude Code session, read `planner_request.json`, `PLANNER.md`,
+    `route.json`, `evidence/required_edges.json`,
+    `evidence/selected_skill_evidence.json`, `evidence/route_summary.json`,
+    and only the selected skill pages needed to understand capability boundaries.
+15. Optionally perform bounded active-workspace inspection when it improves task
+    execution: read non-secret README/project metadata, file maps, git status,
+    relevant source or tests, and obvious verification commands. Do not read
+    `.env`, tokens, credentials, large caches, historical run directories, or
+    unrelated generated artifacts.
+16. Produce a single raw planner JSON object matching
+    `planner_request.json.expected_schema`; do not wrap it in Markdown fences,
+    comments, or explanatory text. Pass that JSON to
+    `skillfabric plan --workspace "$workspace" --agent-mode finalize --package-root "$package_root" --planner-output-file -`.
+17. Confirm that the finalized payload points to an existing `execution_prompt.md`.
 
 Execution:
 
@@ -71,6 +99,8 @@ Execution:
 - If preparation fails, do not start execution.
 - If build, route, or plan finalization fails, report CLI validation error and
   relevant workspace, trace, or package path.
+- If `execution_prompt.md` is not created, report preparation as failed and do
+  not start task execution.
 - If a selected native skill is unavailable, report it as a coverage gap and
   continue only when completion is still safe.
 - If verification cannot run, explain why and name the unverified risk.

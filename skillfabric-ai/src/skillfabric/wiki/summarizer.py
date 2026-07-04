@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 from skillfabric.wiki.models import WikiBuildConfig, WikiSummaryRecord
 
 WIKI_SUMMARY_CACHE_ID = "skillcontract_summary_routing_guidance"
@@ -127,7 +127,7 @@ class WikiSummarizer:
         provider: SummaryProvider | None = None,
     ) -> None:
         self.config = config
-        self.cache_path = Path(config.workspace) / "wiki" / "wiki_summary_cache.json"
+        self.cache_path = Path(config.workspace) / "cache" / "wiki_summary_cache.json"
         self.cache = _load_cache(self.cache_path)
         self.provider = provider
         self._provider_load_failed = False

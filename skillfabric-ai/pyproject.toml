@@ -34,9 +34,6 @@ dependencies = [
 claude = [
   "claude-agent-sdk>=0.1.50",
 ]
-local-embeddings = [
-  "sentence-transformers>=3.0",
-]
 dev = [
   "build>=1.2",
   "pytest>=8.0",
@@ -44,7 +41,6 @@ dev = [
 ]
 all = [
   "claude-agent-sdk>=0.1.50",
-  "sentence-transformers>=3.0",
   "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.8",

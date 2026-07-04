@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.router.models import RouterBundle
-from skillfabric.sdk_env import build_claude_code_sdk_env
+from skillfabric.runtime.sdk_env import build_claude_code_sdk_env
 from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.explorer.prompting import (
     DEFAULT_TOOL_BUDGET,
@@ -495,11 +495,6 @@ def _skill_package_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "properties": {
                         "skill_id": {"type": "string", "description": "Manifest skill_id selected from query_wiki."},
-                        "scope": {
-                            "type": "string",
-                            "enum": ["core", "workflow_bridge", "graph_frontier"],
-                            "description": "Scope from manifest.json.",
-                        },
                         "role": {"type": "string", "description": "Short evidence-grounded reason for selecting this skill."},
                         "evidence": {
                             "type": "array",
@@ -515,7 +510,7 @@ def _skill_package_schema() -> dict[str, Any]:
                             },
                         },
                     },
-                    "required": ["skill_id", "scope", "role", "evidence"],
+                    "required": ["skill_id", "role", "evidence"],
                 },
             },
             "required_edges": {
@@ -669,19 +664,11 @@ def _json_object_from_text(text: str) -> dict[str, Any] | None:
 
 def _package_from_payload(payload: dict[str, Any], query_wiki_root: Path) -> SkillPackage:
     normalized = dict(payload)
-    manifest = _load_manifest(query_wiki_root)
-    scope_by_skill = {
-        str(item.get("skill_id", "")): str(item.get("scope", ""))
-        for item in manifest.get("skills", [])
-        if isinstance(item, dict)
-    }
     selected = []
     for raw in normalized.get("selected_skills", []):
         if not isinstance(raw, dict):
             continue
         row = dict(raw)
-        skill_id = str(row.get("skill_id", ""))
-        row.setdefault("scope", scope_by_skill.get(skill_id, ""))
         if not row.get("role"):
             row["role"] = _first_text(row, "selection_reason", "why_selected", "why", "reason")
         evidence = row.get("evidence", row.get("evidence_paths", []))
@@ -802,14 +789,6 @@ def _first_text(payload: dict[str, Any], *keys: str) -> str:
         if value:
             return str(value)
     return ""
-
-
-def _load_manifest(query_wiki_root: Path) -> dict[str, Any]:
-    manifest_path = query_wiki_root / "manifest.json"
-    if not manifest_path.exists():
-        return {}
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else {}
 
 
 def _write_event(cc_dir: Path, event: dict[str, Any]) -> None:

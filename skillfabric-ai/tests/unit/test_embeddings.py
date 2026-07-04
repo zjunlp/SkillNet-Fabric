@@ -9,10 +9,9 @@ from unittest.mock import patch
 
 from skillfabric.indexing.embeddings import (
     DEFAULT_EMBEDDING_MODEL_ID,
-    LOCAL_SENTENCE_TRANSFORMER_MODEL_ID,
     ApiEmbeddingProvider,
-    SentenceTransformerEmbeddingProvider,
     build_embedding_store,
+    default_embedding_provider,
     embedding_provider_for_model,
 )
 from skillfabric.registry.models import SkillNode
@@ -50,17 +49,6 @@ class _QueryProvider:
     def embed_query(self, text: str) -> list[float]:
         self.query_calls.append(text)
         return [1.0, 0.0]
-
-
-class _RecordingSentenceTransformer:
-    def __init__(self) -> None:
-        self.text_batches: list[list[str]] = []
-        self.kwargs: list[dict[str, object]] = []
-
-    def encode(self, texts: list[str], **kwargs: object) -> list[list[float]]:
-        self.text_batches.append(list(texts))
-        self.kwargs.append(dict(kwargs))
-        return [[1.0, 0.0] for _text in texts]
 
 
 class EmbeddingTests(unittest.TestCase):
@@ -143,13 +131,6 @@ class EmbeddingTests(unittest.TestCase):
         self.assertIsInstance(provider, ApiEmbeddingProvider)
         self.assertEqual(provider.dimension, 1536)
 
-    def test_local_sentence_transformer_provider_uses_configured_model_path(self) -> None:
-        provider = SentenceTransformerEmbeddingProvider()
-
-        self.assertEqual(provider.model_id, LOCAL_SENTENCE_TRANSFORMER_MODEL_ID)
-        self.assertIn("bge-large-en-v1.5", str(provider.model_path))
-        self.assertEqual(provider.dimension, 1024)
-
     def test_embedding_provider_for_model_accepts_api_model_ids(self) -> None:
         provider = embedding_provider_for_model("custom/openai-compatible-embedding", dimension=32)
 
@@ -157,48 +138,22 @@ class EmbeddingTests(unittest.TestCase):
         self.assertEqual(provider.model_id, "custom/openai-compatible-embedding")
         self.assertEqual(provider.dimension, 32)
 
-    def test_embedding_provider_for_model_uses_local_model_path_from_env_file(self) -> None:
+    def test_default_embedding_provider_rejects_unknown_provider(self) -> None:
         with TemporaryDirectory() as tmp:
-            model_path = Path(tmp) / "models" / "BAAI" / "bge-large-en-v1.5"
             env_path = Path(tmp) / ".env"
-            env_path.write_text(f"EMBEDDING_MODEL_PATH={model_path}\n", encoding="utf-8")
+            env_path.write_text("EMBEDDING_PROVIDER=custom-provider\n", encoding="utf-8")
 
-            provider = embedding_provider_for_model(
-                LOCAL_SENTENCE_TRANSFORMER_MODEL_ID,
-                dimension=1024,
-                env_path=env_path,
-            )
+            with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
+                default_embedding_provider(env_path=env_path)
 
-        self.assertIsInstance(provider, SentenceTransformerEmbeddingProvider)
-        self.assertEqual(Path(provider.model_path), model_path)
-        self.assertEqual(provider.dimension, 1024)
+    def test_default_embedding_provider_rejects_unknown_provider_from_shell(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("", encoding="utf-8")
 
-    def test_bge_provider_uses_query_instruction_for_retrieval_queries(self) -> None:
-        provider = SentenceTransformerEmbeddingProvider()
-        recorder = _RecordingSentenceTransformer()
-
-        with patch.object(SentenceTransformerEmbeddingProvider, "_model", return_value=recorder):
-            provider.embed_query("find pdf table parser")
-            provider.embed("pdf table parser skill")
-
-        self.assertEqual(
-            recorder.text_batches[0],
-            ["Represent this sentence for searching relevant passages: find pdf table parser"],
-        )
-        self.assertEqual(recorder.text_batches[1], ["pdf table parser skill"])
-
-    def test_bge_provider_batches_and_truncates_long_embedding_texts(self) -> None:
-        provider = SentenceTransformerEmbeddingProvider(batch_size=2, max_text_chars=12)
-        recorder = _RecordingSentenceTransformer()
-
-        with patch.object(SentenceTransformerEmbeddingProvider, "_model", return_value=recorder):
-            vectors = provider.embed_many(["alpha" * 10, "beta", "gamma"])
-
-        self.assertEqual(len(vectors), 3)
-        self.assertEqual([len(batch) for batch in recorder.text_batches], [2, 1])
-        self.assertEqual(recorder.kwargs[0]["batch_size"], 2)
-        self.assertIn("...", recorder.text_batches[0][0])
-        self.assertLessEqual(len(recorder.text_batches[0][0]), 20)
+            with patch.dict(os.environ, {"EMBEDDING_PROVIDER": "custom-provider"}, clear=False):
+                with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
+                    default_embedding_provider(env_path=env_path)
 
     def test_build_embedding_store_batches_sentence_vectors_and_records_model(self) -> None:
         with TemporaryDirectory() as tmp:

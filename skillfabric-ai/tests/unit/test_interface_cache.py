@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.compiled_graph.interface.extraction import extract_skill_interfaces
-from skillfabric.llm_jobs import LLMJobOptions
+from skillfabric.runtime.jobs import LLMJobOptions
 from tests.unit.relation_helpers import make_skill
 
 

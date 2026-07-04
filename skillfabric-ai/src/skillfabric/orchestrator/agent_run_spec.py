@@ -396,8 +396,8 @@ def _execution_strategy_from_route(
             "Keep dependent skill work serial according to required_order."
         ),
         delegation_policy=(
-            "delegate is optional. Use a subagent only for a bounded, independent exploration, verification, "
-            "or disjoint implementation task that does not block the immediate critical path."
+            "Run in the main Claude Code session by default. Keep any optional delegation out of the critical path "
+            "and preserve a single final verification step."
         ),
         verification_policy=(
             "Do not claim completion without fresh verification evidence from tests, builds, artifact inspection, "

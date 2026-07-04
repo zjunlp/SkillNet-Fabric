@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from skillfabric.sdk_env import build_claude_code_sdk_env
+from skillfabric.runtime.sdk_env import build_claude_code_sdk_env
 
 SDK_ENV_KEYS = (
     "API_KEY",

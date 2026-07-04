@@ -26,14 +26,12 @@ class SkillPackageSelectedSkill:
     """One selected skill from the query wiki."""
 
     skill_id: str
-    scope: str
     role: str
     evidence: list[SkillPackageEvidence] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "skill_id": self.skill_id,
-            "scope": self.scope,
             "role": self.role,
             "evidence": [item.to_dict() for item in self.evidence],
         }
@@ -42,7 +40,6 @@ class SkillPackageSelectedSkill:
     def from_dict(cls, payload: dict[str, Any]) -> SkillPackageSelectedSkill:
         return cls(
             skill_id=str(payload.get("skill_id", "")),
-            scope=str(payload.get("scope", "")),
             role=str(payload.get("role", payload.get("reason", ""))),
             evidence=[
                 SkillPackageEvidence.from_dict(item)
@@ -213,7 +210,6 @@ def skill_package_json_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "properties": {
                         "skill_id": {"type": "string"},
-                        "scope": {"type": "string", "enum": ["core", "workflow_bridge", "graph_frontier"]},
                         "role": {"type": "string"},
                         "evidence": {
                             "type": "array",
@@ -228,7 +224,7 @@ def skill_package_json_schema() -> dict[str, Any]:
                             },
                         },
                     },
-                    "required": ["skill_id", "scope", "role", "evidence"],
+                    "required": ["skill_id", "role", "evidence"],
                 },
             },
             "required_edges": {

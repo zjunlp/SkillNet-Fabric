@@ -15,10 +15,9 @@ from skillfabric.wiki.renderers import (
     _community_page,
     _content_hash,
     _debug_pages,
-    _deliverables_page,
     _first_paragraph,
-    _overview_page,
     _skill_page,
+    _skill_source_page,
     _skill_summary_payload,
     _workflow_page,
 )
@@ -34,23 +33,8 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     source = load_wiki_source(workspace)
     summarizer = WikiSummarizer(config)
     pages = _entity_pages(source, config, summarizer, workspace)
-    page_summaries = {
-        page.entity_id: _first_paragraph(page.text)
-        for page in pages
-    }
-    pages.extend(
-        [
-            _overview_page(source, workspace),
-            _deliverables_page(source, workspace),
-            WikiPage(
-                path=workspace.wiki_dir / "index.md",
-                page_type="index",
-                entity_id="index",
-                title="SkillFabric Wiki",
-                text=render_index(source, page_summaries),
-            ),
-        ]
-    )
+    page_summaries = _directory_page_summaries(pages)
+    pages.extend(_directory_pages(source, page_summaries, workspace))
     for page in pages:
         atomic_write_text(page.path, page.text)
     summarizer.save()
@@ -65,7 +49,7 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
         workspace=workspace.root,
     )
     build_wiki_page_index(workspace)
-    append_log(workspace.wiki_dir / "log.md", result=result, build_id=source.build_id)
+    append_log(workspace.reports_dir / "wiki_log.md", result=result, build_id=source.build_id)
     return result
 
 
@@ -79,6 +63,7 @@ def _entity_pages(
     summaries = _summary_records(source, summarizer)
     for _skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         pages.append(_skill_page(source, skill, config, summaries, workspace))
+        pages.append(_skill_source_page(skill, workspace))
     for community_id, _community in sorted(source.communities.items(), key=lambda item: item[1].name):
         pages.append(_community_page(source, community_id, config, summaries, workspace))
     for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
@@ -86,6 +71,75 @@ def _entity_pages(
     if config.include_debug_pages:
         pages.extend(_debug_pages(source, workspace))
     return pages
+
+
+def _directory_page_summaries(pages: list[WikiPage]) -> dict[str, str]:
+    """Return summaries from routing pages, excluding second-stage source references."""
+
+    summaries: dict[str, str] = {}
+    for page in pages:
+        if _is_skill_source_page(page):
+            continue
+        if page.page_type in {"skill", "community", "workflow"}:
+            summaries[page.entity_id] = _first_paragraph(page.text)
+    return summaries
+
+
+def _is_skill_source_page(page: WikiPage) -> bool:
+    return page.path.parent.name == "source" and page.path.parent.parent.name == "skills"
+
+
+def _directory_pages(
+    source: WikiSource,
+    page_summaries: dict[str, str],
+    workspace: Workspace,
+) -> list[WikiPage]:
+    """Render root and directory-level navigation pages."""
+
+    return [
+        WikiPage(
+            path=workspace.wiki_dir / "index.md",
+            page_type="index",
+            entity_id="index",
+            title="SkillFabric Wiki",
+            text=render_index(source, page_summaries),
+        ),
+        WikiPage(
+            path=workspace.wiki_skills_dir / "index.md",
+            page_type="index",
+            entity_id="skills-index",
+            title="Skills",
+            text=render_index(source, page_summaries, section="skills"),
+        ),
+        WikiPage(
+            path=workspace.wiki_communities_dir / "index.md",
+            page_type="index",
+            entity_id="communities-index",
+            title="Communities",
+            text=render_index(source, page_summaries, section="communities"),
+        ),
+        WikiPage(
+            path=workspace.wiki_workflows_dir / "index.md",
+            page_type="index",
+            entity_id="workflows-index",
+            title="Workflows",
+            text=render_index(source, page_summaries, section="workflows"),
+        ),
+        WikiPage(
+            path=workspace.wiki_references_dir / "index.md",
+            page_type="index",
+            entity_id="references-index",
+            title="References",
+            text=render_index(source, page_summaries, section="references"),
+        ),
+        WikiPage(
+            path=workspace.wiki_skill_sources_dir / "index.md",
+            page_type="index",
+            entity_id="skill-sources-index",
+            title="Skill Sources",
+            text=render_index(source, page_summaries, section="skill-sources"),
+        ),
+    ]
 
 
 def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> None:
@@ -100,8 +154,30 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
     stale_resolver = workspace.wiki_dir / "resolver.md"
     if stale_resolver.exists():
         stale_resolver.unlink()
+    for stale_file in (
+        workspace.wiki_dir / "overview.md",
+        workspace.wiki_dir / "deliverables.md",
+        workspace.wiki_dir / "wiki_page_index.jsonl",
+        workspace.wiki_dir / "wiki_health_report.md",
+        workspace.wiki_dir / "log.md",
+    ):
+        if stale_file.exists():
+            stale_file.unlink()
     if not include_debug_pages and workspace.wiki_debug_dir.exists():
         shutil.rmtree(workspace.wiki_debug_dir)
+    stale_wiki_debug = workspace.wiki_dir / "debug"
+    if stale_wiki_debug.exists():
+        shutil.rmtree(stale_wiki_debug)
+    for path in (
+        workspace.wiki_skills_dir,
+        workspace.wiki_communities_dir,
+        workspace.wiki_workflows_dir,
+        workspace.wiki_skill_sources_dir,
+    ):
+        if path.exists():
+            for page in path.glob("*.md"):
+                page.unlink()
+        path.mkdir(parents=True, exist_ok=True)
     workspace.wiki_workflows_dir.mkdir(parents=True, exist_ok=True)
     if include_debug_pages:
         workspace.wiki_debug_raw_artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -112,6 +188,7 @@ def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:
     return (
         workspace.wiki_dir / "artifacts",
         workspace.wiki_dir / "scenarios",
+        workspace.wiki_dir / "references" / "skill-sources",
     )
 
 

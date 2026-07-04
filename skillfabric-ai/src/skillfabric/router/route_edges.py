@@ -86,7 +86,7 @@ def _reconcile_route_edges(
     *,
     warnings: list[str],
 ) -> list[RouteEdge]:
-    """Promote ordered hints while dropping same-LLM reversed dependency mistakes."""
+    """Drop conflicting same-LLM hard edges while keeping ordered hints soft."""
 
     required_edges = _merge_edges(required_edges)
     ordered_hints = _merge_edges(ordered_hints)
@@ -102,30 +102,29 @@ def _reconcile_route_edges(
             continue
         filtered_required.append(edge)
 
-    required_graph = _edge_graph(filtered_required)
-    existing_pairs = {(edge.before_skill, edge.after_skill) for edge in filtered_required}
-    promoted: list[RouteEdge] = []
+    return _merge_edges(filtered_required)
+
+
+def _reconcile_ordered_hints(
+    ordered_hints: list[RouteEdge],
+    required_edges: list[RouteEdge],
+    *,
+    warnings: list[str],
+) -> list[RouteEdge]:
+    """Return soft hints that do not contradict hard required edges."""
+
+    ordered_hints = _merge_edges(ordered_hints)
+    required_graph = _edge_graph(_merge_edges(required_edges))
+    filtered: list[RouteEdge] = []
     for hint in ordered_hints:
-        if (hint.before_skill, hint.after_skill) in existing_pairs:
-            continue
         if _has_path(required_graph, hint.after_skill, hint.before_skill):
             warnings.append(
                 "dropped conflicting ordered hint: "
                 f"{hint.before_skill} -> {hint.after_skill}; required edge already forces reverse order"
             )
             continue
-        promoted.append(
-            RouteEdge(
-                before_skill=hint.before_skill,
-                after_skill=hint.after_skill,
-                edge_type="depend_on",
-                confidence=hint.confidence,
-                reason=f"Ordered hint: {hint.reason or 'preserve selected skill sequence'}",
-                source=hint.source or "ordered_hint",
-            )
-        )
-        existing_pairs.add((hint.before_skill, hint.after_skill))
-    return _merge_edges([*filtered_required, *promoted])
+        filtered.append(hint)
+    return _merge_edges(filtered)
 
 
 def _edges_from_ordered_skill_ids(

@@ -22,8 +22,8 @@ Treat `$ARGUMENTS` as a skill root plus optional build flags.
 - Use `.skillfabric` when `--workspace` is omitted.
 - Use `.env` when `--env-file` is omitted.
 - Forward `--progress-json` and `--quiet` when provided.
-- Forward `--embedding-provider api|local|disabled`, `--embedding-model`, and
-  `--embedding-model-path` when provided.
+- Forward `--embedding-provider api|disabled` and `--embedding-model` when
+  provided.
 - Use `--skip-llm-validation --embedding-provider disabled --wiki-summary-mode off`
   only when the user explicitly asks for a local smoke check.
 

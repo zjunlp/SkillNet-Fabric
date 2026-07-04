@@ -4,7 +4,7 @@ import threading
 import time
 import unittest
 
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 
 
 class LLMJobRunnerTests(unittest.TestCase):

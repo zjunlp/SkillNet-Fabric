@@ -10,8 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from skillfabric.llm import LLMConfig, litellm_completion, llm_usage_context
-from skillfabric.llm_jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
 
 LLM_ENV_KEYS = (
     "API_KEY",

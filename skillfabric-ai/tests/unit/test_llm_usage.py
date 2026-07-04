@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from skillfabric.llm_usage import LLMUsageTracker, load_usage_records, summarize_usage
+from skillfabric.runtime.usage import LLMUsageTracker, load_usage_records, summarize_usage
 
 
 class LLMUsageTests(unittest.TestCase):

@@ -5,9 +5,9 @@ skills, then produces validated route, planner validation, and execution prompt
 artifacts for Claude Code.
 
 The `skillfabric` CLI is the artifact source of truth. Claude Code commands and
-subagents prepare inputs and perform bounded reasoning, but the CLI owns writes
-to `.skillfabric`: registry, graph, wiki, runs, route finalization, planner
-validation metadata, and `execution_prompt.md`.
+the main Claude Code session prepare inputs and perform bounded reasoning, but
+the CLI owns writes to `.skillfabric`: registry, graph, wiki, runs, route
+finalization, planner validation metadata, and `execution_prompt.md`.
 
 ## Requirements
 
@@ -97,7 +97,7 @@ Use disabled embeddings and skip LLM validation when you want to verify local
 plugin and CLI wiring without API calls:
 
 ```text
-/skillfabric:build examples/skills --workspace .skillfabric-smoke --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
+/skillfabric:build .claude/skills --workspace .skillfabric-smoke --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
 ```
 
 The expected result is a JSON summary with:
@@ -112,7 +112,7 @@ Outside Claude Code, the same smoke check can be run directly:
 
 ```bash
 skillfabric build \
-  --skill-root examples/skills \
+  --skill-root .claude/skills \
   --workspace .skillfabric-smoke \
   --skip-llm-validation \
   --embedding-provider disabled \
@@ -124,8 +124,9 @@ skillfabric build \
 - The CLI owns canonical writes under `.skillfabric`.
 - The plugin does not install hooks, start MCP servers, write Claude Code
   settings, or run background automation.
-- Subagents are read-only reasoning helpers. They return JSON that must be
-  accepted by CLI finalization before it is canonical.
+- Route exploration and prompt planning run inline in the main Claude Code
+  session. They return JSON that must be accepted by CLI finalization before it
+  is canonical.
 - `.skillfabric` is an artifact store, not a runtime skill directory.
 - Packaged route evidence is planner input only. Final task execution should
   follow `execution_prompt.md` and the active user request.

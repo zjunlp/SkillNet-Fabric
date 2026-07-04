@@ -40,10 +40,13 @@ class BuildCliTests(unittest.TestCase):
             self.assertNotIn("estimate", payload)
             self.assertNotIn("budget", payload)
             self.assertIn("cache", payload)
-            self.assertTrue((workspace / "graph" / "compiled_skill_graph.json").exists())
-            self.assertTrue((workspace / "registry" / "skills.jsonl").exists())
+            self.assertTrue((workspace / "graph" / "compiled.json").exists())
+            self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
+            self.assertTrue((workspace / "cache" / "interface_cache.json").exists())
+            self.assertTrue((workspace / "reports" / "build_summary.json").exists())
+            self.assertTrue((workspace / "reports" / "wiki_health_report.md").exists())
             self.assertTrue((workspace / "wiki" / "index.md").exists())
-            self.assertTrue((workspace / "wiki" / "wiki_health_report.md").exists())
+            self.assertFalse((workspace / "wiki" / "wiki_health_report.md").exists())
             self.assertIn("graph", payload["artifacts"])
             self.assertIn("wiki", payload["artifacts"])
 
@@ -68,7 +71,7 @@ class BuildCliTests(unittest.TestCase):
                 )
             payload = json.loads(output.getvalue())
 
-            self.assertTrue((workspace / "graph" / "compiled_skill_graph.json").exists())
+            self.assertTrue((workspace / "graph" / "compiled.json").exists())
             self.assertFalse((workspace / "wiki" / "index.md").exists())
             self.assertNotIn("wiki", payload["artifacts"])
 

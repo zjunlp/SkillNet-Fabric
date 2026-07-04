@@ -17,17 +17,17 @@ skillfabric help config
 
 ```bash
 skillfabric build \
-  --skill-root examples/skills \
+  --skill-root /path/to/skills \
   --workspace .skillfabric \
   --env-file .env
 
 skillfabric route \
-  "extract financial KPIs from a PDF report" \
+  "summarize this repository and identify release risks" \
   --workspace .skillfabric \
   --env-file .env
 
 skillfabric plan \
-  "extract financial KPIs from a PDF report" \
+  "summarize this repository and identify release risks" \
   --workspace .skillfabric \
   --env-file .env
 ```
@@ -40,8 +40,7 @@ pass `--skip-llm-router --explorer-backend fallback` only for deterministic
 local smoke checks.
 
 ```bash
-skillfabric build --skill-root examples/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
-skillfabric build --skill-root examples/skills --embedding-provider local --embedding-model-path /path/to/bge-large-en-v1.5
+skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
 ```
 
 ## Python SDK
@@ -50,34 +49,35 @@ skillfabric build --skill-root examples/skills --embedding-provider local --embe
 from skillfabric import SkillFabric
 
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
-sf.build("examples/skills")
-route = sf.route("extract financial KPIs from a PDF report")
-plan = sf.plan(route=route)
+sf.build("/path/to/skills")
+route = sf.route("summarize this repository and identify release risks")
+package = sf.prepare_plan(route=route)
+plan = sf.finalize_plan(
+    package_root=package.root,
+    planner_output={"execution_prompt": "Summarize the repository and verify the result."},
+)
 print(plan.prompt_path)
 ```
 
 ## Claude Code Plugin
 
 The Claude Code plugin uses the installed `skillfabric` CLI for stable
-artifacts, then uses Claude Code subagents for route-time wiki exploration and
-plan-time workflow/prompt planning. The CLI remains the only component that
-writes SkillFabric workspace artifacts.
+artifacts, then uses the main Claude Code session for bounded route-time wiki
+exploration and plan-time prompt planning. The CLI remains the only component
+that writes SkillFabric workspace artifacts.
 
 ```bash
 claude --plugin-dir plugins/claude-code/skillfabric
 ```
 
 Use `/skillfabric:prepare` to stop at a plan, or `/skillfabric:run` to route,
-plan, and continue with the final task in the current Claude Code session. See
-`docs/claude-code-plugin.md` for command details.
+plan, and continue with the final task in the current Claude Code session.
 
 ## Package Layout
 
 ```text
 skillfabric-ai/                  # PyPI package
 plugins/claude-code/skillfabric/ # Claude Code plugin skeleton
-docs/                            # User and architecture docs
-examples/                        # Tiny runnable skill pool
 ```
 
 The CLI does not run a background executor. The Claude Code plugin can

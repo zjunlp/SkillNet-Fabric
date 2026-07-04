@@ -38,12 +38,15 @@ def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> Wik
     inbound: dict[str, int] = {skill_id: 0 for skill_id in source.skills}
     for page in wiki_dir.rglob("*.md"):
         text = page.read_text(encoding="utf-8")
+        rel = page.relative_to(wiki_dir).as_posix()
+        if rel.startswith("skills/source/") or rel.startswith("references/skill-sources/"):
+            continue
         generated_text = _generated_wiki_text(text)
         if "raw_output" in generated_text:
             report.raw_llm_output_leaks.append(str(page))
-        if page.parent == workspace.wiki_skills_dir and "## Capability Contract" not in text:
+        if page.parent == workspace.wiki_skills_dir and page.name != "index.md" and "## Inputs" not in text:
             report.skills_without_interface.append(page.stem)
-        if page.parent == workspace.wiki_skills_dir and "## Works With" not in text and "## Depends On" not in text:
+        if page.parent == workspace.wiki_skills_dir and page.name != "index.md" and "## Composition Notes" not in text:
             report.skills_without_graph_links.append(page.stem)
         for target in WIKILINK_RE.findall(_strip_fenced_code_blocks(generated_text)):
             target_path = wiki_dir / f"{target}.md"
@@ -131,7 +134,7 @@ def read_wiki_health_summary(path: str | Path) -> dict[str, int]:
 def write_wiki_health_report(workspace: Workspace, report: WikiHealthReport) -> None:
     """Write wiki health markdown report."""
 
-    atomic_write_text(workspace.wiki_dir / "wiki_health_report.md", render_wiki_health_report(report))
+    atomic_write_text(workspace.reports_dir / "wiki_health_report.md", render_wiki_health_report(report))
 
 
 def _int_value(value: Any) -> int:

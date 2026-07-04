@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from skillfabric.llm import LLMConfig, litellm_completion, response_to_jsonable
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 COMMUNITY_REFINEMENT_PROMPT_ID = "community_refinement_graph_routing_boundaries"
 
