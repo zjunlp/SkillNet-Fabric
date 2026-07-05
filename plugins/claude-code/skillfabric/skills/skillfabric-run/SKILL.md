@@ -16,7 +16,11 @@ continues into final task execution.
 
 Treat `$ARGUMENTS` as task text plus optional workspace/build flags.
 
-- The task is all non-option text in `$ARGUMENTS`; preserve the user's wording.
+- The task is the user's natural-language request after removing explicit
+  SkillFabric flags. Preserve the user's wording and do not rewrite it into a
+  narrower task.
+- Treat only recognized flags as workflow configuration. Do not infer API keys,
+  models, or workspaces from free-form prose.
 - Use `.skillfabric` when `--workspace` is omitted.
 - Use `.env` when `--env-file` is omitted.
 - `--skill-root` is optional; it is required only when the workspace has not
@@ -60,7 +64,8 @@ Preparation:
    `query_wiki/EXPLORER.md`, and `query_wiki/index.md`; then read only the
    query-wiki skill, community, workflow, or edge pages needed to select an
    evidence-backed SkillPackage. Do not inspect the active project workspace
-   during this route-selection step.
+   during this route-selection step. Route selection is about choosing skills
+   from the query wiki, not solving the user's task.
 10. Produce a single raw SkillPackage JSON object matching
    `agent_route_request.json.expected_schema`; do not wrap it in Markdown fences,
    comments, or explanatory text. Pass that JSON to
@@ -79,7 +84,8 @@ Preparation:
     execution: read non-secret README/project metadata, file maps, git status,
     relevant source or tests, and obvious verification commands. Do not read
     `.env`, tokens, credentials, large caches, historical run directories, or
-    unrelated generated artifacts.
+    unrelated generated artifacts. Use these observations to ground the
+    execution plan before finalization.
 16. Produce a single raw planner JSON object matching
     `planner_request.json.expected_schema`; do not wrap it in Markdown fences,
     comments, or explanatory text. Pass that JSON to

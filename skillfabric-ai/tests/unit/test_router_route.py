@@ -49,12 +49,12 @@ class RouterRouteTests(unittest.TestCase):
                         {
                             "skill_id": "skill:pdf-table-parser",
                             "role": "Needed to parse PDF tables.",
-                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "valid"}],
+                            "evidence": [{"path": "skills/cards/pdf-table-parser.md", "reason": "valid"}],
                         },
                         {
                             "skill_id": "skill:not-real",
                             "role": "Invalid skill should make strict mode fail.",
-                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "wrong"}],
+                            "evidence": [{"path": "skills/cards/pdf-table-parser.md", "reason": "wrong"}],
                         },
                     ],
                     "rationale": "One valid, one invalid.",
@@ -86,7 +86,7 @@ class RouterRouteTests(unittest.TestCase):
                             "role": "Needed to parse PDF tables.",
                             "evidence": [
                                 {
-                                    "path": "skills/pdf-table-parser.md",
+                                    "path": "skills/cards/pdf-table-parser.md",
                                     "reason": "PDF table parser page.",
                                 }
                             ],
@@ -96,7 +96,7 @@ class RouterRouteTests(unittest.TestCase):
                             "role": "Needed to extract KPI values.",
                             "evidence": [
                                 {
-                                    "path": "skills/financial-kpi-extractor.md",
+                                    "path": "skills/cards/financial-kpi-extractor.md",
                                     "reason": "KPI extractor page.",
                                 }
                             ],
@@ -133,7 +133,7 @@ class RouterRouteTests(unittest.TestCase):
             self.assertEqual(selected_ids, ["skill:pdf-table-parser", "skill:financial-kpi-extractor"])
             self.assertTrue(any("not in query_wiki manifest" in warning for warning in payload["warnings"]))
             self.assertEqual(payload["provenance"], "claude_code")
-            self.assertIn("skills/pdf-table-parser.md", payload["wiki_pages_read"])
+            self.assertIn("skills/cards/pdf-table-parser.md", payload["wiki_pages_read"])
             self.assertTrue((workspace / "runs" / "route-test" / "route.json").exists())
             self.assertTrue((workspace / "runs" / "route-test" / "query_wiki" / "manifest.json").exists())
             self.assertTrue((workspace / "runs" / "route-test" / "cc_explorer" / "skill_package.json").exists())

@@ -67,7 +67,7 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, *, env_path: str | Path | None = None) -> LLMConfig:
-        """Read LiteLLM configuration from environment variables and an env file."""
+        """Read LiteLLM configuration from an env file, with shell fallback."""
 
         values = read_env_file(env_path)
         api_base, api_base_key = _first_config_entry(
@@ -366,11 +366,11 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 def _first_value(values: dict[str, str], *keys: str, default: str = "") -> str:
     for key in keys:
-        if key in os.environ and os.environ[key]:
-            return os.environ[key]
-    for key in keys:
         if values.get(key):
             return values[key]
+    for key in keys:
+        if key in os.environ and os.environ[key]:
+            return os.environ[key]
     return default
 
 
@@ -382,17 +382,17 @@ def _first_config_value(
     default: str = "",
 ) -> str:
     for key in primary_keys:
-        if key in os.environ and os.environ[key]:
-            return os.environ[key]
+        if values.get(key):
+            return values[key]
     for key in primary_keys:
-        if values.get(key):
-            return values[key]
-    for key in fallback_keys:
         if key in os.environ and os.environ[key]:
             return os.environ[key]
     for key in fallback_keys:
         if values.get(key):
             return values[key]
+    for key in fallback_keys:
+        if key in os.environ and os.environ[key]:
+            return os.environ[key]
     return default
 
 
@@ -402,17 +402,17 @@ def _first_config_entry(
     fallback_keys: tuple[str, ...],
 ) -> tuple[str, str]:
     for key in primary_keys:
-        if key in os.environ and os.environ[key]:
-            return os.environ[key], key
+        if values.get(key):
+            return values[key], key
     for key in primary_keys:
-        if values.get(key):
-            return values[key], key
-    for key in fallback_keys:
         if key in os.environ and os.environ[key]:
             return os.environ[key], key
     for key in fallback_keys:
         if values.get(key):
             return values[key], key
+    for key in fallback_keys:
+        if key in os.environ and os.environ[key]:
+            return os.environ[key], key
     return "", ""
 
 

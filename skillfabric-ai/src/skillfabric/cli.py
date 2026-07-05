@@ -72,7 +72,8 @@ Claude Code SDK path:
   ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN
   ANTHROPIC_BASE_URL
 
-Shell environment values take precedence over values loaded from --env-file.
+Values loaded from --env-file take precedence for SkillFabric commands; shell
+environment values are used only for fields missing from the env file.
 SkillFabric v1 commits to OpenAI-compatible APIs through LiteLLM plus the optional
 Claude Code SDK explorer path. Vendor-specific SDKs are not part of the public API.
 
@@ -331,11 +332,11 @@ def _init_check_payload(env_file: str | Path) -> dict[str, object]:
 
 def _configured_source(env_values: dict[str, str], field: str) -> str:
     for key in ENV_ALIASES[field]:
-        if os.environ.get(key):
-            return "shell"
-    for key in ENV_ALIASES[field]:
         if env_values.get(key):
             return "env_file"
+    for key in ENV_ALIASES[field]:
+        if os.environ.get(key):
+            return "shell"
     return ""
 
 
@@ -729,8 +730,8 @@ def _build_options_from_args(args: argparse.Namespace) -> BuildOptions:
     env_values = read_env_file(args.env_file)
     env_embedding_provider = (
         args.embedding_provider
-        or os.environ.get("EMBEDDING_PROVIDER", "")
         or env_values.get("EMBEDDING_PROVIDER")
+        or os.environ.get("EMBEDDING_PROVIDER", "")
         or ""
     ).strip().lower()
     if env_embedding_provider and env_embedding_provider not in {"api", "disabled"}:

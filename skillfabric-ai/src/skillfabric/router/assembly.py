@@ -121,7 +121,7 @@ def _wiki_pages(
 ) -> list[str]:
     pages: list[Path] = []
     for skill_id in sorted(selected_ids):
-        path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
+        path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
         if path.exists():
             pages.append(path)
     for community in communities:

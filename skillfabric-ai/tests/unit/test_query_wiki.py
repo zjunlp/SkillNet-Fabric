@@ -48,8 +48,8 @@ class QueryWikiTests(unittest.TestCase):
             self.assertNotIn("## Candidate Skill Cards", index_md)
             self.assertIn("Read this file first", index_md)
             self.assertIn("## Skill Cards", index_md)
-            self.assertIn("card: skills/pdf-table-parser.md", index_md)
-            self.assertIn("source: skills/source/pdf-table-parser.md", index_md)
+            self.assertIn("card: skills/cards/pdf-table-parser.md", index_md)
+            self.assertIn("source: skills/sources/pdf-table-parser.md", index_md)
             self.assertNotIn("Extract tables from PDF files", index_md)
             self.assertNotIn("route_score:", index_md)
             self.assertNotIn("requires:", index_md)
@@ -58,15 +58,10 @@ class QueryWikiTests(unittest.TestCase):
             self.assertTrue((root / "manifest.json").exists())
             self.assertTrue((root / "page_index.jsonl").exists())
             self.assertTrue((root / "skills").exists())
-            self.assertTrue((root / "skills" / "index.md").exists())
-            skills_index_md = (root / "skills" / "index.md").read_text(encoding="utf-8")
-            self.assertIn("- [skill:pdf-table-parser](pdf-table-parser.md)", skills_index_md)
-            self.assertNotIn("](skills/pdf-table-parser.md)", skills_index_md)
-            self.assertTrue((root / "skills" / "pdf-table-parser.md").exists())
+            self.assertFalse((root / "skills" / "index.md").exists())
+            self.assertTrue((root / "skills" / "cards" / "pdf-table-parser.md").exists())
             self.assertFalse((root / "skills" / "skills" / "pdf-table-parser.md").exists())
-            self.assertNotIn("Extract tables from PDF files", skills_index_md)
-            self.assertNotIn("Use these original descriptions", skills_index_md)
-            self.assertTrue((root / "skills" / "source").exists())
+            self.assertTrue((root / "skills" / "sources").exists())
             self.assertFalse((root / "skills" / "core").exists())
             self.assertFalse((root / "skills" / "workflow_bridge").exists())
             self.assertFalse((root / "skills" / "graph_frontier").exists())
@@ -81,11 +76,10 @@ class QueryWikiTests(unittest.TestCase):
             self.assertTrue(all("path" in row and "summary" in row for row in page_rows))
             paths = {str(row["path"]) for row in page_rows}
             self.assertIn("index.md", paths)
-            self.assertIn("skills/index.md", paths)
-            self.assertIn("skills/pdf-table-parser.md", paths)
-            self.assertNotIn("skills/source/pdf-table-parser.md", paths)
+            self.assertNotIn("skills/index.md", paths)
+            self.assertIn("skills/cards/pdf-table-parser.md", paths)
+            self.assertNotIn("skills/sources/pdf-table-parser.md", paths)
             self.assertTrue(any(row["path"] == "index.md" and row["page_type"] == "index" for row in page_rows))
-            self.assertTrue(any(row["path"] == "skills/index.md" and row["page_type"] == "index" for row in page_rows))
 
             manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
             self.assertNotIn("task_atoms", manifest)
@@ -95,8 +89,8 @@ class QueryWikiTests(unittest.TestCase):
             parser_manifest = next(item for item in manifest["skills"] if item["skill_id"] == "skill:pdf-table-parser")
             self.assertIn("card_path", parser_manifest)
             self.assertIn("source_path", parser_manifest)
-            self.assertEqual(parser_manifest["card_path"], "skills/pdf-table-parser.md")
-            self.assertEqual(parser_manifest["source_path"], "skills/source/pdf-table-parser.md")
+            self.assertEqual(parser_manifest["card_path"], "skills/cards/pdf-table-parser.md")
+            self.assertEqual(parser_manifest["source_path"], "skills/sources/pdf-table-parser.md")
             self.assertEqual(
                 parser_manifest["description"],
                 "Extract tables from PDF files and save structured CSV output.",
@@ -114,8 +108,8 @@ class QueryWikiTests(unittest.TestCase):
             self.assertIn("# skill:pdf-table-parser", card_text)
             self.assertIn("## Skill Card", card_text)
             self.assertNotIn("atom_coverage:", card_text)
-            self.assertIn("card: skills/pdf-table-parser.md", card_text)
-            self.assertIn("source: skills/source/pdf-table-parser.md", card_text)
+            self.assertIn("card: skills/cards/pdf-table-parser.md", card_text)
+            self.assertIn("source: skills/sources/pdf-table-parser.md", card_text)
             self.assertNotIn("# Full SKILL.md", card_text)
             self.assertNotIn("scope", parser_manifest)
             self.assertIn("origin", parser_manifest)
@@ -215,7 +209,7 @@ class QueryWikiTests(unittest.TestCase):
             workspace_path = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace_path)
             build_wiki(WikiBuildConfig(workspace=workspace_path, use_llm_summaries=False))
-            (workspace_path / "wiki" / "skills" / "pdf-table-parser.md").unlink()
+            (workspace_path / "wiki" / "skills" / "cards" / "pdf-table-parser.md").unlink()
             workspace = Workspace(workspace_path)
             bundle = build_router_bundle(
                 RouterBundleConfig(workspace=workspace.root, query="extract financial KPIs from a PDF report")
@@ -230,7 +224,7 @@ class QueryWikiTests(unittest.TestCase):
 
     def _append_external_skill_refs(self, workspace: Workspace, external_skill: str) -> None:
         external_slug = external_skill.removeprefix("skill:")
-        parser_page = workspace.wiki_skills_dir / "pdf-table-parser.md"
+        parser_page = workspace.wiki_skill_cards_dir / "pdf-table-parser.md"
         parser_text = parser_page.read_text(encoding="utf-8")
         parser_text = parser_text.replace(
             "## Failure Modes",
@@ -352,7 +346,7 @@ class QueryWikiTests(unittest.TestCase):
 
     def _explicit_skill_refs(self, root: Path) -> set[str]:
         refs: set[str] = set()
-        wiki_link_pattern = re.compile(r"\[\[skills/([^\]|#]+)")
+        wiki_link_pattern = re.compile(r"\[\[skills/(?:cards/)?([^\]|#]+)")
         skill_id_pattern = re.compile(
             r"(?<![A-Za-z0-9_:-])skill:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?=->|$|[^A-Za-z0-9_.-])"
         )

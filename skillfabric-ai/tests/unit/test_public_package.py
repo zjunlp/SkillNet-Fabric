@@ -253,6 +253,11 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertIn("execution_prompt.md", text)
                 self.assertIn("Do not answer or perform the user's task", text)
                 self.assertIn("Do not stop after only loading the skill", text)
+                self.assertIn("route finalization", text)
+                self.assertIn("plan finalization", text)
+                self.assertIn("have run", text)
+            if path.stem == "build":
+                self.assertIn("the CLI build must", text)
 
         overview_text = (plugin_root / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("## Command Choice", overview_text)
@@ -269,6 +274,8 @@ class PublicPackageTests(unittest.TestCase):
                 encoding="utf-8"
             )
             with self.subTest(command=name):
+                self.assertIn("The task is the user's natural-language request", text)
+                self.assertIn("Treat only recognized flags as workflow configuration.", text)
                 self.assertIn('skillfabric route "$task"', text)
                 self.assertIn("--agent-mode prepare", text)
                 self.assertIn("--agent-mode finalize", text)
@@ -287,11 +294,28 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertIn("query_wiki_root", text)
                 self.assertIn("In the main Claude Code session", text)
                 self.assertIn("Do not inspect the active project workspace", text)
+                self.assertIn("Route selection is about choosing skills", text)
                 self.assertIn("bounded active-workspace inspection", text)
                 self.assertIn("execution_prompt.md", text)
                 self.assertNotIn("Launch `skillfabric-query-wiki-explorer`", text)
                 self.assertNotIn("Launch `skillfabric-workflow-planner`", text)
                 self.assertIn("$ARGUMENTS", text)
+
+    def test_claude_code_plugin_prompts_handle_natural_language_commands(self) -> None:
+        plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
+        build_text = (plugin_root / "skills" / "skillfabric-build" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        doctor_text = (plugin_root / "skills" / "skillfabric-doctor" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("natural language that may contain a skill root", build_text)
+        self.assertIn("first existing directory as the skill root", build_text)
+        self.assertIn("Ignore surrounding natural language", build_text)
+        self.assertIn("contains at least one `SKILL.md` or", build_text)
+        self.assertIn("not built yet", doctor_text)
+        self.assertIn("normal before\n  the first build", doctor_text)
 
     def test_claude_code_plugin_readme_is_product_grade(self) -> None:
         readme = (

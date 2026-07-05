@@ -317,11 +317,11 @@ def _vectors_from_embedding_response(response: Any) -> list[list[float]]:
 
 def _first_value(values: dict[str, str], *keys: str, default: str = "") -> str:
     for key in keys:
-        if key in os.environ and os.environ[key]:
-            return os.environ[key]
-    for key in keys:
         if values.get(key):
             return values[key]
+    for key in keys:
+        if key in os.environ and os.environ[key]:
+            return os.environ[key]
     return default
 
 

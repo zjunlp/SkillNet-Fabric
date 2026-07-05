@@ -66,7 +66,7 @@ def _skip_page(workspace: Workspace, path: Path) -> bool:
         return True
     if rel.startswith("references/skill-sources/"):
         return True
-    if rel.startswith("skills/source/"):
+    if rel.startswith("skills/source/") or rel.startswith("skills/sources/"):
         return True
     if rel in {"hot.md", "log.md", "wiki_health_report.md"}:
         return True
@@ -76,7 +76,7 @@ def _skip_page(workspace: Workspace, path: Path) -> bool:
 def _page_identity(rel_path: str, metadata: dict[str, str]) -> tuple[str, str]:
     if rel_path.endswith("/index.md"):
         return "index", rel_path.removesuffix("/index.md").replace("/", "-") + "-index"
-    if rel_path.startswith("skills/"):
+    if rel_path.startswith("skills/cards/"):
         return "skill", metadata.get("skill_id", f"skill:{Path(rel_path).stem}")
     if rel_path.startswith("communities/"):
         return "community", metadata.get("community_id", Path(rel_path).stem)

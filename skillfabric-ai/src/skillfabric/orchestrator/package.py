@@ -347,7 +347,7 @@ def _copied_skill_paths(package_root: Path) -> list[str]:
 def _copy_selected_skills(workspace: Workspace, package_root: Path, route: RouteResult) -> list[str]:
     copied: list[str] = []
     for skill in route.selected_skills:
-        source = workspace.wiki_skills_dir / f"{slug(skill.skill_id)}.md"
+        source = workspace.wiki_skill_cards_dir / f"{slug(skill.skill_id)}.md"
         target = package_root / "selected_skills" / f"{slug(skill.skill_id)}.md"
         if source.exists():
             shutil.copyfile(source, target)

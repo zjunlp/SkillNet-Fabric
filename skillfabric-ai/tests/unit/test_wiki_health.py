@@ -18,7 +18,7 @@ class WikiHealthTests(unittest.TestCase):
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
-            page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
+            page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(
                 page.read_text(encoding="utf-8") + "\n[[skills/missing-skill]]\nraw_output should not be present\n",
                 encoding="utf-8",
@@ -36,12 +36,12 @@ class WikiHealthTests(unittest.TestCase):
             build_fixture_workspace(workspace)
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
-            page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
+            page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(
                 page.read_text(encoding="utf-8") + "\n```markdown\n[[skills/not-a-generated-link]]\n```\n",
                 encoding="utf-8",
             )
-            source_page = workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+            source_page = workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
             source_page.write_text(
                 source_page.read_text(encoding="utf-8") + "\n[[skills/source-example-link]]\n",
                 encoding="utf-8",

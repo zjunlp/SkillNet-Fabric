@@ -39,7 +39,8 @@ Treat CLI JSON as canonical for configuration status.
 2. Run `which skillfabric` or equivalent command lookup.
 3. Run `skillfabric --help` only far enough to confirm the CLI is callable.
 4. Run `skillfabric init --check --json --env-file $env_file`.
-5. Check whether `$workspace/status.json` exists.
+5. Check whether `$workspace/status.json` exists. If it is missing, report the
+   workspace as "not built yet", not as a CLI or API failure.
 6. If the workspace status file exists, read only non-secret status fields
    needed to summarize readiness.
 7. If configuration is incomplete, report missing field names and the exact
@@ -51,7 +52,8 @@ Treat CLI JSON as canonical for configuration status.
   and verify with `which skillfabric` plus `skillfabric --help`.
 - If config check returns non-JSON output, report that the check failed and
   include only non-secret error text.
-- If the workspace is missing, report that `/skillfabric:build` is needed.
+- If the workspace status file is missing, report that this is normal before
+  the first build and that `/skillfabric:build` is needed.
 - If the workspace status says `failed`, report the status path and the
   non-secret error summary when present.
 

@@ -147,7 +147,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             workspace.ensure()
             route = _route(workspace_path)
             for skill_id in ["skill:data-visualization", "skill:docx", "skill:outside"]:
-                path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
+                path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
                 path.write_text(f"# {skill_id}\n", encoding="utf-8")
 
             result = prepare_execution_package(workspace, route)
@@ -210,7 +210,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             workspace.ensure()
             route = _route(workspace_path)
             for skill_id in ["skill:data-visualization", "skill:docx"]:
-                path = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
+                path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
                 path.write_text(f"# {skill_id}\n", encoding="utf-8")
             prepared = prepare_execution_package(workspace, route)
             planner_output = _valid_planner_output(route)

@@ -68,6 +68,46 @@ class ClaudeCodeSdkEnvTests(unittest.TestCase):
         self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "gpt-5.4-mini")
         self.assertEqual(env["ANTHROPIC_REASONING_EFFORT"], "medium")
 
+    def test_env_file_overrides_existing_claude_code_shell_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_KEY=sk-env",
+                        "BASE_URL=http://env-gateway.example/v1",
+                        "MODEL=openai/env-model",
+                        "SKILLFABRIC_LLM_REASONING_EFFORT=medium",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                _cleared_sdk_env()
+                | {
+                    "ANTHROPIC_AUTH_TOKEN": "sk-shell",
+                    "ANTHROPIC_API_KEY": "sk-shell-api",
+                    "ANTHROPIC_BASE_URL": "http://shell-gateway.example",
+                    "ANTHROPIC_MODEL": "shell-model",
+                    "SKILLFABRIC_LLM_API_KEY": "sk-legacy-shell",
+                    "SKILLFABRIC_LLM_API_BASE": "http://legacy-shell.example/v1",
+                    "SKILLFABRIC_LLM_MODEL": "openai/legacy-shell-model",
+                },
+                clear=False,
+            ):
+                env = build_claude_code_sdk_env(env_path)
+
+        self.assertEqual(env["OPENAI_API_KEY"], "sk-env")
+        self.assertEqual(env["OPENAI_BASE_URL"], "http://env-gateway.example/v1")
+        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "sk-env")
+        self.assertEqual(env["ANTHROPIC_API_KEY"], "sk-env")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://env-gateway.example")
+        self.assertEqual(env["ANTHROPIC_MODEL"], "env-model")
+        self.assertEqual(env["ANTHROPIC_REASONING_EFFORT"], "medium")
+
 
 if __name__ == "__main__":
     unittest.main()

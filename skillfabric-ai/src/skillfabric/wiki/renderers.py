@@ -26,13 +26,13 @@ def _skill_page(
     summary = summaries[("skill", skill.id)]
     core_links = source.skill_core_links(skill.id)
     execution_links = source.skill_execution_links(skill.id)
-    source_slug = f"source/{page_path(workspace.wiki_dir, 'skills', skill.id).name}"
+    source_slug = f"../sources/{page_path(workspace.wiki_dir, 'skills', skill.id).name}"
     tags = _skill_tags(interface)
     text = "\n\n".join(
         [
             frontmatter(
                 {
-                    "type": "Skill",
+                    "type": "Skill Card",
                     "title": skill.name,
                     "description": _one_line(summary.routing_summary or summary.summary or skill.description),
                     "skill_id": skill.id,
@@ -63,7 +63,7 @@ def _skill_page(
         ]
     ) + "\n"
     return WikiPage(
-        path=page_path(workspace.wiki_dir, "skills", skill.id),
+        path=page_path(workspace.wiki_skills_dir, "cards", skill.id),
         page_type="skill",
         entity_id=skill.id,
         title=skill.name,
@@ -160,6 +160,7 @@ def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
                     "title": f"{skill.name} Source",
                     "description": f"Full original SKILL.md for {skill.id}.",
                     "skill_id": skill.id,
+                    "card": f"../cards/{source_filename}",
                     "resource": f"skill://{skill.id.removeprefix('skill:')}/SKILL.md",
                 }
             ),
@@ -398,11 +399,18 @@ def _content_hash(values: list[str]) -> str:
 def _first_paragraph(text: str) -> str:
     skipped_keys = (
         "type:",
+        "title:",
+        "description:",
         "skill_id:",
         "community_id:",
         "artifact_id:",
         "scenario_id:",
         "name:",
+        "selectable:",
+        "source:",
+        "card:",
+        "resource:",
+        "Skill:",
         "content_hash:",
         "tags:",
     )

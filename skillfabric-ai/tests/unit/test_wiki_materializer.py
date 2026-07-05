@@ -19,13 +19,13 @@ class WikiMaterializerTests(unittest.TestCase):
             result = build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
             self.assertGreater(result.pages_written, 0)
-            skill_page = workspace / "wiki" / "skills" / "pdf-table-parser.md"
+            skill_page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             self.assertTrue(skill_page.exists())
             text = skill_page.read_text(encoding="utf-8")
-            self.assertIn("type: Skill", text)
+            self.assertIn("type: Skill Card", text)
             self.assertIn("title: pdf-table-parser", text)
             self.assertIn("skill_id: skill:pdf-table-parser", text)
-            self.assertIn("source: source/pdf-table-parser.md", text)
+            self.assertIn("source: ../sources/pdf-table-parser.md", text)
             self.assertIn("# Skill Card", text)
             self.assertIn("## Purpose", text)
             self.assertIn("## Use When", text)
@@ -45,31 +45,48 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertNotIn("[[scenarios/", text)
             self.assertNotIn("raw_output", text)
             self.assertNotIn("\n```markdown\n", text)
-            source_page = workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+            source_page = workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
             self.assertTrue(source_page.exists())
             source_text = source_page.read_text(encoding="utf-8")
             self.assertIn("type: Skill Source", source_text)
+            self.assertIn("card: ../cards/pdf-table-parser.md", source_text)
             self.assertIn("# Full SKILL.md", source_text)
             self.assertIn("Extract tables", source_text)
             self.assertNotIn("/Users/", source_text)
-            self.assertTrue((workspace / "wiki" / "skills" / "index.md").exists())
-            skills_index_text = (workspace / "wiki" / "skills" / "index.md").read_text(encoding="utf-8")
-            self.assertIn("[pdf-table-parser](pdf-table-parser.md)", skills_index_text)
-            self.assertNotIn("Extract tables from PDF files and save structured CSV output.", skills_index_text)
-            self.assertNotIn("pdf-table-parser Source", skills_index_text)
-            self.assertNotIn("type: Skill Source", skills_index_text)
-            self.assertLess(len(skills_index_text), 6000)
+            root_index_text = (workspace / "wiki" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("## Skill Cards", root_index_text)
+            self.assertIn("[pdf-table-parser](skills/cards/pdf-table-parser.md)", root_index_text)
+            self.assertIn("[full SKILL.md](skills/sources/pdf-table-parser.md)", root_index_text)
+            self.assertIn("## Full Skill Sources", root_index_text)
+            self.assertNotIn("title: pdf-table-parser", root_index_text)
+            self.assertNotIn("Source Source", root_index_text)
+            self.assertNotIn(": Skill: pdf-table-parser Source:", root_index_text)
+            self.assertIn("Extract tables from PDF files", root_index_text)
             self.assertTrue((workspace / "wiki" / "communities").exists())
-            self.assertTrue((workspace / "wiki" / "communities" / "index.md").exists())
-            self.assertTrue((workspace / "wiki" / "workflows" / "index.md").exists())
-            self.assertTrue((workspace / "wiki" / "references" / "index.md").exists())
-            self.assertTrue((workspace / "wiki" / "skills" / "source" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "skills" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "communities" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "workflows" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "references" / "index.md").exists())
+            self.assertFalse((workspace / "wiki" / "skills" / "sources" / "index.md").exists())
             self.assertFalse((workspace / "wiki" / "overview.md").exists())
             self.assertFalse((workspace / "wiki" / "resolver.md").exists())
             self.assertFalse((workspace / "wiki" / "deliverables.md").exists())
             self.assertFalse((workspace / "wiki" / "artifacts").exists())
             self.assertFalse((workspace / "wiki" / "scenarios").exists())
             self.assertTrue((workspace / "wiki" / "workflows").exists())
+
+    def test_build_wiki_removes_stale_flat_skill_pages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            stale_card = workspace / "wiki" / "skills" / "pdf-table-parser.md"
+            stale_card.parent.mkdir(parents=True, exist_ok=True)
+            stale_card.write_text("# stale\n", encoding="utf-8")
+
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+
+            self.assertFalse(stale_card.exists())
+            self.assertTrue((workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").exists())
 
     def test_build_wiki_can_emit_debug_extraction_pages_when_requested(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -146,10 +163,10 @@ class WikiMaterializerTests(unittest.TestCase):
 
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
-            text = (workspace / "wiki" / "skills" / "pdf-table-parser.md").read_text(encoding="utf-8")
+            text = (workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").read_text(encoding="utf-8")
             self.assertNotIn("````markdown", text)
             source_text = (
-                workspace / "wiki" / "skills" / "source" / "pdf-table-parser.md"
+                workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
             ).read_text(encoding="utf-8")
             self.assertIn("```python", source_text)
 

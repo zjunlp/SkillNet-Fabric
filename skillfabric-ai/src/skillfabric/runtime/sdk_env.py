@@ -13,11 +13,11 @@ def build_claude_code_sdk_env(
     *,
     runtime_env_path: str | Path | None = None,
 ) -> dict[str, str]:
-    """Resolve Claude Code SDK env with shell values taking precedence over env-file values."""
+    """Resolve Claude Code SDK env with env-file values taking precedence."""
 
     shell_env = {key: value for key, value in os.environ.items() if value}
     env_file_values = {key: value for key, value in read_env_file(env_file).items() if value}
-    env = {**env_file_values, **shell_env}
+    env = {**shell_env, **env_file_values}
     llm_api_key = _first_env_value(
         shell_env,
         env_file_values,
@@ -46,18 +46,31 @@ def build_claude_code_sdk_env(
     )
     if llm_api_key:
         env["OPENAI_API_KEY"] = llm_api_key
-        if not env.get("ANTHROPIC_AUTH_TOKEN"):
+        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"):
+            env["ANTHROPIC_AUTH_TOKEN"] = llm_api_key
+            env["ANTHROPIC_API_KEY"] = llm_api_key
+        elif not env.get("ANTHROPIC_AUTH_TOKEN"):
             env["ANTHROPIC_AUTH_TOKEN"] = llm_api_key
         if not env.get("ANTHROPIC_API_KEY"):
             env["ANTHROPIC_API_KEY"] = env.get("ANTHROPIC_AUTH_TOKEN", llm_api_key)
     if llm_api_base:
         env["OPENAI_BASE_URL"] = llm_api_base
         env["OPENAI_API_BASE"] = llm_api_base
-        if not env.get("ANTHROPIC_BASE_URL"):
+        if _env_file_has_any(
+            env_file_values,
+            "SKILLFABRIC_LLM_API_BASE",
+            "BASE_URL",
+            "OPENAI_BASE_URL",
+            "OPENAI_API_BASE",
+        ):
+            env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
+        elif not env.get("ANTHROPIC_BASE_URL"):
             env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
     if llm_model:
         model_name = _claude_model_name(llm_model)
-        if not env.get("ANTHROPIC_MODEL"):
+        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL"):
+            env["ANTHROPIC_MODEL"] = model_name
+        elif not env.get("ANTHROPIC_MODEL"):
             env["ANTHROPIC_MODEL"] = model_name
         env.setdefault("ANTHROPIC_SMALL_FAST_MODEL", env["ANTHROPIC_MODEL"])
         env.setdefault("ANTHROPIC_DEFAULT_SONNET_MODEL", env["ANTHROPIC_MODEL"])
@@ -72,12 +85,16 @@ def build_claude_code_sdk_env(
 
 def _first_env_value(shell_env: dict[str, str], env_file_values: dict[str, str], *keys: str) -> str:
     for key in keys:
-        if shell_env.get(key):
-            return shell_env[key]
-    for key in keys:
         if env_file_values.get(key):
             return env_file_values[key]
+    for key in keys:
+        if shell_env.get(key):
+            return shell_env[key]
     return ""
+
+
+def _env_file_has_any(env_file_values: dict[str, str], *keys: str) -> bool:
+    return any(bool(env_file_values.get(key)) for key in keys)
 
 
 def _pin_python_runtime(env: dict[str, str], runtime_env_path: str | Path) -> None:

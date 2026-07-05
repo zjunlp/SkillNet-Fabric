@@ -37,3 +37,6 @@ skills.
 
 Finish only after reporting deliverables changed or produced, verification
 evidence, native skills actually used, coverage gaps, and blockers.
+Loading the skill, restating the task, or producing route artifacts alone is not
+completion; route finalization, plan finalization, and final task execution must
+all have run or failed with a concrete blocker.

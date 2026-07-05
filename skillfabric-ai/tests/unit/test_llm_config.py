@@ -107,6 +107,42 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.api_base, "https://public.example/v1")
             self.assertEqual(config.model, "openai/public-model")
 
+    def test_env_file_takes_precedence_over_claude_code_shell_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_KEY=sk-env",
+                        "BASE_URL=http://env-gateway.example/v1",
+                        "MODEL=openai/env-model",
+                        "MAX_TOKENS=456",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                _cleared_llm_env(
+                    ANTHROPIC_AUTH_TOKEN="sk-shell",
+                    ANTHROPIC_BASE_URL="http://shell-gateway.example",
+                    ANTHROPIC_MODEL="shell-model",
+                    SKILLFABRIC_LLM_API_KEY="sk-legacy-shell",
+                    SKILLFABRIC_LLM_API_BASE="http://legacy-shell.example/v1",
+                    SKILLFABRIC_LLM_MODEL="openai/legacy-shell-model",
+                    SKILLFABRIC_LLM_MAX_TOKENS="999",
+                ),
+                clear=False,
+            ):
+                config = LLMConfig.from_env(env_path=env_path)
+
+            self.assertEqual(config.api_key, "sk-env")
+            self.assertEqual(config.api_base, "http://env-gateway.example/v1")
+            self.assertEqual(config.model, "openai/env-model")
+            self.assertEqual(config.max_tokens, 456)
+
     def test_loads_anthropic_compatible_settings_from_claude_code_env_names(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"

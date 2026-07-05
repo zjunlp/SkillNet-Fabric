@@ -86,7 +86,7 @@ def _directory_page_summaries(pages: list[WikiPage]) -> dict[str, str]:
 
 
 def _is_skill_source_page(page: WikiPage) -> bool:
-    return page.path.parent.name == "source" and page.path.parent.parent.name == "skills"
+    return page.path.parent.name in {"source", "sources"} and page.path.parent.parent.name == "skills"
 
 
 def _directory_pages(
@@ -94,7 +94,7 @@ def _directory_pages(
     page_summaries: dict[str, str],
     workspace: Workspace,
 ) -> list[WikiPage]:
-    """Render root and directory-level navigation pages."""
+    """Render the root wiki catalog."""
 
     return [
         WikiPage(
@@ -103,41 +103,6 @@ def _directory_pages(
             entity_id="index",
             title="SkillFabric Wiki",
             text=render_index(source, page_summaries),
-        ),
-        WikiPage(
-            path=workspace.wiki_skills_dir / "index.md",
-            page_type="index",
-            entity_id="skills-index",
-            title="Skills",
-            text=render_index(source, page_summaries, section="skills"),
-        ),
-        WikiPage(
-            path=workspace.wiki_communities_dir / "index.md",
-            page_type="index",
-            entity_id="communities-index",
-            title="Communities",
-            text=render_index(source, page_summaries, section="communities"),
-        ),
-        WikiPage(
-            path=workspace.wiki_workflows_dir / "index.md",
-            page_type="index",
-            entity_id="workflows-index",
-            title="Workflows",
-            text=render_index(source, page_summaries, section="workflows"),
-        ),
-        WikiPage(
-            path=workspace.wiki_references_dir / "index.md",
-            page_type="index",
-            entity_id="references-index",
-            title="References",
-            text=render_index(source, page_summaries, section="references"),
-        ),
-        WikiPage(
-            path=workspace.wiki_skill_sources_dir / "index.md",
-            page_type="index",
-            entity_id="skill-sources-index",
-            title="Skill Sources",
-            text=render_index(source, page_summaries, section="skill-sources"),
         ),
     ]
 
@@ -154,12 +119,19 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
     stale_resolver = workspace.wiki_dir / "resolver.md"
     if stale_resolver.exists():
         stale_resolver.unlink()
+    if workspace.wiki_skills_dir.exists():
+        for stale_card in workspace.wiki_skills_dir.glob("*.md"):
+            stale_card.unlink()
     for stale_file in (
         workspace.wiki_dir / "overview.md",
         workspace.wiki_dir / "deliverables.md",
         workspace.wiki_dir / "wiki_page_index.jsonl",
         workspace.wiki_dir / "wiki_health_report.md",
         workspace.wiki_dir / "log.md",
+        workspace.wiki_skills_dir / "index.md",
+        workspace.wiki_communities_dir / "index.md",
+        workspace.wiki_workflows_dir / "index.md",
+        workspace.wiki_references_dir / "index.md",
     ):
         if stale_file.exists():
             stale_file.unlink()
@@ -169,7 +141,7 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
     if stale_wiki_debug.exists():
         shutil.rmtree(stale_wiki_debug)
     for path in (
-        workspace.wiki_skills_dir,
+        workspace.wiki_skill_cards_dir,
         workspace.wiki_communities_dir,
         workspace.wiki_workflows_dir,
         workspace.wiki_skill_sources_dir,
@@ -188,6 +160,8 @@ def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:
     return (
         workspace.wiki_dir / "artifacts",
         workspace.wiki_dir / "scenarios",
+        workspace.wiki_dir / "references",
+        workspace.wiki_skills_dir / "source",
         workspace.wiki_dir / "references" / "skill-sources",
     )
 

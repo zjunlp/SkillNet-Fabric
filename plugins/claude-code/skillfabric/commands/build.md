@@ -30,3 +30,5 @@ Build or refresh the SkillFabric workspace from native `SKILL.md` files.
 
 Finish only after reporting the workspace, skill count, graph/wiki/status
 artifacts, warnings, cache counts, and the next useful SkillFabric command.
+Loading the skill or describing the build is not completion; the CLI build must
+have run or failed with a concrete non-secret error.

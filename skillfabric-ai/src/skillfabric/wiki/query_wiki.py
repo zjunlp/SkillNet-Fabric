@@ -23,7 +23,7 @@ ORIGIN_ORDER = {
     "workflow_bridge": 1,
     "graph_frontier": 2,
 }
-SKILL_WIKI_LINK_PATTERN = re.compile(r"\[\[skills/([^\]|#]+)")
+SKILL_WIKI_LINK_PATTERN = re.compile(r"\[\[skills/(?:cards/)?([^\]|#]+)")
 SKILL_ID_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_:-])skill:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?=->|$|[^A-Za-z0-9_.-])"
 )
@@ -97,8 +97,8 @@ def materialize_query_wiki(
     if query_root.exists():
         shutil.rmtree(query_root)
     for path in (
-        query_root / "skills",
-        query_root / "skills" / "source",
+        query_root / "skills" / "cards",
+        query_root / "skills" / "sources",
         query_root / "communities",
         query_root / "workflows",
         query_root / "edges",
@@ -161,8 +161,8 @@ def materialize_query_wiki(
     missing_pages: list[dict[str, str]] = []
     skills_manifest = []
     for skill_id, origin in sorted(origins.items(), key=_origin_sort_key):
-        source = workspace.wiki_skills_dir / f"{slug(skill_id)}.md"
-        target = query_root / "skills" / f"{slug(skill_id)}.md"
+        source = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
+        target = query_root / "skills" / "cards" / f"{slug(skill_id)}.md"
         description = ""
         if _copy_sanitized_page(source, target, included_skill_ids, external_slug_pattern):
             copied_pages.append(_rel(query_root, target))
@@ -172,7 +172,7 @@ def materialize_query_wiki(
                 if skill_id in registry_skills
                 else _page_description(target)
             )
-            source_target = query_root / "skills" / "source" / target.name
+            source_target = query_root / "skills" / "sources" / target.name
             source_path = (
                 _rel(query_root, source_target)
                 if _copy_page(
@@ -269,7 +269,6 @@ def materialize_query_wiki(
     )
     atomic_write_text(query_root / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     atomic_write_text(query_root / "index.md", _render_index(manifest))
-    atomic_write_text(query_root / "skills" / "index.md", _render_skills_index(manifest))
     atomic_write_text(query_root / "EXPLORER.md", _render_explorer_instructions())
     _write_page_index(query_root)
     return QueryWikiBuildResult(root=query_root, manifest=manifest)
@@ -455,12 +454,12 @@ def _copy_page(source: Path, target: Path) -> bool:
 
 
 def _workspace_skill_ids(workspace: Workspace) -> set[str]:
-    if not workspace.wiki_skills_dir.exists():
+    if not workspace.wiki_skill_cards_dir.exists():
         return set()
     return {
         f"skill:{path.stem}"
-        for path in workspace.wiki_skills_dir.glob("*.md")
-        if path.is_file() and path.name != "index.md"
+        for path in workspace.wiki_skill_cards_dir.glob("*.md")
+        if path.is_file()
     }
 
 
@@ -568,7 +567,7 @@ def _write_page_index(query_root: Path) -> None:
     rows: list[dict[str, Any]] = []
     for path in sorted(query_root.rglob("*.md")):
         rel = path.relative_to(query_root).as_posix()
-        if rel.startswith("skills/source/"):
+        if rel.startswith(("skills/source/", "skills/sources/")):
             continue
         if rel == "EXPLORER.md":
             page_type = "instructions"
@@ -607,7 +606,7 @@ def _page_identity(rel: str, metadata: dict[str, Any]) -> tuple[str, str]:
         return "index", "index"
     if rel.endswith("/index.md"):
         return "index", rel.removesuffix("/index.md").replace("/", "-") + "-index"
-    if rel.startswith("skills/"):
+    if rel.startswith("skills/cards/"):
         return "skill", str(metadata.get("skill_id", f"skill:{Path(rel).stem}"))
     if rel.startswith("communities/"):
         return "community", str(metadata.get("community_id", Path(rel).stem))
@@ -659,26 +658,6 @@ def _render_index(manifest: dict[str, Any]) -> str:
     lines.append("- bridge_edges: edges/bridge_edges.jsonl")
     lines.append("- frontier_edges: edges/frontier_edges.jsonl")
     return "\n".join(lines) + "\n"
-
-
-def _render_skills_index(manifest: dict[str, Any]) -> str:
-    lines = [
-        "# Skills",
-        "",
-        "Skill directory. Open a card to evaluate routing fit.",
-        "",
-    ]
-    for skill in manifest["skills"]:
-        if not skill.get("selectable", True):
-            continue
-        lines.append(f"- [{skill['skill_id']}]({_relative_link_from_skills_index(skill.get('card_path', ''))})")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _relative_link_from_skills_index(path: Any) -> str:
-    value = str(path or "")
-    prefix = "skills/"
-    return value.removeprefix(prefix) if value.startswith(prefix) else value
 
 
 def _render_explorer_instructions() -> str:

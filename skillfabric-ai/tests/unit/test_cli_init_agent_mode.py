@@ -81,6 +81,52 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertEqual(payload["sources"]["API_KEY"], "shell")
             self.assertNotIn("sk-cc-token", output.getvalue())
 
+    def test_init_check_prefers_env_file_over_claude_code_shell_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "API_KEY=sk-env-secret",
+                        "BASE_URL=http://env-gateway.example/v1",
+                        "MODEL=openai/env-model",
+                        "EMBEDDING_MODEL=openai/env-embedding",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "ANTHROPIC_AUTH_TOKEN": "sk-cc-token",
+                    "ANTHROPIC_BASE_URL": "http://cc-gateway.example",
+                    "ANTHROPIC_MODEL": "cc-model",
+                    "SKILLFABRIC_LLM_API_KEY": "sk-legacy-token",
+                    "SKILLFABRIC_LLM_API_BASE": "http://legacy-gateway.example/v1",
+                    "SKILLFABRIC_LLM_MODEL": "openai/legacy-model",
+                },
+                clear=True,
+            ):
+                with contextlib.redirect_stdout(output):
+                    cli_main(["init", "--env-file", str(env_file), "--check", "--json"])
+
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["configured"])
+            self.assertEqual(
+                payload["sources"],
+                {
+                    "API_KEY": "env_file",
+                    "BASE_URL": "env_file",
+                    "MODEL": "env_file",
+                    "EMBEDDING_MODEL": "env_file",
+                },
+            )
+            self.assertNotIn("sk-env-secret", output.getvalue())
+            self.assertNotIn("sk-cc-token", output.getvalue())
+
     def test_init_writes_env_file_with_private_permissions_and_preserves_key(self) -> None:
         with TemporaryDirectory() as tmp:
             env_file = Path(tmp) / ".env"

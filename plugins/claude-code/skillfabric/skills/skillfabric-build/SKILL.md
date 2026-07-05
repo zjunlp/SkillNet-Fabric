@@ -13,9 +13,14 @@ a directory of native `SKILL.md` files. Stop after the workspace is built.
 
 ## Input Contract
 
-Treat `$ARGUMENTS` as a skill root plus optional build flags.
+Treat `$ARGUMENTS` as natural language that may contain a skill root plus
+optional build flags.
 
-- The first non-option argument is the skill root.
+- If `$ARGUMENTS` contains one or more path-like directory references, use the
+  first existing directory as the skill root. Common examples:
+  `.claude/skills`, `skills`, `./skills`, or an absolute path.
+- Ignore surrounding natural language such as "build", "please", "use", or
+  "construct a graph/wiki from".
 - If the skill root is omitted and `.claude/skills` exists in the current
   project, use `.claude/skills`.
 - If no skill root is available, ask for it before running build.
@@ -41,6 +46,8 @@ warnings, and cache status.
 ## Workflow
 
 1. Resolve `skill_root`, `workspace`, `env_file`, and forwarded build flags.
+   Verify `skill_root` exists and contains at least one `SKILL.md` or
+   `skill.md` before building.
 2. If this is not an explicit local smoke check, run
    `skillfabric init --check --json --env-file $env_file`.
 3. If configuration is incomplete, stop and tell the user to run

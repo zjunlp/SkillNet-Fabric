@@ -36,3 +36,5 @@ executing that task.
 
 Finish only after reporting the execution package root, `execution_prompt.md`,
 planner validation path, selected skills, warnings, coverage gaps, and blockers.
+Loading the skill, restating the task, or producing route artifacts alone is not
+completion; route finalization and plan finalization must both have run.

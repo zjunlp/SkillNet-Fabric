@@ -198,7 +198,7 @@ class RouterBundleTests(unittest.TestCase):
             )
             build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
             for skill in skills:
-                page = workspace.wiki_skills_dir / f"{skill.name}.md"
+                page = workspace.wiki_skill_cards_dir / f"{skill.name}.md"
                 page.parent.mkdir(parents=True, exist_ok=True)
                 page.write_text(f"# {skill.name}\n", encoding="utf-8")
 
@@ -287,7 +287,7 @@ class RouterBundleTests(unittest.TestCase):
             )
             build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
             for skill in skills:
-                page = workspace.wiki_skills_dir / f"{skill.name}.md"
+                page = workspace.wiki_skill_cards_dir / f"{skill.name}.md"
                 page.parent.mkdir(parents=True, exist_ok=True)
                 page.write_text(f"# {skill.name}\n", encoding="utf-8")
 
@@ -408,8 +408,8 @@ class RouterBundleTests(unittest.TestCase):
             )
             for path in (
                 workspace.wiki_dir / "index.md",
-                workspace.wiki_skills_dir / "pdf-table-parser.md",
-                workspace.wiki_skills_dir / "financial-kpi-extractor.md",
+                workspace.wiki_skill_cards_dir / "pdf-table-parser.md",
+                workspace.wiki_skill_cards_dir / "financial-kpi-extractor.md",
                 workspace.wiki_communities_dir / "finance.md",
             ):
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -437,7 +437,7 @@ class RouterBundleTests(unittest.TestCase):
             self.assertTrue(any(item["skill_id"] == kpi.id and item["ppr_score"] > 0 for item in payload["selected_skills"]))
             self.assertEqual([hint["canonical_object"] for hint in payload["workflow_hints"]], ["csv_table"])
             self.assertFalse(any(page.endswith("wiki/index.md") for page in payload["wiki_pages"]))
-            self.assertTrue(any(page.endswith("wiki/skills/pdf-table-parser.md") for page in payload["wiki_pages"]))
+            self.assertTrue(any(page.endswith("wiki/skills/cards/pdf-table-parser.md") for page in payload["wiki_pages"]))
             self.assertTrue(any(page.endswith("wiki/communities/finance.md") for page in payload["wiki_pages"]))
             self.assertFalse(any("/debug/" in page for page in payload["wiki_pages"]))
 

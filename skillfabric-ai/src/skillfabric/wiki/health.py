@@ -21,7 +21,7 @@ def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> Wik
     report = WikiHealthReport(fallback_count=fallback_count)
     wiki_dir = workspace.wiki_dir
     expected_skill_pages = {
-        str(workspace.wiki_skills_dir / f"{slug(skill_id)}.md")
+        str(workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md")
         for skill_id in source.skills
     }
     expected_community_pages = {
@@ -39,22 +39,23 @@ def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> Wik
     for page in wiki_dir.rglob("*.md"):
         text = page.read_text(encoding="utf-8")
         rel = page.relative_to(wiki_dir).as_posix()
-        if rel.startswith("skills/source/") or rel.startswith("references/skill-sources/"):
+        if rel.startswith(("skills/source/", "skills/sources/", "references/skill-sources/")):
             continue
         generated_text = _generated_wiki_text(text)
         if "raw_output" in generated_text:
             report.raw_llm_output_leaks.append(str(page))
-        if page.parent == workspace.wiki_skills_dir and page.name != "index.md" and "## Inputs" not in text:
+        if page.parent == workspace.wiki_skill_cards_dir and "## Inputs" not in text:
             report.skills_without_interface.append(page.stem)
-        if page.parent == workspace.wiki_skills_dir and page.name != "index.md" and "## Composition Notes" not in text:
+        if page.parent == workspace.wiki_skill_cards_dir and "## Composition Notes" not in text:
             report.skills_without_graph_links.append(page.stem)
         for target in WIKILINK_RE.findall(_strip_fenced_code_blocks(generated_text)):
-            target_path = wiki_dir / f"{target}.md"
+            target_path = _wikilink_target_path(wiki_dir, target)
             if not target_path.exists():
                 report.broken_links.append(f"{page}: {target}")
-            if target.startswith("skills/"):
+            skill_slug = _wikilink_skill_slug(target)
+            if skill_slug:
                 for skill_id in source.skills:
-                    if slug(skill_id) == target.removeprefix("skills/"):
+                    if slug(skill_id) == skill_slug:
                         inbound[skill_id] += 1
                         break
     for skill_id, count in inbound.items():
@@ -88,6 +89,22 @@ def _strip_fenced_code_blocks(text: str) -> str:
             continue
         lines.append(line)
     return "\n".join(lines)
+
+
+def _wikilink_target_path(wiki_dir: Path, target: str) -> Path:
+    if target.startswith("skills/cards/"):
+        return wiki_dir / f"{target}.md"
+    if target.startswith("skills/"):
+        return wiki_dir / "skills" / "cards" / f"{target.removeprefix('skills/')}.md"
+    return wiki_dir / f"{target}.md"
+
+
+def _wikilink_skill_slug(target: str) -> str:
+    if target.startswith("skills/cards/"):
+        return target.removeprefix("skills/cards/")
+    if target.startswith("skills/"):
+        return target.removeprefix("skills/")
+    return ""
 
 
 def render_wiki_health_report(report: WikiHealthReport) -> str:

@@ -17,7 +17,8 @@ def slug(value: str) -> str:
 def wiki_link(category: str, entity_id: str, label: str | None = None) -> str:
     """Return an Obsidian-style wikilink."""
 
-    target = f"{category}/{slug(entity_id)}"
+    target_category = "skills/cards" if category == "skills" else category
+    target = f"{target_category}/{slug(entity_id)}"
     if label and label != slug(entity_id):
         return f"[[{target}|{label}]]"
     return f"[[{target}]]"

@@ -57,6 +57,10 @@ class Workspace:
         return self.wiki_dir / "skills"
 
     @property
+    def wiki_skill_cards_dir(self) -> Path:
+        return self.wiki_skills_dir / "cards"
+
+    @property
     def wiki_communities_dir(self) -> Path:
         return self.wiki_dir / "communities"
 
@@ -70,7 +74,7 @@ class Workspace:
 
     @property
     def wiki_skill_sources_dir(self) -> Path:
-        return self.wiki_skills_dir / "source"
+        return self.wiki_skills_dir / "sources"
 
     @property
     def wiki_debug_raw_artifacts_dir(self) -> Path:
@@ -107,9 +111,9 @@ class Workspace:
             self.execution_dir,
             self.wiki_dir,
             self.wiki_skills_dir,
+            self.wiki_skill_cards_dir,
             self.wiki_communities_dir,
             self.wiki_workflows_dir,
-            self.wiki_references_dir,
             self.wiki_skill_sources_dir,
             self.runs_dir,
         ):

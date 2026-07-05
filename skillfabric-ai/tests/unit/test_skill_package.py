@@ -31,13 +31,13 @@ class SkillPackageTests(unittest.TestCase):
                         {
                             "skill_id": "skill:pdf-table-parser",
                             "role": "Parse PDF tables.",
-                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "routing fit"}],
+                            "evidence": [{"path": "skills/cards/pdf-table-parser.md", "reason": "routing fit"}],
                         },
                         {
                             "skill_id": "skill:financial-kpi-extractor",
                             "role": "Extract KPI values.",
                             "evidence": [
-                                {"path": "skills/financial-kpi-extractor.md", "reason": "routing fit"}
+                                {"path": "skills/cards/financial-kpi-extractor.md", "reason": "routing fit"}
                             ],
                         },
                     ],
@@ -123,13 +123,13 @@ class SkillPackageTests(unittest.TestCase):
                         {
                             "skill_id": "skill:pdf-table-parser",
                             "role": "Parse PDF tables.",
-                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "parser page"}],
+                            "evidence": [{"path": "skills/cards/pdf-table-parser.md", "reason": "parser page"}],
                         },
                         {
                             "skill_id": "skill:financial-kpi-extractor",
                             "role": "Extract KPIs.",
                             "evidence": [
-                                {"path": "skills/financial-kpi-extractor.md", "reason": "extractor page"}
+                                {"path": "skills/cards/financial-kpi-extractor.md", "reason": "extractor page"}
                             ],
                         },
                     ],
@@ -138,7 +138,7 @@ class SkillPackageTests(unittest.TestCase):
                             "before": "skill:pdf-table-parser",
                             "after": "skill:financial-kpi-extractor",
                             "relation_type": "depend_on",
-                            "evidence_path": "skills/financial-kpi-extractor.md",
+                            "evidence_path": "skills/cards/financial-kpi-extractor.md",
                             "reason": "Extractor page says it uses parser output.",
                         }
                     ],
@@ -166,13 +166,13 @@ class SkillPackageTests(unittest.TestCase):
                         {
                             "skill_id": "skill:pdf-table-parser",
                             "role": "Parse PDF tables.",
-                            "evidence": [{"path": "skills/pdf-table-parser.md", "reason": "parser page"}],
+                            "evidence": [{"path": "skills/cards/pdf-table-parser.md", "reason": "parser page"}],
                         },
                         {
                             "skill_id": "skill:financial-kpi-extractor",
                             "role": "Extract KPIs.",
                             "evidence": [
-                                {"path": "skills/financial-kpi-extractor.md", "reason": "extractor page"}
+                                {"path": "skills/cards/financial-kpi-extractor.md", "reason": "extractor page"}
                             ],
                         },
                     ],
@@ -181,7 +181,7 @@ class SkillPackageTests(unittest.TestCase):
                             "before": "skill:pdf-table-parser",
                             "after": "skill:financial-kpi-extractor",
                             "relation_type": "state_compatibility",
-                            "evidence_path": "skills/financial-kpi-extractor.md",
+                            "evidence_path": "skills/cards/financial-kpi-extractor.md",
                             "reason": "Extractor consumes parser state.",
                         }
                     ],
