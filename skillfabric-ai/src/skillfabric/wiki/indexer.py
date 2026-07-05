@@ -41,8 +41,10 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         description = _clean_summary(page_summaries.get(skill_id) or skill.description)
         card_path = f"skills/cards/{slug(skill_id)}.md"
         source_path = f"skills/sources/{slug(skill_id)}.md"
-        suffix = f": {description}" if description else ""
-        lines.append(f"- [{skill.name}]({card_path}){suffix} Source: [full SKILL.md]({source_path})")
+        lines.append(f"- [{skill.name}]({card_path})")
+        if description:
+            lines.append(f"  summary: {description}")
+        lines.append(f"  source: [full SKILL.md]({source_path})")
     if source.communities:
         lines.extend(["", "## Communities"])
         for community_id, community in sorted(source.communities.items(), key=lambda item: item[1].name):
@@ -63,7 +65,10 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
 
 def _clean_summary(value: str) -> str:
     text = " ".join(str(value).split())
-    return text[:240].rstrip() if len(text) > 240 else text
+    if len(text) <= 240:
+        return text
+    clipped = text[:237].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return f"{clipped}..."
 
 
 def append_log(path: Path, *, result: WikiBuildResult, build_id: str) -> None:

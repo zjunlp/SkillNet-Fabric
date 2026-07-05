@@ -45,7 +45,7 @@ def _collect_pages(workspace: Workspace) -> list[WikiPageEntry]:
         rel_path = path.relative_to(workspace.wiki_dir).as_posix()
         page_type, entity_id = _page_identity(rel_path, metadata)
         title = _title(body) or str(metadata.get("name", "")) or path.stem
-        summary = _summary(body)
+        summary = _summary(metadata, body)
         pages.append(
             WikiPageEntry(
                 page_id=_stable_id(rel_path),
@@ -114,13 +114,24 @@ def _title(body: str) -> str:
     return ""
 
 
-def _summary(body: str) -> str:
+def _summary(metadata: dict[str, str], body: str) -> str:
+    description = metadata.get("description", "")
+    if description:
+        return _short_text(description, limit=300)
     for line in body.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped.startswith("- Source path:"):
             continue
-        return stripped[:300]
+        return _short_text(stripped, limit=300)
     return ""
+
+
+def _short_text(value: str, *, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    clipped = text[: max(0, limit - 3)].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return f"{clipped}..." if clipped else text[:limit]
 
 
 def _stable_id(value: str) -> str:

@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from skillfabric.wiki.explorer.search_index import load_page_index
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
+from skillfabric.wiki.renderers import _first_paragraph
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
@@ -19,6 +20,7 @@ class WikiMaterializerTests(unittest.TestCase):
             result = build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
             self.assertGreater(result.pages_written, 0)
+            self.assertEqual(result.pages_written, len(list((workspace / "wiki").rglob("*.md"))))
             skill_page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             self.assertTrue(skill_page.exists())
             text = skill_page.read_text(encoding="utf-8")
@@ -169,6 +171,15 @@ class WikiMaterializerTests(unittest.TestCase):
                 workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
             ).read_text(encoding="utf-8")
             self.assertIn("```python", source_text)
+
+    def test_first_paragraph_truncates_on_word_boundary(self) -> None:
+        summary = _first_paragraph("routing " * 80)
+
+        self.assertLessEqual(len(summary), 240)
+        self.assertTrue(summary.endswith("..."))
+        self.assertNotIn(" ...", summary)
+        self.assertTrue(summary.removesuffix("...").endswith("routing"))
+
 
 if __name__ == "__main__":
     unittest.main()

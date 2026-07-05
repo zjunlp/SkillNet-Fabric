@@ -359,6 +359,14 @@ def _one_line(value: str) -> str:
     return " ".join(str(value).split())
 
 
+def _short_text(value: str, *, limit: int = 240) -> str:
+    text = _one_line(value)
+    if len(text) <= limit:
+        return text
+    clipped = text[: max(0, limit - 3)].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return f"{clipped}..." if clipped else text[:limit]
+
+
 def _field_names(fields: list[InterfaceField]) -> list[str]:
     return [field.name for field in fields if field.name]
 
@@ -416,5 +424,5 @@ def _first_paragraph(text: str) -> str:
     )
     for line in text.splitlines():
         if line and not line.startswith("---") and not line.startswith("#") and not line.startswith(skipped_keys):
-            return line.strip()
+            return _short_text(line)
     return ""

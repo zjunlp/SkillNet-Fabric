@@ -41,7 +41,7 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     health = analyze_wiki_health(workspace, fallback_count=summarizer.fallback_count)
     write_wiki_health_report(workspace, health)
     result = WikiBuildResult(
-        pages_written=len(pages) + 1,
+        pages_written=len(pages),
         cache_hits=summarizer.cache_hits,
         llm_calls=summarizer.llm_calls,
         fallback_count=summarizer.fallback_count,
