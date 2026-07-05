@@ -42,7 +42,7 @@ def _root_index(source: WikiSource) -> str:
             "## Directories",
             f"* [Skills](skills/) - routing cards for {len(source.skills)} skills.",
             f"* [Communities](communities/) - capability clusters for {len(source.communities)} groups.",
-            f"* [Workflows](workflows/) - validated ordering and handoff hints.",
+            "* [Workflows](workflows/) - validated ordering and handoff hints.",
             "* [Skill Sources](skills/source/) - authoritative SKILL.md files for second-stage reading.",
             "",
             "## Reading Order",
