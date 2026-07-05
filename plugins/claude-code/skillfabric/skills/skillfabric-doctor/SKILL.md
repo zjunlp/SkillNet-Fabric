@@ -2,6 +2,7 @@
 name: skillfabric-doctor
 description: Use when the user asks to check, diagnose, validate, or troubleshoot SkillFabric CLI availability, API configuration, plugin wiring, or workspace readiness in Claude Code.
 license: MIT
+disable-model-invocation: true
 ---
 
 # SkillFabric Doctor
@@ -28,6 +29,8 @@ Treat `$ARGUMENTS` as optional diagnostic flags.
 - Do not ask the user to paste API credentials into the conversation.
 - Do not run `skillfabric init` in interactive write mode.
 - Do not build or mutate `.skillfabric`.
+- Do not use `find`, `grep`, `rg`, `sed`, `cat`, or directory scans to inspect
+  the workspace.
 - Do not display shell environment values or raw config payloads beyond
   present/missing field names.
 
@@ -35,16 +38,13 @@ Treat CLI JSON as canonical for configuration status.
 
 ## Workflow
 
-1. Resolve `env_file` and `workspace`.
-2. Run `which skillfabric` or equivalent command lookup.
-3. Run `skillfabric --help` only far enough to confirm the CLI is callable.
-4. Run `skillfabric init --check --json --env-file $env_file`.
-5. Check whether `$workspace/status.json` exists. If it is missing, report the
-   workspace as "not built yet", not as a CLI or API failure.
-6. If the workspace status file exists, read only non-secret status fields
-   needed to summarize readiness.
-7. If configuration is incomplete, report missing field names and the exact
-   terminal command: `skillfabric init --env-file $env_file`.
+1. Prefer the Doctor State JSON injected by the slash command. If it is absent,
+   run `skillfabric doctor-state $ARGUMENTS`.
+2. Treat the returned JSON as the only status source.
+3. If `workspace_status.stage` is `not_built`, report "not built yet" and say
+   this is normal before the first build.
+4. If configuration is incomplete, report missing field names and the exact
+   terminal command: `skillfabric init --env-file <env_file>`.
 
 ## Failure Handling
 
@@ -59,12 +59,19 @@ Treat CLI JSON as canonical for configuration status.
 
 ## Final Response
 
-Return:
+Write a concise readiness summary, not a raw JSON field dump.
 
-- CLI availability.
-- Env file checked.
-- Whether API-backed builds are configured.
-- Missing field names when incomplete.
-- Workspace status path and readiness.
-- Next command: `/skillfabric:build`, `/skillfabric:prepare`, or
-  `/skillfabric:run`.
+Preferred format:
+
+```text
+SkillFabric ready.
+
+- CLI: available
+- API config: complete via <env_file>
+- Workspace: ready, <skill_count> skills, build <build_id>
+- Next: /skillfabric:prepare or /skillfabric:run
+```
+
+If incomplete, keep the same shape but replace the affected line with the
+missing field names or "Workspace: not built yet". Do not list every `present`,
+`sources`, or nested `workspace_status` key unless the user asks for details.

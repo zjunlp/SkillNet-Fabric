@@ -43,7 +43,7 @@ from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
 from skillfabric.wiki.query_wiki import materialize_query_wiki, render_query_wiki_skill_card
 
-PUBLIC_COMMANDS = ("init", "help", "build", "route", "plan", "query-wiki")
+PUBLIC_COMMANDS = ("init", "help", "build", "route", "plan", "query-wiki", "doctor-state", "run-state")
 INIT_FIELDS = ("API_KEY", "BASE_URL", "MODEL", "EMBEDDING_MODEL")
 ENV_ALIASES = {
     "API_KEY": ("API_KEY", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
@@ -106,6 +106,12 @@ def main(argv: list[str] | None = None) -> None:
     parser, command_parsers = _build_parser()
     if argv_list in (["--help"], ["-h"]):
         parser.print_help()
+        return
+    if argv_list[:1] == ["doctor-state"] and not {"--help", "-h"}.intersection(argv_list[1:]):
+        _doctor_state(argparse.Namespace(tokens=argv_list[1:]))
+        return
+    if argv_list[:1] == ["run-state"] and not {"--help", "-h"}.intersection(argv_list[1:]):
+        _run_state(argparse.Namespace(tokens=argv_list[1:]))
         return
     args = parser.parse_args(argv_list)
     if args.command == "help":
@@ -176,12 +182,30 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     )
     plan_parser.add_argument("query", nargs="?")
     plan_parser.add_argument("--route-file")
-    _add_route_options(plan_parser, include_query=False)
+    _add_route_options(plan_parser, include_query=False, agent_mode_choices=("prepare", "finalize", "latest"))
     plan_parser.add_argument("--renderer", choices=["claude-code", "codex"], default="claude-code")
     plan_parser.add_argument("--planner-output-file", help=argparse.SUPPRESS)
     plan_parser.add_argument("--package-root", help=argparse.SUPPRESS)
     plan_parser.set_defaults(handler=_plan)
     command_parsers["plan"] = plan_parser
+
+    doctor_state_parser = subcommands.add_parser(
+        "doctor-state",
+        help=argparse.SUPPRESS,
+        description="Return non-secret readiness status for the Claude Code /skillfabric:doctor command.",
+    )
+    doctor_state_parser.add_argument("tokens", nargs=argparse.REMAINDER)
+    doctor_state_parser.set_defaults(handler=_doctor_state)
+    command_parsers["doctor-state"] = doctor_state_parser
+
+    run_state_parser = subcommands.add_parser(
+        "run-state",
+        help=argparse.SUPPRESS,
+        description="Return the next state for the Claude Code /skillfabric:run command.",
+    )
+    run_state_parser.add_argument("tokens", nargs=argparse.REMAINDER)
+    run_state_parser.set_defaults(handler=_run_state)
+    command_parsers["run-state"] = run_state_parser
 
     query_wiki_parser = subcommands.add_parser("query-wiki", help="Inspect a prepared query_wiki directory")
     query_wiki_subcommands = query_wiki_parser.add_subparsers(dest="query_wiki_command", required=True)
@@ -202,7 +226,12 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quiet", action="store_true")
 
 
-def _add_route_options(parser: argparse.ArgumentParser, *, include_query: bool = True) -> None:
+def _add_route_options(
+    parser: argparse.ArgumentParser,
+    *,
+    include_query: bool = True,
+    agent_mode_choices: tuple[str, ...] = ("prepare", "finalize"),
+) -> None:
     if include_query:
         parser.add_argument("query")
     parser.add_argument("--workspace", default=".skillfabric")
@@ -222,7 +251,7 @@ def _add_route_options(parser: argparse.ArgumentParser, *, include_query: bool =
     parser.add_argument("--expanded-limit", type=int, default=100, help=argparse.SUPPRESS)
     parser.add_argument("--workflow-confidence-threshold", type=float, default=0.95, help=argparse.SUPPRESS)
     parser.add_argument("--max-workflow-hints", type=int, default=12, help=argparse.SUPPRESS)
-    parser.add_argument("--agent-mode", choices=["prepare", "finalize"], help=argparse.SUPPRESS)
+    parser.add_argument("--agent-mode", choices=agent_mode_choices, help=argparse.SUPPRESS)
     parser.add_argument("--skill-package-file", help=argparse.SUPPRESS)
 
 
@@ -338,6 +367,111 @@ def _configured_source(env_values: dict[str, str], field: str) -> str:
         if os.environ.get(key):
             return "shell"
     return ""
+
+
+def _doctor_state(args: argparse.Namespace) -> None:
+    print(json.dumps(_doctor_state_payload(args), ensure_ascii=False, indent=2))
+
+
+def _doctor_state_payload(args: argparse.Namespace) -> dict[str, object]:
+    parsed = _parse_state_tokens(getattr(args, "tokens", []))
+    env_file = parsed["env_file"]
+    workspace = Workspace(parsed["workspace"])
+    config = _init_check_payload(env_file)
+    status_path = workspace.root / "status.json"
+    status_summary = _workspace_status_summary(status_path)
+    workspace_ready = status_summary.get("exists") is True and status_summary.get("stage") == "complete"
+    api_configured = bool(config["configured"])
+    next_command = _doctor_next_command(api_configured, workspace_ready)
+    return {
+        "cli_available": True,
+        "env_file": str(env_file),
+        "api_configured": api_configured,
+        "missing": config["missing"],
+        "present": config["present"],
+        "sources": config["sources"],
+        "workspace": str(workspace.root),
+        "status_path": str(status_path),
+        "workspace_ready": workspace_ready,
+        "workspace_status": status_summary,
+        "next_command": next_command,
+        "instructions": [
+            "Report only field names, boolean status, paths, and non-secret status metadata.",
+            "Do not scan the workspace or print env-file contents.",
+            "Do not build, route, plan, or execute from doctor.",
+        ],
+    }
+
+
+def _workspace_status_summary(status_path: Path) -> dict[str, object]:
+    if not status_path.exists():
+        return {"exists": False, "stage": "not_built"}
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"exists": True, "stage": "invalid_json"}
+    if not isinstance(payload, dict):
+        return {"exists": True, "stage": "invalid_json"}
+    stage = _workspace_status_stage(payload)
+    return {
+        "exists": True,
+        "stage": stage,
+        "build_id": payload.get("build_id"),
+        "skill_count": payload.get("skill_count"),
+        "warnings_count": _count_warnings(payload.get("warnings")),
+    }
+
+
+def _workspace_status_stage(payload: dict[str, object]) -> str:
+    explicit = payload.get("stage") or payload.get("status")
+    if explicit:
+        return str(explicit)
+    artifacts = payload.get("artifacts")
+    if payload.get("build_id") and payload.get("skill_count") is not None and isinstance(artifacts, dict):
+        return "complete"
+    return "unknown"
+
+
+def _count_warnings(value: object) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
+def _doctor_next_command(api_configured: bool, workspace_ready: bool) -> str:
+    if not api_configured:
+        return "/skillfabric:doctor after configuring .env with skillfabric init --env-file .env"
+    if not workspace_ready:
+        return "/skillfabric:build"
+    return "/skillfabric:prepare or /skillfabric:run"
+
+
+def _parse_state_tokens(tokens: list[str]) -> dict[str, str]:
+    workspace = ".skillfabric"
+    env_file = ".env"
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            break
+        if token in {"--workspace", "--env-file"}:
+            if index + 1 >= len(tokens):
+                raise SystemExit(f"{token} requires a value")
+            value = tokens[index + 1]
+            if token == "--workspace":
+                workspace = value
+            else:
+                env_file = value
+            index += 2
+            continue
+        if token.startswith("--workspace="):
+            workspace = token.split("=", 1)[1]
+            index += 1
+            continue
+        if token.startswith("--env-file="):
+            env_file = token.split("=", 1)[1]
+            index += 1
+            continue
+        index += 1
+    return {"workspace": workspace, "env_file": env_file}
 
 
 def _write_env_values(env_path: Path, updates: dict[str, str]) -> None:
@@ -587,6 +721,9 @@ def _route_agent_finalize(args: argparse.Namespace) -> RouteResult:
 
 
 def _plan(args: argparse.Namespace) -> None:
+    if args.agent_mode == "latest":
+        print(json.dumps(_latest_execution_package_payload(args.workspace), ensure_ascii=False, indent=2))
+        return
     if args.agent_mode == "prepare":
         route = _route_from_args_or_file(args)
         prepared = prepare_execution_package(args.workspace, route, renderer=args.renderer)
@@ -605,9 +742,150 @@ def _plan(args: argparse.Namespace) -> None:
         print(json.dumps(_plan_payload(result), ensure_ascii=False, indent=2))
         return
     raise SystemExit(
-        "skillfabric plan now requires --agent-mode prepare or --agent-mode finalize; "
+        "skillfabric plan now requires --agent-mode prepare, --agent-mode finalize, or --agent-mode latest; "
         "direct deterministic planning was removed."
     )
+
+
+def _run_state(args: argparse.Namespace) -> None:
+    print(json.dumps(_run_state_payload(args), ensure_ascii=False, indent=2))
+
+
+def _run_state_payload(args: argparse.Namespace) -> dict[str, object]:
+    parsed = _parse_run_state_tokens(getattr(args, "tokens", []))
+    latest = _latest_execution_package_payload(parsed["workspace"])
+    query = str(parsed["query"]).strip()
+    if latest.get("found"):
+        latest_task = str(latest.get("task") or "").strip()
+        if query and _normalize_task_text(query) != _normalize_task_text(latest_task):
+            return {
+                "action": "prepare_required",
+                "workspace": latest["workspace"],
+                "env_file": parsed["env_file"],
+                "prepared_prompt_found": True,
+                "existing_prompt_ignored": True,
+                "existing_trace_id": latest["trace_id"],
+                "existing_task": latest_task,
+                "task": query,
+                "message": "A finalized prompt exists, but the user supplied a different task. Prepare this task before execution.",
+            }
+        return {
+            "action": "reuse_prompt",
+            "workspace": latest["workspace"],
+            "env_file": parsed["env_file"],
+            "prepared_prompt_found": True,
+            "prompt_path": latest["prompt_path"],
+            "package_root": latest["package_root"],
+            "planner_validation_path": latest["planner_validation_path"],
+            "route_file": latest["route_file"],
+            "trace_id": latest["trace_id"],
+            "task": latest["task"],
+            "selected_skills": latest["selected_skills"],
+            "instructions": [
+                "Read prompt_path before loading native skills, searching, fetching, or answering.",
+                "Do not discover .skillfabric/runs with find, grep, rg, ls, or directory scans.",
+            ],
+        }
+    if not query:
+        return {
+            "action": "missing_task",
+            "workspace": str(Workspace(parsed["workspace"]).root),
+            "env_file": parsed["env_file"],
+            "prepared_prompt_found": False,
+            "message": "No finalized execution prompt exists. Ask the user for a task or run /skillfabric:prepare first.",
+        }
+    return {
+        "action": "prepare_required",
+        "workspace": str(Workspace(parsed["workspace"]).root),
+        "env_file": parsed["env_file"],
+        "prepared_prompt_found": False,
+        "task": query,
+        "message": "No finalized execution prompt exists for reuse. Run the normal prepare pipeline for this task, then execute the finalized prompt.",
+    }
+
+
+def _parse_run_state_tokens(tokens: list[str]) -> dict[str, str]:
+    workspace = ".skillfabric"
+    env_file = ".env"
+    query_parts: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            query_parts.extend(tokens[index + 1 :])
+            break
+        if token in {"--workspace", "--env-file"}:
+            if index + 1 >= len(tokens):
+                raise SystemExit(f"run-state {token} requires a value")
+            value = tokens[index + 1]
+            if token == "--workspace":
+                workspace = value
+            else:
+                env_file = value
+            index += 2
+            continue
+        if token.startswith("--workspace="):
+            workspace = token.split("=", 1)[1]
+            index += 1
+            continue
+        if token.startswith("--env-file="):
+            env_file = token.split("=", 1)[1]
+            index += 1
+            continue
+        query_parts.append(token)
+        index += 1
+    return {"workspace": workspace, "env_file": env_file, "query": " ".join(query_parts).strip()}
+
+
+def _normalize_task_text(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _latest_execution_package_payload(workspace_root: str | Path) -> dict[str, object]:
+    workspace = Workspace(workspace_root)
+    candidates: list[tuple[float, Path]] = []
+    if workspace.runs_dir.exists():
+        for prompt_path in workspace.runs_dir.glob("*/execution_package/execution_prompt.md"):
+            package_root = prompt_path.parent
+            validation_path = package_root / "planner_validation.json"
+            if _planner_validation_is_valid(validation_path):
+                candidates.append((prompt_path.stat().st_mtime, package_root))
+    if not candidates:
+        return {
+            "found": False,
+            "workspace": str(workspace.root),
+            "message": "no finalized execution package found",
+        }
+
+    _mtime, package_root = max(candidates, key=lambda item: item[0])
+    route_path = package_root / "route.json"
+    route_payload = json.loads(route_path.read_text(encoding="utf-8")) if route_path.exists() else {}
+    prompt_path = package_root / "execution_prompt.md"
+    return {
+        "found": True,
+        "workspace": str(workspace.root),
+        "package_root": str(package_root),
+        "prompt_path": str(prompt_path),
+        "planner_validation_path": str(package_root / "planner_validation.json"),
+        "route_file": str(route_path),
+        "trace_id": str(route_payload.get("trace_id") or package_root.parent.name),
+        "task": str(route_payload.get("query") or ""),
+        "selected_skills": [
+            item.get("skill_id", "")
+            for item in route_payload.get("selected_skills", [])
+            if isinstance(item, dict) and item.get("skill_id")
+        ],
+    }
+
+
+def _planner_validation_is_valid(validation_path: Path) -> bool:
+    if not validation_path.exists():
+        return False
+    try:
+        payload = json.loads(validation_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return bool(isinstance(payload, dict) and payload.get("valid") is True)
 
 
 def _read_agent_skill_package(skill_package_file: str, trace_dir: Path) -> dict[str, object]:

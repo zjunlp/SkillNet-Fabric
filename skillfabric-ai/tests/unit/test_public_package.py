@@ -151,6 +151,16 @@ class PublicPackageTests(unittest.TestCase):
             command_text = command_path.read_text(encoding="utf-8")
             self.assertIn("description:", command_text)
             self.assertIn("argument-hint:", command_text)
+            if command == "run":
+                self.assertIn("allowed-tools:", command_text)
+                self.assertIn("!`skillfabric run-state $ARGUMENTS`", command_text)
+                self.assertIn("Run State JSON", command_text)
+                self.assertIn("Do not use `find`, `grep`, `rg`, or `ls`", command_text)
+            if command == "doctor":
+                self.assertIn("allowed-tools:", command_text)
+                self.assertIn("!`skillfabric doctor-state $ARGUMENTS`", command_text)
+                self.assertIn("Doctor State JSON", command_text)
+                self.assertIn("Do not use `find`, `grep`, `rg`, `sed`, `cat`, or directory scans", command_text)
             for section in (
                 "# Command Contract",
                 "## Inputs",
@@ -168,9 +178,16 @@ class PublicPackageTests(unittest.TestCase):
             self.assertTrue(path.exists(), f"missing command skill: {path}")
             text = path.read_text(encoding="utf-8")
             self.assertIn(f"name: skillfabric-{command}", text)
+            self.assertIn("disable-model-invocation: true", text)
             self.assertIn("$ARGUMENTS", text)
             if command == "run":
                 self.assertIn("execute the user's task", text.lower())
+                self.assertIn("skillfabric run-state", text)
+                self.assertIn("Run State JSON", text)
+            if command == "doctor":
+                self.assertIn("Write a concise readiness summary", text)
+                self.assertIn("not a raw JSON field dump", text)
+                self.assertIn("Do not list every `present`", text)
             for snippet in required_snippets:
                 if snippet.startswith("["):
                     continue
@@ -212,6 +229,7 @@ class PublicPackageTests(unittest.TestCase):
             text = command_skill.read_text(encoding="utf-8")
             self.assertIn(f"name: skillfabric-{name}", text)
             self.assertIn("description:", text)
+            self.assertIn("disable-model-invocation: true", text)
             self.assertIn("Use when", text)
             self.assertIn("Treat CLI JSON as canonical", text)
             self.assertIn("Do not reveal secret values or env-file contents.", text)
@@ -245,17 +263,26 @@ class PublicPackageTests(unittest.TestCase):
             ):
                 self.assertIn(section, text)
             self.assertIn(f"Use the `skillfabric-{path.stem}` skill as the authoritative workflow.", text)
+            if path.stem == "doctor":
+                self.assertIn("Doctor State JSON", text)
+                self.assertIn("Report readiness from that JSON only.", text)
             if path.stem in {"prepare", "run"}:
                 self.assertIn("Treat all non-option text in `$ARGUMENTS` as the task query.", text)
                 self.assertIn("Preserve the user's wording", text)
-                self.assertIn("Run SkillFabric route prepare and route finalize.", text)
-                self.assertIn("Run SkillFabric plan prepare and plan finalize.", text)
                 self.assertIn("execution_prompt.md", text)
-                self.assertIn("Do not answer or perform the user's task", text)
                 self.assertIn("Do not stop after only loading the skill", text)
-                self.assertIn("route finalization", text)
-                self.assertIn("plan finalization", text)
-                self.assertIn("have run", text)
+                if path.stem == "prepare":
+                    self.assertIn("Run SkillFabric route prepare and route finalize.", text)
+                    self.assertIn("Run SkillFabric plan prepare and plan finalize.", text)
+                    self.assertIn("Do not answer or perform the user's task", text)
+                    self.assertIn("route finalization", text)
+                    self.assertIn("plan finalization", text)
+                    self.assertIn("have run", text)
+                else:
+                    self.assertIn("Run State JSON", text)
+                    self.assertIn("prepare/finalize and plan prepare/finalize", text)
+                    self.assertIn("before task tools, search, or final answers", text)
+                    self.assertIn("task tools, search, or final answers", text)
             if path.stem == "build":
                 self.assertIn("the CLI build must", text)
 
@@ -293,6 +320,12 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertIn("Do not wrap it in Markdown fences", text)
                 self.assertIn("comments, or", text)
                 self.assertIn("explanatory text", text)
+                if name == "run":
+                    self.assertIn('skillfabric run-state "$task"', text)
+                    self.assertIn('set `$execution_prompt` to `prompt_path`', text)
+                    self.assertIn("Before reading `execution_prompt.md`, do not use Web Search, Fetch", text)
+                    self.assertIn("If no reusable prompt exists and no task was provided", text)
+                    self.assertIn("Do not substitute shell path discovery for `run-state`", text)
                 self.assertIn("agent_route_request.json", text)
                 self.assertIn("planner_request.json", text)
                 self.assertIn("query_wiki_root", text)
@@ -320,6 +353,8 @@ class PublicPackageTests(unittest.TestCase):
         self.assertIn("contains at least one `SKILL.md` or", build_text)
         self.assertIn("not built yet", doctor_text)
         self.assertIn("normal before\n  the first build", doctor_text)
+        self.assertIn("SkillFabric ready.", doctor_text)
+        self.assertIn("Workspace: ready, <skill_count> skills, build <build_id>", doctor_text)
 
     def test_claude_code_plugin_readme_is_product_grade(self) -> None:
         readme = (
@@ -344,6 +379,7 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:doctor",
             "/skillfabric:prepare",
             "/skillfabric:run",
+            "reuses the latest prepared prompt when available",
             "--embedding-provider disabled",
             "Do not paste API keys",
         ):

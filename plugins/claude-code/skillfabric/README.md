@@ -72,8 +72,9 @@ want Claude Code to execute the task:
 /skillfabric:prepare "write a migration plan for the auth module" --skill-root .claude/skills --workspace .skillfabric
 ```
 
-Use `/skillfabric:run` only when you want Claude Code to route, plan, and
-then perform the final task in the current session.
+Use `/skillfabric:run` only when you want Claude Code to execute a finalized
+SkillFabric prompt. It reuses the latest prepared prompt when available, or
+routes and plans the provided task first.
 
 ## Commands
 
@@ -83,8 +84,9 @@ then perform the final task in the current session.
   a skill root.
 - `/skillfabric:prepare` builds when needed, routes, plans, and returns a
   handoff package without executing the final task.
-- `/skillfabric:run` builds when needed, routes, plans, reads the finalized
-  prompt, and executes the task in the current Claude Code session.
+- `/skillfabric:run` reads the latest finalized prompt when available; otherwise
+  it builds when needed, routes, plans, reads the finalized prompt, and executes
+  the task in the current Claude Code session.
 
 Slash commands are thin wrappers under `commands/*.md`; command logic lives in
 `skills/skillfabric-<command>/SKILL.md` using Claude Code's modern skill-backed

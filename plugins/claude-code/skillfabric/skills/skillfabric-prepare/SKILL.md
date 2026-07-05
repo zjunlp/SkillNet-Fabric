@@ -2,6 +2,7 @@
 name: skillfabric-prepare
 description: Use when the user wants Claude Code to select relevant skills and create a SkillFabric execution package and prompt-only handoff without executing the final task.
 license: MIT
+disable-model-invocation: true
 ---
 
 # SkillFabric Prepare

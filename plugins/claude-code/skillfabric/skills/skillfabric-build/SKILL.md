@@ -2,6 +2,7 @@
 name: skillfabric-build
 description: Use when the user asks Claude Code to build or rebuild a SkillFabric workspace from a skill root. This skill backs /skillfabric:build and produces graph, registry, wiki, status, and build diagnostic artifacts without routing or executing a task.
 license: MIT
+disable-model-invocation: true
 ---
 
 # SkillFabric Build
