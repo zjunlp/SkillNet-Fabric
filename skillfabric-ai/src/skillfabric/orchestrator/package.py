@@ -125,6 +125,7 @@ def finalize_execution_package(
     if not route_path.exists():
         raise ValueError(f"missing package route artifact: {route_path}")
     route = RouteResult.from_dict(json.loads(route_path.read_text(encoding="utf-8")))
+    planner_output = _normalized_planner_output(planner_output)
     validation_errors = validate_planner_output(route, package_root, planner_output)
     planner_validation_path = package_root / "planner_validation.json"
     atomic_write_text(
@@ -186,6 +187,23 @@ def validate_planner_output(
     else:
         _validate_execution_prompt_surface(execution_prompt, errors)
     return errors
+
+
+def _normalized_planner_output(planner_output: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(planner_output, dict):
+        return planner_output
+    normalized = dict(planner_output)
+    execution_prompt = normalized.get("execution_prompt")
+    if isinstance(execution_prompt, str):
+        normalized["execution_prompt"] = _normalize_execution_prompt(execution_prompt)
+    return normalized
+
+
+def _normalize_execution_prompt(execution_prompt: str) -> str:
+    text = execution_prompt.replace("\r\n", "\n").replace("\r", "\n")
+    if text.count("\\n") >= 2 and text.count("\n") <= 1:
+        text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+    return text
 
 
 def _validate_execution_prompt_surface(execution_prompt: str, errors: list[str]) -> None:

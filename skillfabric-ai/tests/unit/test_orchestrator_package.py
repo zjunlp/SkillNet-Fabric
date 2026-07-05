@@ -236,6 +236,25 @@ class OrchestratorPackageTests(unittest.TestCase):
             validation = json.loads((root / "planner_validation.json").read_text(encoding="utf-8"))
             self.assertTrue(validation["valid"])
 
+    def test_finalize_execution_package_normalizes_escaped_newlines(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace_path = Path(tmp) / ".skillfabric"
+            workspace = Workspace(workspace_path)
+            workspace.ensure()
+            route = _route(workspace_path)
+            prepared = prepare_execution_package(workspace, route)
+            planner_output = {
+                "execution_prompt": "# Execution Prompt\\n\\n## Objective\\nExecute the selected task.\\n\\n## Final Report\\nReport checks.",
+            }
+
+            finalize_execution_package(prepared.root, planner_output)
+
+            prompt = (prepared.root / "execution_prompt.md").read_text(encoding="utf-8")
+            saved_output = json.loads((prepared.root / "planner_output.json").read_text(encoding="utf-8"))
+            self.assertIn("# Execution Prompt\n\n## Objective", prompt)
+            self.assertNotIn("\\n\\n", prompt)
+            self.assertEqual(saved_output["execution_prompt"], prompt.rstrip())
+
     def test_finalize_execution_package_rejects_invalid_planner_outputs(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"

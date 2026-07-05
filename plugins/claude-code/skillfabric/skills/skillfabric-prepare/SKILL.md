@@ -66,10 +66,11 @@ and warnings.
    evidence-backed SkillPackage. Do not inspect the active project workspace
    during this route-selection step. Route selection is about choosing skills
    from the query wiki, not solving the user's task.
-10. Produce a single raw SkillPackage JSON object matching
-   `agent_route_request.json.expected_schema`; do not wrap it in Markdown fences,
-   comments, or explanatory text. Pass that JSON to
-   `skillfabric route "$task" --workspace "$workspace" --env-file "$env_file" --trace-id "$trace_id" --agent-mode finalize --skill-package-file -`.
+10. Write a single raw SkillPackage JSON object matching
+   `agent_route_request.json.expected_schema` to the returned
+   `skill_package_file`. Do not wrap it in Markdown fences, comments, or
+   explanatory text. Then run
+   `skillfabric route "$task" --workspace "$workspace" --env-file "$env_file" --trace-id "$trace_id" --agent-mode finalize --skill-package-file "$skill_package_file"`.
 11. Read the finalized route JSON and use its `trace_dir/route.json` as
     `$route_json`.
 12. Run
@@ -86,10 +87,12 @@ and warnings.
     `.env`, tokens, credentials, large caches, historical run directories, or
     unrelated generated artifacts. Use these observations only to improve the
     execution plan, not to execute the task.
-16. Produce a single raw planner JSON object matching
-    `planner_request.json.expected_schema`; do not wrap it in Markdown fences,
-    comments, or explanatory text. Pass that JSON to
-    `skillfabric plan --workspace "$workspace" --agent-mode finalize --package-root "$package_root" --planner-output-file -`.
+16. Write a single raw planner JSON object matching
+    `planner_request.json.expected_schema` to the returned
+    `planner_output_path`. Do not wrap it in Markdown fences, comments, or
+    explanatory text. Use real newline characters inside `execution_prompt`,
+    not literal `\n` text. Then run
+    `skillfabric plan --workspace "$workspace" --agent-mode finalize --package-root "$package_root" --planner-output-file "$planner_output_path"`.
 17. Confirm that the finalized payload points to an existing `execution_prompt.md`.
 18. Stop after finalization. Do not execute `execution_prompt.md`.
 

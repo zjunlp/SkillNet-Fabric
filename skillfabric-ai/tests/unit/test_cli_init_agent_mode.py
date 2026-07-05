@@ -320,6 +320,76 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertEqual(json.loads((trace_dir / "agent_skill_package.json").read_text(encoding="utf-8")), json.loads(skill_package_json))
             self.assertTrue((trace_dir / "route.json").exists())
 
+    def test_agent_mode_finalize_accepts_prepare_returned_skill_package_path(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            prepare_output = io.StringIO()
+            with contextlib.redirect_stdout(prepare_output):
+                cli_main(
+                    [
+                        "route",
+                        "extract financial KPIs from a PDF report",
+                        "--workspace",
+                        str(workspace),
+                        "--trace-id",
+                        "agent-file-path",
+                        "--agent-mode",
+                        "prepare",
+                    ]
+                )
+
+            prepared = json.loads(prepare_output.getvalue())
+            trace_dir = Path(prepared["trace_dir"])
+            query_wiki_root = Path(prepared["query_wiki_root"])
+            manifest = json.loads((query_wiki_root / "manifest.json").read_text(encoding="utf-8"))
+            selected = next(item for item in manifest["skills"] if item["selectable"])
+            skill_package_path = Path(prepared["skill_package_file"])
+            skill_package_path.write_text(
+                json.dumps(
+                    {
+                        "selected_skills": [
+                            {
+                                "skill_id": selected["skill_id"],
+                                "role": "Use this skill for the main task capability.",
+                                "evidence": [{"path": selected["card_path"], "reason": "Selected from query wiki."}],
+                            }
+                        ],
+                        "required_edges": [],
+                        "ordered_hints": [],
+                        "near_misses": [],
+                        "coverage_notes": [],
+                        "rationale": "Single evidence-backed skill selection.",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            finalize_output = io.StringIO()
+            with contextlib.redirect_stdout(finalize_output):
+                cli_main(
+                    [
+                        "route",
+                        "extract financial KPIs from a PDF report",
+                        "--workspace",
+                        str(workspace),
+                        "--trace-id",
+                        "agent-file-path",
+                        "--agent-mode",
+                        "finalize",
+                        "--skill-package-file",
+                        str(skill_package_path),
+                    ]
+                )
+
+            route = json.loads(finalize_output.getvalue())
+            self.assertEqual(route["trace_id"], "agent-file-path")
+            self.assertEqual(route["selected_skills"][0]["skill_id"], selected["skill_id"])
+            self.assertTrue((trace_dir / "route.json").exists())
+
     def test_agent_mode_finalize_rejects_skill_package_file_outside_trace_dir(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"

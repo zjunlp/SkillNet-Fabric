@@ -666,7 +666,12 @@ def _resolve_inside_root(root: Path, path: str | Path, *, outside_message: str) 
     root_resolved = root.resolve()
     candidate = Path(path)
     if not candidate.is_absolute():
-        candidate = root / candidate
+        candidate_resolved = candidate.resolve()
+        try:
+            candidate_resolved.relative_to(root_resolved)
+            candidate = candidate_resolved
+        except (OSError, ValueError):
+            candidate = root / candidate
     try:
         resolved = candidate.resolve()
         resolved.relative_to(root_resolved)
