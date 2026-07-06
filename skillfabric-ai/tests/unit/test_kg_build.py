@@ -14,19 +14,15 @@ from unittest.mock import patch
 from skillfabric.cli import main as cli_main
 from skillfabric.compiled_graph.builder import (
     BuildConfig,
-    _resolve_community_refinement_provider,
     build_graph,
 )
 from skillfabric.compiled_graph.canonicalization.compiler import (
     DeterministicCanonicalizationProvider,
 )
-from skillfabric.compiled_graph.communities.providers import (
-    DeterministicCommunityRefinementProvider,
-)
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.health import analyze_health
 from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
-from skillfabric.compiled_graph.models import CommunityNode, Edge, GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.models import SkillNode
@@ -50,18 +46,6 @@ def fake_litellm_embedding(**kwargs):
     }
 
 
-class StaticCommunityRefinementProvider:
-    model_id = "static-community-refiner"
-
-    def refine(self, payload):
-        return {
-            "name": "Refined Skill Cluster",
-            "summary": "Refined community summary.",
-            "task_patterns": ["route related skills"],
-            "representative_skill_ids": [item["id"] for item in payload["members"][:2]],
-        }
-
-
 def _health_skill(skill_id: str, name: str, description: str) -> SkillNode:
     return SkillNode(
         id=skill_id,
@@ -76,32 +60,7 @@ def _health_skill(skill_id: str, name: str, description: str) -> SkillNode:
     )
 
 
-def _health_community(
-    community_id: str,
-    name: str,
-    summary: str,
-    *,
-    task_patterns: list[str] | None = None,
-    member_count: int = 1,
-) -> CommunityNode:
-    return CommunityNode(
-        id=community_id,
-        type="community",
-        name=name,
-        summary=summary,
-        member_count=member_count,
-        task_patterns=task_patterns or [],
-    )
-
-
 class KGBuildTests(unittest.TestCase):
-    def test_default_community_refinement_is_deterministic(self) -> None:
-        provider = _resolve_community_refinement_provider(
-            BuildConfig(skill_root=FIXTURE_SKILLS)
-        )
-
-        self.assertIsInstance(provider, DeterministicCommunityRefinementProvider)
-
     def test_parser_uses_frontmatter_without_removed_metadata_field(self) -> None:
         skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
         removed_field = "routing_" + "metadata"
@@ -210,7 +169,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertTrue((workspace / "graph" / "embeddings.json").exists())
             self.assertTrue((workspace / "graph" / "embedding_meta.jsonl").exists())
             self.assertTrue((workspace / "graph" / "graph.json").exists())
-            self.assertTrue((workspace / "graph" / "communities.json").exists())
+            self.assertFalse((workspace / "graph" / "communities.json").exists())
             self.assertTrue((workspace / "graph" / "edge_evidence.jsonl").exists())
             self.assertFalse((workspace / "graph" / "relation_validation_audit.jsonl").exists())
             self.assertTrue((workspace / "graph" / "relation_validation_summary.json").exists())
@@ -247,8 +206,9 @@ class KGBuildTests(unittest.TestCase):
             node_types = {node["type"] for node in graph_data["nodes"]}
             edge_types = {edge["type"] for edge in graph_data["edges"]}
             node_keys = set().union(*(node.keys() for node in graph_data["nodes"]))
-            self.assertEqual(node_types, {"skill", "community"})
-            self.assertLessEqual(edge_types, {"similar_to", "member_of", "compose_with", "depend_on"})
+            self.assertEqual(node_types, {"skill"})
+            self.assertLessEqual(edge_types, {"similar_to", "compose_with", "depend_on"})
+            self.assertNotIn("member_of", edge_types)
             self.assertTrue(all("candidate_sources" not in edge for edge in graph_data["edges"]))
             self.assertTrue(all("raw_output" not in edge for edge in graph_data["edges"]))
             self.assertNotIn("inputs", node_keys)
@@ -286,13 +246,17 @@ class KGBuildTests(unittest.TestCase):
             status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["canonical_object_count"], result.stats["canonical_object_count"])
             self.assertEqual(status["execution_compatibility_count"], result.stats["execution_compatibility_count"])
-            self.assertIn("community_clustering_algorithm", status)
-            self.assertIn("community_projection_similar_to_count", status)
-            self.assertIn("community_projection_compose_with_count", status)
-            self.assertIn("community_projection_depend_on_ignored_count", status)
-            self.assertIn("community_oversize_split_count", status)
+            self.assertNotIn("community_count", status)
+            self.assertNotIn("community_refinement_model_id", status)
+            self.assertNotIn("community_clustering_algorithm", status)
+            self.assertNotIn("community_projection_similar_to_count", status)
+            self.assertNotIn("community_projection_compose_with_count", status)
+            self.assertNotIn("community_projection_depend_on_ignored_count", status)
+            self.assertNotIn("community_oversize_split_count", status)
             self.assertNotIn("community_assignment_provenance", status)
             self.assertNotIn("community_assignment_warning", status)
+            self.assertNotIn("communities", status["artifacts"])
+            self.assertNotIn("community_refinement_cache", status["artifacts"])
             self.assertNotIn("artifact_node_count", status)
             self.assertNotIn("scenario_node_count", status)
             self.assertNotIn("artifact_nodes", status["artifacts"])
@@ -339,35 +303,6 @@ class KGBuildTests(unittest.TestCase):
             self.assertFalse(stale_predicate_inventory.exists())
             self.assertFalse(stale_workflow_compatibility.exists())
 
-    def test_build_graph_writes_refined_community_metadata(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            result = build_graph(
-                BuildConfig(
-                    skill_root=FIXTURE_SKILLS,
-                    workspace=workspace,
-                    similar_top_k=3,
-                    candidate_top_k=6,
-                    validator=StaticPairValidator({}),
-                    canonicalization_provider=DeterministicCanonicalizationProvider(),
-                    interface_extractor=DeterministicInterfaceExtractor(),
-                    execution_validator=DeterministicExecutionFlowValidator(),
-                    community_refinement_provider=StaticCommunityRefinementProvider(),
-                    embedding_provider=FakeEmbeddingProvider(),
-                    build_id="community-refined-build",
-                )
-            )
-
-            community_payload = json.loads((workspace / "graph" / "communities.json").read_text(encoding="utf-8"))
-            first = community_payload["communities"][0]
-
-            self.assertTrue(result.communities)
-            self.assertEqual(first["community"]["name"], "Refined Skill Cluster")
-            self.assertEqual(first["community"]["summary_provenance"], "llm_refined")
-            self.assertEqual(first["community"]["model_id"], "static-community-refiner")
-            self.assertEqual(first["community"]["task_patterns"], ["route related skills"])
-            self.assertEqual(first["summary_provenance"], "llm_refined")
-
     def test_health_report_detects_cycles_and_missing_evidence(self) -> None:
         graph = GraphDocument(
             schema_version="1.0",
@@ -381,213 +316,10 @@ class KGBuildTests(unittest.TestCase):
             stats={},
             config_digest="x",
         )
-
-        report = analyze_health(graph, communities=[])
+        report = analyze_health(graph)
 
         self.assertTrue(report.depend_on_cycles)
         self.assertEqual(report.edges_missing_evidence, 3)
-
-    def test_health_report_detects_community_text_outlier(self) -> None:
-        skill = _health_skill(
-            "skill:data-storytelling",
-            "data-storytelling",
-            "Analyze tabular data and explain statistical findings through charts and analysis narratives.",
-        )
-        brand = _health_community(
-            "community:brand",
-            "Brand and Content Styling",
-            "Brand copy, visual tone, and social campaign calendars.",
-            task_patterns=["draft marketing posts"],
-        )
-        analytics = _health_community(
-            "community:data",
-            "Data Analytics",
-            "Statistical analysis, spreadsheet data, charts, and analytical reporting.",
-            task_patterns=["analyze tabular data"],
-        )
-        graph = GraphDocument(
-            schema_version="1.0",
-            build_id="community-text-health",
-            nodes=[skill, brand, analytics],
-            edges=[
-                Edge(
-                    source="skill:data-storytelling",
-                    target="community:brand",
-                    type="member_of",
-                    confidence=1.0,
-                )
-            ],
-            stats={},
-            config_digest="x",
-        )
-
-        report = analyze_health(graph, communities=[brand, analytics])
-
-        self.assertEqual(len(report.community_text_outliers), 1)
-        self.assertEqual(report.community_text_outliers[0].skill_id, "skill:data-storytelling")
-        self.assertEqual(report.community_text_outliers[0].suggested_community_id, "community:data")
-
-    def test_health_report_ignores_generic_creator_token_for_community_text(self) -> None:
-        skill = _health_skill(
-            "skill:skill-creator",
-            "skill-creator",
-            "Create reusable skill documentation and agent instructions for prompt workflows.",
-        )
-        assigned = _health_community(
-            "community:prompt",
-            "Content and Prompt Operations",
-            "Prompt engineering, reusable documentation, agent instructions, and conflict resolution.",
-            task_patterns=["write reusable prompts"],
-        )
-        media = _health_community(
-            "community:media",
-            "Media Processing",
-            "Slack gif creator workflows, video media production, animation, and color grading.",
-            task_patterns=["generate gifs"],
-        )
-        graph = GraphDocument(
-            schema_version="1.0",
-            build_id="community-text-health",
-            nodes=[skill, assigned, media],
-            edges=[
-                Edge(
-                    source="skill:skill-creator",
-                    target="community:prompt",
-                    type="member_of",
-                    confidence=1.0,
-                )
-            ],
-            stats={},
-            config_digest="x",
-        )
-
-        report = analyze_health(graph, communities=[assigned, media])
-
-        self.assertFalse(report.community_text_outliers)
-
-    def test_health_report_ignores_generic_review_and_sharing_tokens(self) -> None:
-        skill = _health_skill(
-            "skill:code-review-excellence",
-            "code-review-excellence",
-            "Review code changes, pull requests, tests, design risks, and engineering feedback quality.",
-        )
-        assigned = _health_community(
-            "community:workflow",
-            "Workflow Planning",
-            "Task tracking, requirements shaping, prompt design, and process coordination.",
-            task_patterns=["coordinate review process"],
-        )
-        presentation = _health_community(
-            "community:presentation",
-            "Presentation Artifacts",
-            "Slide decks and publication-style visual deliverables packaged for sharing and review.",
-            task_patterns=["package information for sharing"],
-        )
-        graph = GraphDocument(
-            schema_version="1.0",
-            build_id="community-text-health",
-            nodes=[skill, assigned, presentation],
-            edges=[
-                Edge(
-                    source="skill:code-review-excellence",
-                    target="community:workflow",
-                    type="member_of",
-                    confidence=1.0,
-                )
-            ],
-            stats={},
-            config_digest="x",
-        )
-
-        report = analyze_health(graph, communities=[assigned, presentation])
-
-        self.assertFalse(report.community_text_outliers)
-
-    def test_health_report_detects_weak_cross_community_compose_edges(self) -> None:
-        visual = _health_community(
-            "community:visual",
-            "Visual Artifact Studio",
-            "Image, canvas, and presentation artifact workflows.",
-        )
-        data = _health_community(
-            "community:data",
-            "Data Analytics",
-            "Statistics, spreadsheets, charts, and data reporting.",
-        )
-        graph = GraphDocument(
-            schema_version="1.0",
-            build_id="weak-cross-community-edge-health",
-            nodes=[
-                _health_skill("skill:canvas-design", "canvas-design", "Design visual canvas artifacts."),
-                _health_skill("skill:statistical-analysis", "statistical-analysis", "Run statistical analysis."),
-                visual,
-                data,
-            ],
-            edges=[
-                Edge("skill:canvas-design", "community:visual", "member_of", confidence=1.0),
-                Edge("skill:statistical-analysis", "community:data", "member_of", confidence=1.0),
-                Edge(
-                    "skill:canvas-design",
-                    "skill:statistical-analysis",
-                    "compose_with",
-                    confidence=0.86,
-                    provenance="llm_validated",
-                ),
-                Edge(
-                    "skill:statistical-analysis",
-                    "skill:canvas-design",
-                    "depend_on",
-                    confidence=0.86,
-                    provenance="llm_validated",
-                ),
-            ],
-            stats={},
-            config_digest="x",
-        )
-
-        report = analyze_health(graph, communities=[visual, data])
-
-        self.assertEqual(len(report.weak_cross_community_compose_edges), 1)
-        self.assertEqual(report.weak_cross_community_compose_edges[0].source, "skill:canvas-design")
-        self.assertEqual(report.weak_cross_community_compose_edges[0].target, "skill:statistical-analysis")
-
-    def test_health_report_detects_low_cohesion_large_community(self) -> None:
-        large = _health_community(
-            "community:mixed",
-            "Mixed Web Data Integration",
-            "A broad mix of APIs, browser automation, media processing, and reporting.",
-            member_count=15,
-        )
-        large.cohesion_score = 0.16
-        focused = _health_community(
-            "community:docs",
-            "Document Studio",
-            "Document and presentation authoring.",
-            member_count=6,
-        )
-        focused.cohesion_score = 0.6
-        small_sparse = _health_community(
-            "community:media",
-            "Media Production",
-            "Media conversion utilities.",
-            member_count=3,
-        )
-        small_sparse.cohesion_score = 0.1
-
-        report = analyze_health(
-            GraphDocument(
-                schema_version="1.0",
-                build_id="low-cohesion-large-community",
-                nodes=[large, focused, small_sparse],
-                edges=[],
-                stats={},
-                config_digest="x",
-            ),
-            communities=[large, focused, small_sparse],
-        )
-
-        self.assertEqual(len(report.low_cohesion_large_communities), 1)
-        self.assertEqual(report.low_cohesion_large_communities[0].community_id, "community:mixed")
 
     def test_public_cli_build_writes_core_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:

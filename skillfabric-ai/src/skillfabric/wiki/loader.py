@@ -13,7 +13,7 @@ from skillfabric.compiled_graph.execution.models import (
     ScenarioNode,
 )
 from skillfabric.compiled_graph.interface.models import SkillInterface
-from skillfabric.compiled_graph.models import CommunityNode, Edge, GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 
@@ -24,7 +24,6 @@ class WikiSource:
 
     build_id: str
     skills: dict[str, SkillNode]
-    communities: dict[str, CommunityNode]
     interfaces: dict[str, SkillInterface]
     raw_artifacts: dict[str, ArtifactNode]
     raw_scenarios: dict[str, ScenarioNode]
@@ -32,7 +31,6 @@ class WikiSource:
     raw_skill_artifact_edges: list[ExecutionEdge]
     raw_skill_scenario_edges: list[ExecutionEdge]
     execution_index: list[ExecutionIndexRecord]
-    community_members: dict[str, list[str]] = field(default_factory=dict)
     evidence_lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
 
@@ -67,11 +65,6 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         if isinstance(node, SkillNode)
     }
     _merge_raw_skills(workspace, skills)
-    communities = {
-        node.id: node
-        for node in core_graph.nodes
-        if isinstance(node, CommunityNode)
-    }
     interfaces = {
         interface.skill_id: interface
         for interface in (
@@ -108,7 +101,6 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
     return WikiSource(
         build_id=core_graph.build_id,
         skills=skills,
-        communities=communities,
         interfaces=interfaces,
         raw_artifacts=raw_artifacts,
         raw_scenarios=raw_scenarios,
@@ -116,7 +108,6 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         raw_skill_artifact_edges=raw_skill_artifact_edges,
         raw_skill_scenario_edges=raw_skill_scenario_edges,
         execution_index=execution_index,
-        community_members=_community_members(core_graph.edges),
         evidence_lookup=_load_evidence_lookup(workspace),
         stats=dict(payload.get("stats", {})),
     )
@@ -138,14 +129,6 @@ def _execution_edges(payload: Any) -> list[ExecutionEdge]:
     if not isinstance(payload, list):
         return []
     return [ExecutionEdge.from_dict(item) for item in payload if isinstance(item, dict)]
-
-
-def _community_members(edges: list[Edge]) -> dict[str, list[str]]:
-    output: dict[str, list[str]] = {}
-    for edge in edges:
-        if edge.type == "member_of":
-            output.setdefault(edge.target, []).append(edge.source)
-    return {key: sorted(values) for key, values in output.items()}
 
 
 def _load_evidence_lookup(workspace: Workspace) -> dict[tuple[str, str, str], list[dict[str, Any]]]:

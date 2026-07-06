@@ -187,7 +187,7 @@ class WikiExplorerTests(unittest.TestCase):
             ).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -221,7 +221,7 @@ class WikiExplorerTests(unittest.TestCase):
             ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -244,7 +244,7 @@ class WikiExplorerTests(unittest.TestCase):
             backend.explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -273,7 +273,7 @@ class WikiExplorerTests(unittest.TestCase):
             ).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -300,7 +300,7 @@ class WikiExplorerTests(unittest.TestCase):
                 ClaudeCodeWikiExplorerBackend(env_file=env_path, sdk_runtime=runtime).explore(
                     query="x",
                     query_wiki_root=query_wiki_root,
-                    bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                    bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                     trace_dir=trace_dir,
                 )
 
@@ -319,7 +319,7 @@ class WikiExplorerTests(unittest.TestCase):
                 ClaudeCodeWikiExplorerBackend(env_file=Path(tmp) / "missing.env", sdk_runtime=runtime).explore(
                     query="x",
                     query_wiki_root=query_wiki_root,
-                    bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                    bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                     trace_dir=trace_dir,
                 )
 
@@ -359,7 +359,7 @@ class WikiExplorerTests(unittest.TestCase):
                 ClaudeCodeWikiExplorerBackend(env_file=env_path, sdk_runtime=runtime).explore(
                     query="x",
                     query_wiki_root=query_wiki_root,
-                    bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                    bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                     trace_dir=trace_dir,
                 )
 
@@ -415,7 +415,7 @@ class WikiExplorerTests(unittest.TestCase):
             package = ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -469,7 +469,7 @@ class WikiExplorerTests(unittest.TestCase):
             package = ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -611,7 +611,7 @@ class WikiExplorerTests(unittest.TestCase):
                 ClaudeCodeWikiExplorerBackend(sdk_runtime=ApiErrorRuntime({})).explore(
                     query="x",
                     query_wiki_root=query_wiki_root,
-                    bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                    bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                     trace_dir=trace_dir,
                 )
 
@@ -654,7 +654,7 @@ class WikiExplorerTests(unittest.TestCase):
             package = ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
                 query="x",
                 query_wiki_root=query_wiki_root,
-                bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                 trace_dir=trace_dir,
             )
 
@@ -693,7 +693,7 @@ class WikiExplorerTests(unittest.TestCase):
                 ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
                     query="x",
                     query_wiki_root=query_wiki_root,
-                    bundle=RouterBundle(query="x", selected_skills=[], communities=[], workflow_hints=[], wiki_pages=[]),
+                    bundle=RouterBundle(query="x", selected_skills=[], workflow_hints=[], wiki_pages=[]),
                     trace_dir=trace_dir,
                 )
 

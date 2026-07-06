@@ -91,33 +91,6 @@ class RouterSkillCandidate:
 
 
 @dataclass(slots=True)
-class RouterCommunityContext:
-    """Community context attached to selected skills."""
-
-    community_id: str
-    name: str
-    summary: str
-    selected_member_ids: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "community_id": self.community_id,
-            "name": self.name,
-            "summary": self.summary,
-            "selected_member_ids": sorted(set(self.selected_member_ids)),
-        }
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> RouterCommunityContext:
-        return cls(
-            community_id=str(payload.get("community_id", "")),
-            name=str(payload.get("name", "")),
-            summary=str(payload.get("summary", "")),
-            selected_member_ids=_string_list(payload.get("selected_member_ids", [])),
-        )
-
-
-@dataclass(slots=True)
 class RouterWorkflowHint:
     """Workflow hint scoped to selected skills for route ordering."""
 
@@ -159,7 +132,6 @@ class RouterBundle:
 
     query: str
     selected_skills: list[RouterSkillCandidate]
-    communities: list[RouterCommunityContext]
     workflow_hints: list[RouterWorkflowHint]
     wiki_pages: list[str]
     warnings: list[str] = field(default_factory=list)
@@ -168,7 +140,6 @@ class RouterBundle:
         return {
             "query": self.query,
             "selected_skills": [item.to_dict() for item in self.selected_skills],
-            "communities": [item.to_dict() for item in self.communities],
             "workflow_hints": [item.to_dict() for item in self.workflow_hints],
             "wiki_pages": list(self.wiki_pages),
             "warnings": list(self.warnings),
@@ -181,11 +152,6 @@ class RouterBundle:
             selected_skills=[
                 RouterSkillCandidate.from_dict(item)
                 for item in payload.get("selected_skills", [])
-                if isinstance(item, dict)
-            ],
-            communities=[
-                RouterCommunityContext.from_dict(item)
-                for item in payload.get("communities", [])
                 if isinstance(item, dict)
             ],
             workflow_hints=[

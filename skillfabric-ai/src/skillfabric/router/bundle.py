@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from skillfabric.router.assembly import (
-    _communities,
     _load_graph,
     _load_registry_skills,
-    _selected_communities,
     _wiki_pages,
     _workflow_hints,
 )
@@ -14,7 +12,6 @@ from skillfabric.router.expansion import _expand_seed_skills, _expand_seed_skill
 from skillfabric.router.models import (
     RouterBundle,
     RouterBundleConfig,
-    RouterCommunityContext,
     RouterSkillCandidate,
     RouterWorkflowHint,
 )
@@ -29,7 +26,6 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
     workspace = Workspace(config.workspace)
     graph = _load_graph(workspace)
     skills = _load_registry_skills(workspace)
-    communities = _communities(graph)
     warnings: list[str] = []
     if not skills:
         warnings.append(f"registry skills not found: {workspace.graph_dir / 'registry.jsonl'}")
@@ -82,18 +78,16 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
             tol=max(config.ppr_tol, 0.0),
         )
     selected_ids = {item.skill_id for item in selected}
-    community_context = _selected_communities(graph.edges, communities, selected_ids)
     workflow_hints = _workflow_hints(
         workspace,
         selected_ids,
         confidence_threshold=config.workflow_confidence_threshold,
         limit=max(config.max_workflow_hints, 0),
     )
-    wiki_pages = _wiki_pages(workspace, selected_ids, community_context)
+    wiki_pages = _wiki_pages(workspace, selected_ids)
     return RouterBundle(
         query=config.query,
         selected_skills=selected,
-        communities=community_context,
         workflow_hints=workflow_hints,
         wiki_pages=wiki_pages,
         warnings=warnings,
@@ -103,7 +97,6 @@ def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
 __all__ = [
     "RouterBundle",
     "RouterBundleConfig",
-    "RouterCommunityContext",
     "RouterSkillCandidate",
     "RouterWorkflowHint",
     "build_router_bundle",

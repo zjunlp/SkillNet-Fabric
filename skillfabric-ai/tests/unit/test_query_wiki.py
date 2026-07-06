@@ -65,6 +65,7 @@ class QueryWikiTests(unittest.TestCase):
             self.assertFalse((root / "skills" / "core").exists())
             self.assertFalse((root / "skills" / "workflow_bridge").exists())
             self.assertFalse((root / "skills" / "graph_frontier").exists())
+            self.assertFalse((root / "communities").exists())
             self.assertFalse((root / "references").exists())
             self.assertFalse((root / "hot.md").exists())
             page_rows = [
@@ -114,6 +115,7 @@ class QueryWikiTests(unittest.TestCase):
             self.assertNotIn("scope", parser_manifest)
             self.assertIn("origin", parser_manifest)
             self.assertIn("copied_pages", manifest)
+            self.assertNotIn("communities", manifest)
             self.assertTrue((root / "edges" / "bridge_edges.jsonl").exists())
             self.assertTrue((root / "edges" / "frontier_edges.jsonl").exists())
             for workflow in manifest["included_workflows"]:
@@ -245,21 +247,6 @@ class QueryWikiTests(unittest.TestCase):
         )
         parser_page.write_text(parser_text, encoding="utf-8")
 
-        for community_page in workspace.wiki_communities_dir.glob("*.md"):
-            community_text = community_page.read_text(encoding="utf-8")
-            if "pdf-table-parser" not in community_text:
-                continue
-            community_text = community_text.replace(
-                "## Important Skill Relations",
-                "## External Noise\n\n"
-                f"- [[skills/{external_slug}]]\n"
-                f"- compose_with: [[skills/pdf-table-parser]] -> [[skills/{external_slug}]]\n\n"
-                "## Important Skill Relations",
-                1,
-            )
-            community_page.write_text(community_text, encoding="utf-8")
-            break
-
         for workflow_page in workspace.wiki_workflows_dir.glob("*.md"):
             workflow_text = workflow_page.read_text(encoding="utf-8")
             if "pdf-table-parser" not in workflow_text:
@@ -313,7 +300,6 @@ class QueryWikiTests(unittest.TestCase):
             root / "index.md",
             root / "manifest.json",
             *sorted((root / "skills").rglob("*.md")),
-            *sorted((root / "communities").rglob("*.md")),
             *sorted((root / "workflows").rglob("*.md")),
             *sorted((root / "edges").rglob("*.jsonl")),
         ]

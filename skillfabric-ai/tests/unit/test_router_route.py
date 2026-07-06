@@ -215,7 +215,6 @@ class RouterRouteTests(unittest.TestCase):
             bundle = RouterBundle(
                 query=query,
                 selected_skills=selected,
-                communities=[],
                 workflow_hints=[],
                 wiki_pages=[],
             )
@@ -298,7 +297,6 @@ class RouterRouteTests(unittest.TestCase):
             bundle = RouterBundle(
                 query=query,
                 selected_skills=selected,
-                communities=[],
                 workflow_hints=[],
                 wiki_pages=[],
             )
@@ -355,7 +353,6 @@ class RouterRouteTests(unittest.TestCase):
             bundle = RouterBundle(
                 query=query,
                 selected_skills=selected,
-                communities=[],
                 workflow_hints=[],
                 wiki_pages=[],
             )

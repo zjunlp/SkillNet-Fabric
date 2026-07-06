@@ -19,8 +19,6 @@ def _expand_seed_skills(
     selected = {item.skill_id: item for item in ranked_seeds}
     seed_ids = set(selected)
     for edge in edges:
-        if edge.type == "member_of":
-            continue
         if edge.source in seed_ids and edge.target in skills:
             _add_graph_expansion(selected, seeds, skills[edge.target], selected[edge.source], edge)
         if edge.target in seed_ids and edge.source in skills:
@@ -160,8 +158,6 @@ def _limit_candidates(
 def _ppr_adjacency(edges: list[Edge], skills: dict[str, SkillNode]) -> dict[str, dict[str, float]]:
     adjacency: dict[str, dict[str, float]] = {skill_id: {} for skill_id in skills}
     for edge in edges:
-        if edge.type == "member_of":
-            continue
         if edge.source not in skills or edge.target not in skills:
             continue
         confidence = max(edge.confidence, 0.0)
@@ -244,8 +240,6 @@ def _ppr_support_sources(edges: list[Edge], skills: dict[str, SkillNode], seed_i
     depths = _ppr_depths(adjacency, seed_ids)
     output: dict[str, list[str]] = {}
     for edge in edges:
-        if edge.type == "member_of":
-            continue
         if edge.source not in skills or edge.target not in skills:
             continue
         source_depth = depths.get(edge.source)

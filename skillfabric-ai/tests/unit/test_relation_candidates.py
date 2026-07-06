@@ -40,14 +40,6 @@ class RelationCandidateTests(unittest.TestCase):
 
         self.assertEqual(pairs, [])
 
-    def test_does_not_generate_candidates_from_community_membership(self) -> None:
-        left = make_skill("skill:left", "left", "Left skill.")
-        right = make_skill("skill:right", "right", "Right skill.")
-
-        pairs = generate_relation_candidates([left, right], [], per_skill_limit=10)
-
-        self.assertEqual(pairs, [])
-
     def test_applies_per_skill_limit_stably(self) -> None:
         hub = make_skill("skill:hub", "hub", "Hub skill.")
         skills = [hub] + [

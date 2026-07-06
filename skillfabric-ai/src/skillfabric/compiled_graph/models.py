@@ -7,44 +7,8 @@ from typing import Any, Literal
 
 from skillfabric.registry.models import SkillNode
 
-NodeType = Literal["skill", "community"]
-EdgeType = Literal["similar_to", "member_of", "compose_with", "depend_on"]
-
-
-@dataclass(slots=True)
-class CommunityNode:
-    """Community node in the canonical KG."""
-
-    id: str
-    type: Literal["community"]
-    name: str
-    summary: str
-    member_count: int
-    representative_skill_ids: list[str] = field(default_factory=list)
-    cohesion_score: float = 0.0
-    task_patterns: list[str] = field(default_factory=list)
-    summary_provenance: str = "deterministic_fallback"
-    model_id: str = "deterministic-community"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> CommunityNode:
-        return cls(
-            id=str(payload["id"]),
-            type="community",
-            name=str(payload.get("name", "")),
-            summary=str(payload.get("summary", "")),
-            member_count=int(payload.get("member_count", 0)),
-            representative_skill_ids=[
-                str(item) for item in payload.get("representative_skill_ids", [])
-            ],
-            cohesion_score=float(payload.get("cohesion_score", 0.0)),
-            task_patterns=[str(item) for item in payload.get("task_patterns", [])],
-            summary_provenance=str(payload.get("summary_provenance", "deterministic_fallback")),
-            model_id=str(payload.get("model_id", "deterministic-community")),
-        )
+NodeType = Literal["skill"]
+EdgeType = Literal["similar_to", "compose_with", "depend_on"]
 
 
 @dataclass(slots=True)
@@ -116,7 +80,7 @@ class GraphDocument:
 
     schema_version: str
     build_id: str
-    nodes: list[SkillNode | CommunityNode]
+    nodes: list[SkillNode]
     edges: list[Edge]
     stats: dict[str, Any]
     config_digest: str
@@ -125,12 +89,7 @@ class GraphDocument:
         return {
             "schema_version": self.schema_version,
             "build_id": self.build_id,
-            "nodes": [
-                node.to_dict(include_raw_text=False)
-                if isinstance(node, SkillNode)
-                else node.to_dict()
-                for node in self.nodes
-            ],
+            "nodes": [node.to_dict(include_raw_text=False) for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
             "stats": self.stats,
             "config_digest": self.config_digest,
@@ -138,12 +97,10 @@ class GraphDocument:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> GraphDocument:
-        nodes: list[SkillNode | CommunityNode] = []
+        nodes: list[SkillNode] = []
         for item in payload.get("nodes", []):
             if item.get("type") == "skill":
                 nodes.append(SkillNode.from_dict(item))
-            elif item.get("type") == "community":
-                nodes.append(CommunityNode.from_dict(item))
         return cls(
             schema_version=str(payload.get("schema_version", "1.0")),
             build_id=str(payload.get("build_id", "")),

@@ -78,8 +78,6 @@ def _page_identity(rel_path: str, metadata: dict[str, str]) -> tuple[str, str]:
         return "index", rel_path.removesuffix("/index.md").replace("/", "-") + "-index"
     if rel_path.startswith("skills/cards/"):
         return "skill", metadata.get("skill_id", f"skill:{Path(rel_path).stem}")
-    if rel_path.startswith("communities/"):
-        return "community", metadata.get("community_id", Path(rel_path).stem)
     if rel_path.startswith("workflows/"):
         return "workflow", metadata.get("workflow_id", Path(rel_path).stem)
     if rel_path == "index.md":

@@ -614,7 +614,6 @@ def _build_summary(
         "graph": {
             "node_count": len(graph_result.graph.nodes),
             "edge_count": len(graph_result.graph.edges),
-            "community_count": len(graph_result.communities),
         },
         "artifacts": artifacts,
         "cache": {

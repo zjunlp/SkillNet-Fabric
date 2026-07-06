@@ -99,7 +99,6 @@ def materialize_query_wiki(
     for path in (
         query_root / "skills" / "cards",
         query_root / "skills" / "sources",
-        query_root / "communities",
         query_root / "workflows",
         query_root / "edges",
     ):
@@ -207,15 +206,6 @@ def materialize_query_wiki(
             }
         )
 
-    community_rows = _copy_communities(
-        workspace,
-        query_root,
-        graph.edges,
-        included_skill_ids,
-        external_slug_pattern,
-        copied_pages,
-        missing_pages,
-    )
     included_workflows, excluded_workflows = _copy_closed_workflows(
         workspace,
         query_root,
@@ -254,7 +244,6 @@ def materialize_query_wiki(
             "max_frontier_skills": max_frontier_skills,
         },
         "skills": skills_manifest,
-        "communities": community_rows,
         "included_workflows": included_workflows,
         "excluded_workflows": excluded_workflows,
         "copied_pages": copied_pages,
@@ -304,33 +293,6 @@ def _frontier_edges(
             if len(frontier_ids) >= max_frontier_skills:
                 return selected
     return selected
-
-
-def _copy_communities(
-    workspace: Workspace,
-    query_root: Path,
-    edges: list[Edge],
-    included_skill_ids: set[str],
-    external_slug_pattern: re.Pattern[str] | None,
-    copied_pages: list[str],
-    missing_pages: list[dict[str, str]],
-) -> list[dict[str, Any]]:
-    members: dict[str, list[str]] = {}
-    for edge in edges:
-        if edge.type == "member_of" and edge.source in included_skill_ids:
-            members.setdefault(edge.target, []).append(edge.source)
-    rows: list[dict[str, Any]] = []
-    for community_id, skill_ids in sorted(members.items()):
-        source = workspace.wiki_communities_dir / f"{slug(community_id)}.md"
-        target = query_root / "communities" / f"{slug(community_id)}.md"
-        page_path = ""
-        if _copy_sanitized_page(source, target, included_skill_ids, external_slug_pattern):
-            copied_pages.append(_rel(query_root, target))
-            page_path = _rel(query_root, target)
-        else:
-            missing_pages.append({"community_id": community_id, "source_path": str(source)})
-        rows.append({"community_id": community_id, "skill_ids": sorted(skill_ids), "page_path": page_path})
-    return rows
 
 
 def _copy_closed_workflows(
@@ -608,8 +570,6 @@ def _page_identity(rel: str, metadata: dict[str, Any]) -> tuple[str, str]:
         return "index", rel.removesuffix("/index.md").replace("/", "-") + "-index"
     if rel.startswith("skills/cards/"):
         return "skill", str(metadata.get("skill_id", f"skill:{Path(rel).stem}"))
-    if rel.startswith("communities/"):
-        return "community", str(metadata.get("community_id", Path(rel).stem))
     if rel.startswith("workflows/"):
         return "workflow", str(metadata.get("workflow_id", Path(rel).stem))
     return str(metadata.get("type", "page")).lower(), Path(rel).stem
@@ -645,10 +605,6 @@ def _render_index(manifest: dict[str, Any]) -> str:
             f"| sources={_format_card_value(skill.get('sources')) or 'none'} | {status} "
             f"| card={skill.get('card_path', '')} | source={skill.get('source_path', '')}"
         )
-    lines.append("")
-    lines.append("## Communities")
-    for community in manifest["communities"]:
-        lines.append(f"- {community['community_id']} | {', '.join(community['skill_ids'])}")
     lines.append("")
     lines.append("## Workflows")
     for workflow in manifest["included_workflows"]:

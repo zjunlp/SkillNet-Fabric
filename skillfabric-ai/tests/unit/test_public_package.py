@@ -491,7 +491,7 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn("wiki_summary", metrics)
             self.assertEqual(
                 metrics["wiki_summary"]["fallback_count"],
-                result.stats["skill_count"] + len(result.communities),
+                result.stats["skill_count"],
             )
 
     def test_python_facade_rejects_unknown_embedding_provider(self) -> None:

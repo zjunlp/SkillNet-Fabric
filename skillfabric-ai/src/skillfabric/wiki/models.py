@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-WikiPageType = Literal["skill", "community", "workflow", "debug", "index", "health"]
+WikiPageType = Literal["skill", "workflow", "debug", "index", "health"]
 
 
 @dataclass(slots=True)
@@ -81,7 +81,6 @@ class WikiHealthReport:
     """Health report for a generated wiki."""
 
     missing_skill_pages: list[str] = field(default_factory=list)
-    missing_community_pages: list[str] = field(default_factory=list)
     broken_links: list[str] = field(default_factory=list)
     orphan_skill_pages: list[str] = field(default_factory=list)
     skills_without_interface: list[str] = field(default_factory=list)
@@ -94,7 +93,6 @@ class WikiHealthReport:
     def summary(self) -> dict[str, int]:
         return {
             "missing_skill_page_count": len(self.missing_skill_pages),
-            "missing_community_page_count": len(self.missing_community_pages),
             "broken_link_count": len(self.broken_links),
             "orphan_skill_page_count": len(self.orphan_skill_pages),
             "skill_without_interface_count": len(self.skills_without_interface),

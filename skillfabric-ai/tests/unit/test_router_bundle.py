@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
-from skillfabric.compiled_graph.models import CommunityNode, Edge, GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import build_embedding_store
 from skillfabric.registry.models import SkillNode
@@ -342,24 +342,13 @@ class RouterBundleTests(unittest.TestCase):
                 "Write markdown reports from KPI JSON.",
                 "Compose a final markdown report from KPI outputs.",
             )
-            community = CommunityNode(
-                id="community:finance",
-                type="community",
-                name="Financial Document Skills",
-                summary="Skills for parsing financial documents and writing reports.",
-                member_count=3,
-                representative_skill_ids=[parser.id, kpi.id],
-            )
             graph = GraphDocument(
                 schema_version="1.0",
                 build_id="router-test",
-                nodes=[parser, kpi, writer, community],
+                nodes=[parser, kpi, writer],
                 edges=[
                     Edge(source=parser.id, target=kpi.id, type="depend_on", confidence=0.97, reason="KPI extraction consumes parsed tables."),
                     Edge(source=kpi.id, target=writer.id, type="depend_on", confidence=0.92, reason="Report writing consumes extracted KPI JSON."),
-                    Edge(source=parser.id, target=community.id, type="member_of", confidence=1.0),
-                    Edge(source=kpi.id, target=community.id, type="member_of", confidence=1.0),
-                    Edge(source=writer.id, target=community.id, type="member_of", confidence=1.0),
                 ],
                 stats={},
                 config_digest="router-test",
@@ -408,7 +397,6 @@ class RouterBundleTests(unittest.TestCase):
                 workspace.wiki_dir / "index.md",
                 workspace.wiki_skill_cards_dir / "pdf-table-parser.md",
                 workspace.wiki_skill_cards_dir / "financial-kpi-extractor.md",
-                workspace.wiki_communities_dir / "finance.md",
             ):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("# page\n", encoding="utf-8")
@@ -434,9 +422,10 @@ class RouterBundleTests(unittest.TestCase):
             self.assertTrue(any(item["skill_id"] == kpi.id and "ppr:depend_on" in item["sources"] for item in payload["selected_skills"]))
             self.assertTrue(any(item["skill_id"] == kpi.id and item["ppr_score"] > 0 for item in payload["selected_skills"]))
             self.assertEqual([hint["canonical_object"] for hint in payload["workflow_hints"]], ["csv_table"])
+            self.assertNotIn("communities", payload)
             self.assertFalse(any(page.endswith("wiki/index.md") for page in payload["wiki_pages"]))
             self.assertTrue(any(page.endswith("wiki/skills/cards/pdf-table-parser.md") for page in payload["wiki_pages"]))
-            self.assertTrue(any(page.endswith("wiki/communities/finance.md") for page in payload["wiki_pages"]))
+            self.assertFalse(any("/communities/" in page for page in payload["wiki_pages"]))
             self.assertFalse(any("/debug/" in page for page in payload["wiki_pages"]))
 
     def test_ppr_recalls_two_hop_skills_and_preserves_depend_on_direction(self) -> None:
@@ -446,22 +435,13 @@ class RouterBundleTests(unittest.TestCase):
             goal = _skill("skill:goal", "goal-runner", "Run the exact target task.", "needle_target run the requested task.")
             prereq = _skill("skill:prereq", "prerequisite-maker", "Prepare required state.", "Prepare state.")
             second = _skill("skill:second", "second-hop-helper", "Prepare prerequisite input.", "Support prerequisite.")
-            community = CommunityNode(
-                id="community:test",
-                type="community",
-                name="Test Community",
-                summary="Membership should not propagate candidates.",
-                member_count=3,
-                representative_skill_ids=[goal.id],
-            )
             graph = GraphDocument(
                 schema_version="1.0",
                 build_id="ppr-test",
-                nodes=[goal, prereq, second, community],
+                nodes=[goal, prereq, second],
                 edges=[
                     Edge(source=goal.id, target=prereq.id, type="depend_on", confidence=1.0),
                     Edge(source=prereq.id, target=second.id, type="compose_with", confidence=1.0),
-                    Edge(source=goal.id, target=community.id, type="member_of", confidence=1.0),
                 ],
                 stats={},
                 config_digest="ppr-test",
@@ -490,7 +470,6 @@ class RouterBundleTests(unittest.TestCase):
             self.assertIn("ppr:depend_on", selected[prereq.id].sources)
             self.assertIn("ppr:compose_with", selected[second.id].sources)
             self.assertGreater(selected[prereq.id].ppr_score, selected[second.id].ppr_score)
-            self.assertFalse(any(source.startswith("ppr:member_of") for item in selected.values() for source in item.sources))
 
     def test_one_hop_ablation_does_not_recall_two_hop_skill(self) -> None:
         with TemporaryDirectory() as tmp:

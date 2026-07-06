@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from collections import Counter
 
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge
@@ -68,47 +67,6 @@ def _skill_page(
         title=skill.name,
         text=text,
     )
-
-
-def _community_page(
-    source: WikiSource,
-    community_id: str,
-    config: WikiBuildConfig,
-    summaries: dict[tuple[str, str], WikiSummaryRecord],
-    workspace: Workspace,
-) -> WikiPage:
-    community = source.communities[community_id]
-    members = source.community_members.get(community_id, [])
-    common = _common_interface_terms(source, members)
-    summary = summaries[("community", community_id)]
-    important_edges = [
-        edge
-        for edge in source.core_edges
-        if edge.type in {"compose_with", "depend_on"}
-        and edge.source in members
-        and edge.target in members
-    ]
-    text = "\n\n".join(
-        [
-            frontmatter(
-                {
-                    "type": "Community",
-                    "title": community.name,
-                    "description": _one_line(summary.summary or community.summary),
-                    "community_id": community_id,
-                    "tags": ["community"],
-                }
-            ),
-            f"# {community.name}",
-            "## Capability Cluster Summary\n\n" + (summary.summary or community.summary),
-            "## Representative Skills\n\n" + bullet_list([wiki_link("skills", item, source.skills[item].name) for item in community.representative_skill_ids if item in source.skills]),
-            "## Member Skills\n\n" + bullet_list([wiki_link("skills", item, source.skills[item].name) for item in members if item in source.skills]),
-            "## Common Task Patterns\n\n" + bullet_list(community.task_patterns or [summary.workflow_summary or summary.summary or community.summary]),
-            "## Common Contract Terms\n\n" + bullet_list([f"{key}: {', '.join(values)}" for key, values in common.items() if values]),
-            "## Important Skill Relations\n\n" + _render_core_links(source, important_edges, current_skill_id="", limit=config.max_neighbors_per_section),
-        ]
-    ) + "\n"
-    return WikiPage(page_path(workspace.wiki_dir, "communities", community_id), "community", community_id, community.name, text)
 
 
 def _workflow_page(
@@ -248,7 +206,7 @@ def _render_composition_notes(
     values: list[str] = []
     relation_text = _render_core_links(
         source,
-        [edge for edge in core_links if edge.type in {"compose_with", "depend_on", "member_of"}],
+        [edge for edge in core_links if edge.type in {"compose_with", "depend_on"}],
         current_skill_id=current_skill_id,
         limit=limit,
     )
@@ -280,13 +238,6 @@ def _render_core_links(source: WikiSource, edges: list[Edge], *, current_skill_i
     for edge in sorted(edges, key=lambda item: (item.type, -item.confidence, -item.weight, item.source, item.target)):
         if len(items) >= limit:
             break
-        if edge.type == "member_of":
-            if edge.target in source.communities:
-                key = ("member_of", edge.target)
-                if key not in seen:
-                    items.append(f"member_of: {wiki_link('communities', edge.target, source.communities[edge.target].name)}")
-                    seen.add(key)
-            continue
         if current_skill_id:
             label, other = _directed_link_label(edge, current_skill_id)
         else:
@@ -369,19 +320,6 @@ def _directed_link_label(edge: Edge, current_skill_id: str) -> tuple[str, str]:
     return edge.type, other
 
 
-def _common_interface_terms(source: WikiSource, members: list[str]) -> dict[str, list[str]]:
-    output: dict[str, list[str]] = {}
-    for field_group in ("requires", "produces", "uses_tools"):
-        counter: Counter[str] = Counter()
-        for skill_id in members:
-            interface = source.interfaces.get(skill_id)
-            if interface is None:
-                continue
-            counter.update(_field_names(list(getattr(interface, field_group))))
-        output[field_group] = [name for name, _count in counter.most_common(8)]
-    return output
-
-
 def _content_hash(values: list[str]) -> str:
     digest = hashlib.sha256()
     for value in values:
@@ -396,7 +334,6 @@ def _first_paragraph(text: str) -> str:
         "title:",
         "description:",
         "skill_id:",
-        "community_id:",
         "artifact_id:",
         "scenario_id:",
         "name:",

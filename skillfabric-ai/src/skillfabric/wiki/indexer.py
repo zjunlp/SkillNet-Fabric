@@ -32,7 +32,6 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         "",
         "## Corpus",
         f"- skills: {len(source.skills)}",
-        f"- communities: {len(source.communities)}",
         f"- workflows: {len(source.execution_index)}",
         "",
         "## Skill Cards",
@@ -45,12 +44,6 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         if description:
             lines.append(f"  summary: {description}")
         lines.append(f"  source: [full SKILL.md]({source_path})")
-    if source.communities:
-        lines.extend(["", "## Communities"])
-        for community_id, community in sorted(source.communities.items(), key=lambda item: item[1].name):
-            summary = _clean_summary(page_summaries.get(community_id, community.summary))
-            suffix = f": {summary}" if summary else ""
-            lines.append(f"- [{community.name}](communities/{slug(community_id)}.md){suffix}")
     if source.execution_index:
         lines.extend(["", "## Workflows"])
         for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):

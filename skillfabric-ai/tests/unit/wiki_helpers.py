@@ -9,9 +9,6 @@ from skillfabric.compiled_graph.builder import BuildConfig, build_graph
 from skillfabric.compiled_graph.canonicalization.compiler import (
     DeterministicCanonicalizationProvider,
 )
-from skillfabric.compiled_graph.communities.providers import (
-    DeterministicCommunityRefinementProvider,
-)
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
@@ -103,7 +100,6 @@ def _build_fixture_workspace_uncached(workspace: Path) -> None:
             interface_extractor=DeterministicInterfaceExtractor(),
             execution_validator=DeterministicExecutionFlowValidator(),
             canonicalization_provider=DeterministicCanonicalizationProvider(),
-            community_refinement_provider=DeterministicCommunityRefinementProvider(),
             embedding_provider=FakeEmbeddingProvider(),
             build_id="wiki-test-build",
         )

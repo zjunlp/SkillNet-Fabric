@@ -24,16 +24,9 @@ def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> Wik
         str(workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md")
         for skill_id in source.skills
     }
-    expected_community_pages = {
-        str(workspace.wiki_communities_dir / f"{slug(community_id)}.md")
-        for community_id in source.communities
-    }
     for path in expected_skill_pages:
         if not Path(path).exists():
             report.missing_skill_pages.append(path)
-    for path in expected_community_pages:
-        if not Path(path).exists():
-            report.missing_community_pages.append(path)
 
     inbound: dict[str, int] = {skill_id: 0 for skill_id in source.skills}
     for page in wiki_dir.rglob("*.md"):
@@ -114,7 +107,6 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
     sections.append("\n".join(f"- {key}: {value}" for key, value in report.summary.items()))
     details = {
         "Missing Skill Pages": report.missing_skill_pages,
-        "Missing Community Pages": report.missing_community_pages,
         "Broken Links": report.broken_links,
         "Orphan Skill Pages": report.orphan_skill_pages,
         "Skills Without Interface": report.skills_without_interface,

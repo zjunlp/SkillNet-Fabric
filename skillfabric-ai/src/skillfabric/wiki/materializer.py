@@ -11,9 +11,6 @@ from skillfabric.wiki.indexer import append_log, render_index
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage, WikiSummaryRecord
 from skillfabric.wiki.renderers import (
-    _common_interface_terms,
-    _community_page,
-    _content_hash,
     _debug_pages,
     _first_paragraph,
     _skill_page,
@@ -64,8 +61,6 @@ def _entity_pages(
     for _skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         pages.append(_skill_page(source, skill, config, summaries, workspace))
         pages.append(_skill_source_page(skill, workspace))
-    for community_id, _community in sorted(source.communities.items(), key=lambda item: item[1].name):
-        pages.append(_community_page(source, community_id, config, summaries, workspace))
     for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
         pages.append(_workflow_page(source, record, workspace))
     if config.include_debug_pages:
@@ -80,7 +75,7 @@ def _directory_page_summaries(pages: list[WikiPage]) -> dict[str, str]:
     for page in pages:
         if _is_skill_source_page(page):
             continue
-        if page.page_type in {"skill", "community", "workflow"}:
+        if page.page_type in {"skill", "workflow"}:
             summaries[page.entity_id] = _first_paragraph(page.text)
     return summaries
 
@@ -129,7 +124,6 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
         workspace.wiki_dir / "wiki_health_report.md",
         workspace.wiki_dir / "log.md",
         workspace.wiki_skills_dir / "index.md",
-        workspace.wiki_communities_dir / "index.md",
         workspace.wiki_workflows_dir / "index.md",
         workspace.wiki_references_dir / "index.md",
     ):
@@ -142,7 +136,6 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
         shutil.rmtree(stale_wiki_debug)
     for path in (
         workspace.wiki_skill_cards_dir,
-        workspace.wiki_communities_dir,
         workspace.wiki_workflows_dir,
         workspace.wiki_skill_sources_dir,
     ):
@@ -160,6 +153,7 @@ def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:
     return (
         workspace.wiki_dir / "artifacts",
         workspace.wiki_dir / "scenarios",
+        workspace.wiki_dir / "communities",
         workspace.wiki_dir / "references",
         workspace.wiki_skills_dir / "source",
         workspace.wiki_dir / "references" / "skill-sources",
@@ -178,21 +172,6 @@ def _summary_records(
                 "entity_id": skill_id,
                 "content_hash": skill.content_hash,
                 "payload": _skill_summary_payload(skill, source.interfaces.get(skill_id)),
-            }
-        )
-    for community_id, community in sorted(source.communities.items(), key=lambda item: item[1].name):
-        members = source.community_members.get(community_id, [])
-        requests.append(
-            {
-                "page_type": "community",
-                "entity_id": community_id,
-                "content_hash": _content_hash([community_id, *members]),
-                "payload": {
-                    "name": community.name,
-                    "summary": community.summary,
-                    "member_count": len(members),
-                    **_common_interface_terms(source, members),
-                },
             }
         )
     return summarizer.summarize_many(requests)

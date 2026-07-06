@@ -7,9 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 
 from skillfabric.compiled_graph.execution.models import ExecutionIndexRecord
-from skillfabric.compiled_graph.models import CommunityNode, Edge, GraphDocument
+from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.registry.models import SkillNode
-from skillfabric.router.models import RouterCommunityContext, RouterWorkflowHint
+from skillfabric.router.models import RouterWorkflowHint
 from skillfabric.storage import Workspace
 from skillfabric.wiki.pages import slug
 
@@ -55,31 +55,6 @@ def _first_existing(*paths: Path) -> Path:
     return paths[0]
 
 
-def _communities(graph: GraphDocument) -> dict[str, CommunityNode]:
-    return {node.id: node for node in graph.nodes if isinstance(node, CommunityNode)}
-
-
-def _selected_communities(
-    edges: list[Edge],
-    communities: dict[str, CommunityNode],
-    selected_ids: set[str],
-) -> list[RouterCommunityContext]:
-    members: dict[str, list[str]] = {}
-    for edge in edges:
-        if edge.type == "member_of" and edge.source in selected_ids and edge.target in communities:
-            members.setdefault(edge.target, []).append(edge.source)
-    output = [
-        RouterCommunityContext(
-            community_id=community_id,
-            name=communities[community_id].name,
-            summary=communities[community_id].summary,
-            selected_member_ids=skill_ids,
-        )
-        for community_id, skill_ids in members.items()
-    ]
-    return sorted(output, key=lambda item: (-len(item.selected_member_ids), item.community_id))
-
-
 def _workflow_hints(
     workspace: Workspace,
     selected_ids: set[str],
@@ -117,15 +92,10 @@ def _workflow_hints(
 def _wiki_pages(
     workspace: Workspace,
     selected_ids: set[str],
-    communities: list[RouterCommunityContext],
 ) -> list[str]:
     pages: list[Path] = []
     for skill_id in sorted(selected_ids):
         path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
-        if path.exists():
-            pages.append(path)
-    for community in communities:
-        path = workspace.wiki_communities_dir / f"{slug(community.community_id)}.md"
         if path.exists():
             pages.append(path)
     return [str(path) for path in pages if "/debug/" not in str(path)]

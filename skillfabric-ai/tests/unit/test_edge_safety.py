@@ -67,7 +67,7 @@ class EdgeSafetyTests(unittest.TestCase):
 
         self.assertEqual(result.removed_depend_on_cycle_edges, [c_to_a])
         self.assertIn(similar, result.edges)
-        self.assertFalse(analyze_health(graph, communities=[]).depend_on_cycles)
+        self.assertFalse(analyze_health(graph).depend_on_cycles)
 
     def test_deterministic_accept_has_strong_cycle_rank(self) -> None:
         deterministic = _edge(

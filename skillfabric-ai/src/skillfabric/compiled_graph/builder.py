@@ -25,13 +25,6 @@ from skillfabric.compiled_graph.canonicalization.models import (
     CanonicalizationBuild,
     CanonicalizationProvider,
 )
-from skillfabric.compiled_graph.communities.assignment import (
-    assign_final_communities,
-)
-from skillfabric.compiled_graph.communities.providers import (
-    CommunityRefinementProvider,
-    DeterministicCommunityRefinementProvider,
-)
 from skillfabric.compiled_graph.execution.compiler import (
     ExecutionGraphBuild,
     compile_execution_graph,
@@ -62,7 +55,7 @@ from skillfabric.compiled_graph.interface.health import (
     render_interface_health_report,
 )
 from skillfabric.compiled_graph.interface.models import InterfaceExtractionRecord, SkillInterface
-from skillfabric.compiled_graph.models import CommunityNode, Edge, GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.compiled_graph.relations.candidates import generate_relation_candidates
 from skillfabric.compiled_graph.relations.edge_safety import enforce_depend_on_acyclicity
 from skillfabric.compiled_graph.relations.similarity import build_similar_edges
@@ -101,7 +94,6 @@ class BuildConfig:
     execution_validator: ExecutionFlowValidator | None = None
     interface_extractor: SkillInterfaceExtractor | None = None
     canonicalization_provider: CanonicalizationProvider | None = None
-    community_refinement_provider: CommunityRefinementProvider | None = None
     embedding_provider: EmbeddingProvider | None = None
     llm_env_path: str | Path = ".env"
     build_id: str | None = None
@@ -122,7 +114,6 @@ class BuildResult:
     """Result returned by a KG build."""
 
     graph: GraphDocument
-    communities: list[CommunityNode]
     skills: list[SkillNode]
     workspace: Workspace
     interfaces: dict[str, SkillInterface] = field(default_factory=dict)
@@ -135,15 +126,14 @@ class BuildResult:
         """Return graph neighbors for a skill."""
 
         output: dict[tuple[str, str], dict[str, Any]] = {}
-        community_names = {
-            node.id: node.name for node in self.communities
-        }
         for edge in self.graph.edges:
             if edge.source == skill_id:
-                record = _neighbor_record(edge, edge.target, community_names)
+                record = _neighbor_record(edge, edge.target)
             elif edge.target == skill_id:
-                record = _neighbor_record(edge, edge.source, community_names)
+                record = _neighbor_record(edge, edge.source)
             else:
+                continue
+            if not str(record["skill_id"]).startswith("skill:"):
                 continue
             key = (str(record["skill_id"]), str(record["edge_type"]))
             existing = output.get(key)
@@ -188,7 +178,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
         interface_extractor = _resolve_interface_extractor(config)
         execution_validator = _resolve_execution_validator(config)
         canonicalization_provider = _resolve_canonicalization_provider(config)
-        community_refinement_provider = _resolve_community_refinement_provider(config)
         workspace.write_json(
             workspace.checkpoint_path,
             {"stage": "scan", "build_id": build_id, "config_digest": config_digest},
@@ -321,37 +310,18 @@ def build_graph(config: BuildConfig) -> BuildResult:
         relation_validation_summary = summarize_relation_validation_records(validation_records)
         compose_depend_edges = [record.edge for record in validation_records if record.edge is not None]
         edge_evidence_rows = [record.to_record() for record in validation_records]
-        relation_edges_for_assignment = project_execution_records(execution_records, list(compose_depend_edges))
         stage_timer.mark("compose_depend")
-
-        workspace.write_json(
-            workspace.checkpoint_path,
-            {"stage": "community_clustering", "build_id": build_id, "config_digest": config_digest},
-        )
-        communities, member_edges, _membership, community_stats = assign_final_communities(
-            skills,
-            provider=community_refinement_provider,
-            refinement_cache_path=workspace.cache_dir / "community_refinement_cache.json",
-            similar_edges=similar_edges,
-            relation_edges=relation_edges_for_assignment,
-            interfaces=interfaces,
-            job_options=llm_job_options,
-        )
-        stage_timer.mark("community_clustering")
 
         all_edges: list[Edge] = []
         all_edges.extend(similar_edges)
-        all_edges.extend(member_edges)
         all_edges.extend(compose_depend_edges)
         all_edges = project_execution_records(execution_records, all_edges)
         edge_safety = enforce_depend_on_acyclicity(all_edges)
         all_edges = edge_safety.edges
         stats = {
             "skill_count": len(skills),
-            "community_count": len(communities),
             "edge_count": len(all_edges),
             "similar_to_count": len(similar_edges),
-            "member_of_count": len(member_edges),
             "compose_depend_candidate_count": len(relation_candidates),
             "compose_depend_edge_count": len(compose_depend_edges),
             "skipped_unchanged": skipped_unchanged,
@@ -361,7 +331,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
             "interface_accepted_count": sum(1 for record in interface_records if record.accepted),
             "interface_rejected_count": sum(1 for record in interface_records if not record.accepted),
             "interface_model_id": interface_extractor.model_id,
-            **community_stats,
             "canonicalization_model_id": canonicalization_provider.model_id,
             "raw_contract_object_count": len(canonicalization.raw_terms),
             "canonical_object_count": len(canonicalization.objects),
@@ -406,13 +375,13 @@ def build_graph(config: BuildConfig) -> BuildResult:
         graph = GraphDocument(
             schema_version="1.0",
             build_id=build_id,
-            nodes=[*skills, *communities],
+            nodes=skills,
             edges=all_edges,
             stats=stats,
             config_digest=config_digest,
         )
 
-        _write_graph_artifacts(workspace, graph, communities, edge_evidence_rows, validation_records)
+        _write_graph_artifacts(workspace, graph, edge_evidence_rows, validation_records)
         _write_compiled_graph_artifact(
             workspace,
             graph,
@@ -425,7 +394,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
         )
         health = render_health_report(
             graph,
-            communities,
             cache_hits=0,
             llm_validations=int(relation_validation_summary.get("validator_calls", 0)),
             skipped_unchanged=skipped_unchanged,
@@ -438,20 +406,11 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "schema_version": graph.schema_version,
                 "config_digest": config_digest,
                 "skill_count": len(skills),
-                "community_count": len(communities),
                 "edge_count": len(all_edges),
                 "interface_count": stats["interface_count"],
                 "interface_accepted_count": stats["interface_accepted_count"],
                 "interface_rejected_count": stats["interface_rejected_count"],
                 "interface_model_id": stats["interface_model_id"],
-                "community_refinement_model_id": stats["community_refinement_model_id"],
-                "community_clustering_algorithm": stats["community_clustering_algorithm"],
-                "community_projection_similar_to_count": stats["community_projection_similar_to_count"],
-                "community_projection_compose_with_count": stats["community_projection_compose_with_count"],
-                "community_projection_depend_on_ignored_count": stats[
-                    "community_projection_depend_on_ignored_count"
-                ],
-                "community_oversize_split_count": stats["community_oversize_split_count"],
                 "canonicalization_model_id": stats["canonicalization_model_id"],
                 "raw_contract_object_count": stats["raw_contract_object_count"],
                 "canonical_object_count": stats["canonical_object_count"],
@@ -474,13 +433,11 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "artifacts": {
                     "graph": str(workspace.graph_dir / "graph.json"),
                     "compiled_skill_graph": str(workspace.graph_dir / "compiled.json"),
-                    "communities": str(workspace.graph_dir / "communities.json"),
                     "edge_evidence": str(workspace.graph_dir / "edge_evidence.jsonl"),
                     "health_report": str(workspace.graph_dir / "graph_health_report.md"),
                     "skill_interfaces": str(workspace.graph_dir / "contracts.jsonl"),
                     "interface_evidence": str(workspace.graph_dir / "interface_evidence.jsonl"),
                     "interface_health_report": str(workspace.graph_dir / "interface_health_report.md"),
-                    "community_refinement_cache": str(workspace.cache_dir / "community_refinement_cache.json"),
                     "canonical_objects": str(workspace.execution_dir / "canonical_objects.jsonl"),
                     "canonical_aliases": str(workspace.execution_dir / "canonical_aliases.jsonl"),
                     "canonicalization_cache": str(workspace.cache_dir / "canonicalization_cache.json"),
@@ -500,7 +457,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
         )
     return BuildResult(
         graph=graph,
-        communities=communities,
         skills=skills,
         interfaces=interfaces,
         execution_graph=execution_graph,
@@ -518,18 +474,6 @@ def load_graph(workspace_root: str | Path = ".skillfabric") -> GraphDocument:
     return GraphDocument.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
-def load_communities(workspace_root: str | Path = ".skillfabric") -> list[CommunityNode]:
-    """Load communities.json from a workspace."""
-
-    path = Path(workspace_root) / "graph" / "communities.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return [
-        CommunityNode.from_dict(item["community"])
-        for item in payload.get("communities", [])
-        if isinstance(item, dict) and isinstance(item.get("community"), dict)
-    ]
-
-
 def get_skill_neighbors(
     skill_id: str,
     *,
@@ -539,8 +483,7 @@ def get_skill_neighbors(
     """Query skill neighbors from graph.json."""
 
     graph = load_graph(workspace_root)
-    communities = load_communities(workspace_root)
-    result = BuildResult(graph=graph, communities=communities, skills=[], workspace=Workspace(workspace_root))
+    result = BuildResult(graph=graph, skills=[], workspace=Workspace(workspace_root))
     return result.neighbors(skill_id)[:limit]
 
 
@@ -566,30 +509,10 @@ def _write_registry(workspace: Workspace, skills: list[SkillNode]) -> None:
 def _write_graph_artifacts(
     workspace: Workspace,
     graph: GraphDocument,
-    communities: list[CommunityNode],
     edge_evidence_rows: list[dict[str, Any]],
     validation_records: list[Any],
 ) -> None:
     workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
-    membership: dict[str, list[str]] = {}
-    for edge in graph.edges:
-        if edge.type == "member_of":
-            membership.setdefault(edge.target, []).append(edge.source)
-    workspace.write_json(
-        workspace.graph_dir / "communities.json",
-        {
-            "schema_version": "1.0",
-            "communities": [
-                {
-                    "community": community.to_dict(),
-                    "members": sorted(membership.get(community.id, [])),
-                    "summary_provenance": community.summary_provenance,
-                    "model_id": community.model_id,
-                }
-                for community in communities
-            ],
-        },
-    )
     workspace.write_jsonl(workspace.graph_dir / "edge_evidence.jsonl", edge_evidence_rows)
     workspace.write_json(
         workspace.graph_dir / "relation_validation_summary.json",
@@ -793,7 +716,6 @@ def _write_build_metrics(
                 "interface": stats.get("interface_model_id", ""),
                 "canonicalization": stats.get("canonicalization_model_id", ""),
                 "execution": stats.get("execution_model_id", ""),
-                "community_refinement": stats.get("community_refinement_model_id", ""),
             },
         },
     )
@@ -860,7 +782,6 @@ def _config_digest(config: BuildConfig) -> str:
         "skip_interface_extraction": config.skip_interface_extraction,
         "skip_execution_layer": config.skip_execution_layer,
         "canonicalization_provider": type(config.canonicalization_provider).__name__ if config.canonicalization_provider else "",
-        "community_refinement_provider": type(config.community_refinement_provider).__name__ if config.community_refinement_provider else "",
         "execution_bucket_limit": config.execution_bucket_limit,
         "llm_concurrency": config.llm_concurrency,
         "llm_rate_limit_per_minute": config.llm_rate_limit_per_minute,
@@ -918,12 +839,6 @@ def _resolve_canonicalization_provider(config: BuildConfig) -> CanonicalizationP
     return LiteLLMCanonicalizationProvider.from_env(env_path=config.llm_env_path)
 
 
-def _resolve_community_refinement_provider(config: BuildConfig) -> CommunityRefinementProvider:
-    if config.community_refinement_provider is not None:
-        return config.community_refinement_provider
-    return DeterministicCommunityRefinementProvider()
-
-
 def _resolve_execution_validator(config: BuildConfig) -> ExecutionFlowValidator:
     if config.execution_validator is not None:
         return config.execution_validator
@@ -944,10 +859,10 @@ def _llm_job_options(config: BuildConfig) -> LLMJobOptions:
     )
 
 
-def _neighbor_record(edge: Edge, neighbor_id: str, community_names: dict[str, str]) -> dict[str, Any]:
+def _neighbor_record(edge: Edge, neighbor_id: str) -> dict[str, Any]:
     return {
         "skill_id": neighbor_id,
-        "name": community_names.get(neighbor_id, neighbor_id.removeprefix("skill:")),
+        "name": neighbor_id.removeprefix("skill:"),
         "edge_type": edge.type,
         "source": edge.source,
         "target": edge.target,
