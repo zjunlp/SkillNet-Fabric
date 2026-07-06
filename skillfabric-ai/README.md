@@ -29,11 +29,10 @@ These values are bridged to the OpenAI-compatible LiteLLM path and to Claude
 Code SDK `ANTHROPIC_*` runtime aliases. Keep real keys in a private shell,
 conda, or untracked `.env` configuration.
 
-Public builds keep LLM-backed skill contracts, wiki summaries, and community
-metadata, while relation and execution validation use selective interface-first
-checks to avoid sending every candidate pair through full `SKILL.md` prompts.
-Plain route/plan uses fallback routing unless you explicitly request the Claude
-Code explorer.
+Public builds keep LLM-backed skill contracts and wiki summaries, while relation
+and execution validation use selective interface-first checks to avoid sending
+every candidate pair through full `SKILL.md` prompts. Plain route/plan uses
+fallback routing unless you explicitly request the Claude Code explorer.
 
 ```bash
 skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off

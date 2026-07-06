@@ -10,7 +10,7 @@ from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.compiled_graph.relations.models import CandidatePair
 from skillfabric.registry.models import SkillNode
 
-RELATION_PROMPT_ID = "relation_validation_low_redundancy"
+RELATION_PROMPT_ID = "relation_validation_low_redundancy_v2"
 COMPACT_RELATION_PROMPT_ID = "relation_validation_compact_interface_first"
 
 
@@ -132,7 +132,7 @@ def build_pair_validation_messages(
             "Step 2: Check for concrete producer-consumer evidence: artifact, data, state, credential, environment, or validation result.",
             "Step 3: If producer-consumer evidence exists, verify the dependency direction from consumer/dependent to producer/prerequisite.",
             "Step 4: If no strict dependency exists, check whether the skills cover distinct complementary stages of a reusable task.",
-            "Step 5: Reject relations based only on shared tools, shared domain, similar names, community membership, or one-off co-occurrence.",
+            "Step 5: Reject relations based only on shared tools, shared domain, similar names, retrieval neighborhood, or one-off co-occurrence.",
             "Step 6: Check whether one skill is merely a broader, narrower, or redundant alternative to the other. If so, output none.",
             "Step 7: Calibrate confidence from the strength, specificity, and directionality of evidence.",
             "Step 8: Return the strict schema with short evidence and a reason that explains the edge decision.",
@@ -141,7 +141,7 @@ def build_pair_validation_messages(
             "Identify each skill's primary capability, input requirements, output artifacts/states, tools, and scope boundaries.",
             "Check whether one skill's concrete output, environment state, or validated intermediate artifact is required by the other skill.",
             "Check whether the skills cover distinct complementary stages of a larger reusable task.",
-            "Reject relations based only on topical similarity, shared tools, broad community membership, or the fact that both could appear in one task.",
+            "Reject relations based only on topical similarity, shared tools, broad retrieval neighborhood, or the fact that both could appear in one task.",
             "Prefer no edge unless the relation would help a downstream recommender expose a smaller, more useful skill set or order selected skills safely.",
         ],
         "edge_semantics": {
@@ -197,7 +197,7 @@ def build_pair_validation_messages(
             "Only validate an edge between skill_a and skill_b. If the text says skill_a or skill_b depends on a third skill that is not this pair, output edge_type=none.",
             "Do not substitute skill_a or skill_b for a missing third prerequisite skill. A third skill dependency is not evidence for this candidate pair.",
             "Accepted edges must cite evidence that connects both candidate skills, either by citing lines from both skills or by citing a line in one skill that explicitly names the other skill.",
-            "Shared tools, shared communities, or textual similarity are not sufficient evidence by themselves.",
+            "Shared tools, retrieval proximity, or textual similarity are not sufficient evidence by themselves.",
             "Use none when evidence is weak or absent.",
             "Cite evidence lines from full_skill_md or candidate_evidence.",
             "Do not invent evidence not present in the provided skill content.",

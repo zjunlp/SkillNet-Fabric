@@ -9,6 +9,8 @@ from skillfabric.registry.models import SkillNode
 
 NodeType = Literal["skill"]
 EdgeType = Literal["similar_to", "compose_with", "depend_on"]
+_EDGE_TYPES = {"similar_to", "compose_with", "depend_on"}
+_NODE_TYPES = {"skill"}
 
 
 @dataclass(slots=True)
@@ -58,10 +60,15 @@ class Edge:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> Edge:
+        if "type" not in payload:
+            raise ValueError("missing edge type")
+        edge_type = str(payload["type"])
+        if edge_type not in _EDGE_TYPES:
+            raise ValueError(f"unsupported edge type: {edge_type}")
         return cls(
             source=str(payload.get("source", "")),
             target=str(payload.get("target", "")),
-            type=payload.get("type", "similar_to"),
+            type=edge_type,
             confidence=float(payload.get("confidence", 0.0)),
             weight=float(payload.get("weight", 0.0)),
             provenance=str(payload.get("provenance", "computed")),
@@ -99,8 +106,12 @@ class GraphDocument:
     def from_dict(cls, payload: dict[str, Any]) -> GraphDocument:
         nodes: list[SkillNode] = []
         for item in payload.get("nodes", []):
-            if item.get("type") == "skill":
-                nodes.append(SkillNode.from_dict(item))
+            if not isinstance(item, dict):
+                raise ValueError("graph nodes must be JSON objects")
+            node_type = str(item.get("type", ""))
+            if node_type not in _NODE_TYPES:
+                raise ValueError(f"unsupported node type: {node_type}")
+            nodes.append(SkillNode.from_dict(item))
         return cls(
             schema_version=str(payload.get("schema_version", "1.0")),
             build_id=str(payload.get("build_id", "")),

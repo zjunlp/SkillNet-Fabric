@@ -22,7 +22,7 @@ def generate_relation_candidates(
 ) -> list[CandidatePair]:
     """Generate bounded workflow-relation candidates from interface contracts.
 
-    ``similar_to`` edges are retrieval/community signals, not workflow evidence.
+    ``similar_to`` edges are retrieval signals, not workflow evidence.
     Explicit textual mentions are intentionally ignored here because broad tool
     names and examples create noisy graph frontier edges. Accepted execution
     flows are projected directly into graph edges by the execution layer, so

@@ -82,7 +82,7 @@ class RelationValidationTests(unittest.TestCase):
         self.assertIn("direction_hint", prompt_text)
         self.assertIn("FULL_A", prompt_text)
         self.assertIn("FULL_B", prompt_text)
-        self.assertEqual(payload["prompt_id"], "relation_validation_low_redundancy")
+        self.assertEqual(payload["prompt_id"], "relation_validation_low_redundancy_v2")
         for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
             self.assertIn(field, payload)
         self.assertIn("decision_workflow", payload)
@@ -224,7 +224,7 @@ class RelationValidationTests(unittest.TestCase):
         self.assertTrue(audit[0]["escalated_from_compact"])
         self.assertIn("Full context", audit[0]["reason"])
 
-    def test_high_confidence_execution_flow_relation_records_deterministic_provenance(self) -> None:
+    def test_execution_flow_relation_uses_validator_instead_of_deterministic_accept(self) -> None:
         skill_a = make_skill("skill:consumer", "consumer", "Consumes parsed data.")
         skill_b = make_skill("skill:producer", "producer", "Produces parsed data.")
         pair = CandidatePair(
@@ -238,15 +238,34 @@ class RelationValidationTests(unittest.TestCase):
             ],
             direction_hint="A->B",
         )
+        calls = 0
 
-        records = validate_relation_candidates([pair], [skill_a, skill_b], validator=StaticPairValidator({}))
+        class CountingValidator:
+            model_id = "counting-relation"
 
+            def validate(self, skill_a, skill_b, pair, *, interfaces=None, execution_records=None):
+                nonlocal calls
+                calls += 1
+                return {
+                    "edge_type": "depend_on",
+                    "direction": "A->B",
+                    "confidence": 0.91,
+                    "evidence": [
+                        {"skill": "skill:consumer", "line": 1, "text": "Consumes parsed data."},
+                        {"skill": "skill:producer", "line": 1, "text": "Produces parsed data."},
+                    ],
+                    "reason": "Producer output satisfies consumer input.",
+                }
+
+        records = validate_relation_candidates([pair], [skill_a, skill_b], validator=CountingValidator())
+
+        self.assertEqual(calls, 1)
         self.assertTrue(records[0].accepted)
         self.assertIsNotNone(records[0].edge)
-        self.assertEqual(records[0].edge.provenance, "deterministic_accept")
-        self.assertEqual(records[0].edge.weight, 0.92)
+        self.assertEqual(records[0].edge.provenance, "llm_validated")
+        self.assertEqual(records[0].edge.weight, 0.728)
         summary = summarize_relation_validation_records(records)
-        self.assertEqual(summary["deterministic_accept"], 1)
+        self.assertEqual(summary["deterministic_accept"], 0)
 
     def test_prompt_contains_confidence_calibration_without_extra_edge_schema(self) -> None:
         skill_a = make_skill("skill:object-picker", "object-picker", "Take object from receptacle.")

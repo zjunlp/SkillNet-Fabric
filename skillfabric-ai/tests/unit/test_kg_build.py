@@ -321,6 +321,29 @@ class KGBuildTests(unittest.TestCase):
         self.assertTrue(report.depend_on_cycles)
         self.assertEqual(report.edges_missing_evidence, 3)
 
+    def test_graph_document_rejects_removed_or_invalid_schema_fields(self) -> None:
+        skill_payload = _health_skill("skill:a", "alpha", "A skill.").to_dict()
+
+        with self.assertRaisesRegex(ValueError, "unsupported node type"):
+            GraphDocument.from_dict(
+                {
+                    "schema_version": "1.0",
+                    "build_id": "bad-node",
+                    "nodes": [{**skill_payload, "type": "community"}],
+                    "edges": [],
+                    "stats": {},
+                    "config_digest": "x",
+                }
+            )
+
+        with self.assertRaisesRegex(ValueError, "missing edge type"):
+            Edge.from_dict({"source": "skill:a", "target": "skill:b", "confidence": 0.5})
+
+        with self.assertRaisesRegex(ValueError, "unsupported edge type"):
+            Edge.from_dict(
+                {"source": "skill:a", "target": "skill:b", "type": "member_of", "confidence": 0.5}
+            )
+
     def test_public_cli_build_writes_core_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"

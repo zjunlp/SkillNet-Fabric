@@ -55,7 +55,7 @@ class LiteLLMSummaryProvider:
                             "to an execution agent."
                         ),
                         "input": {
-                            "page_type": "The wiki entity type, such as skill, community, edge, workflow, or index.",
+                            "page_type": "The wiki entity type, such as skill, workflow, or index.",
                             "entity_id": "The stable entity id used by query_wiki pages.",
                             "payload": (
                                 "Structured source data derived from the compiled graph and wiki renderer. Treat it as evidence, "
