@@ -158,16 +158,45 @@ class ExecutionValidationTests(unittest.TestCase):
         payload = json.loads(messages[1]["content"])
 
         self.assertEqual(payload["prompt_id"], "execution_validation_handoff_precision")
-        for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
+        for field in ("role", "goal", "input", "output", "workflow", "rules", "constraints"):
             self.assertIn(field, payload)
         self.assertIn("decision_workflow", payload)
         self.assertIn("precision_goal", payload["direction_semantics"])
         self.assertIn("For projected_edge_type=depend_on, the target skill depends on the source skill", prompt_text)
-        self.assertIn("source_skill produces or enables; target_skill consumes or requires", prompt_text)
+        self.assertIn("source_skill produces or enables a post-state", prompt_text)
+        self.assertIn("target_skill consumes or requires a pre-state", prompt_text)
         self.assertIn("belief_state or planning_state", prompt_text)
         self.assertIn("not a world-state producer", prompt_text)
         self.assertIn("same overall task", prompt_text)
         self.assertIn("generic data, text, output, result", prompt_text)
+        self.assertIn("post-state", prompt_text)
+        self.assertIn("pre-state", prompt_text)
+        self.assertIn("strict consumable handoff", prompt_text)
+        self.assertIn("non-strict workflow progression", prompt_text)
+        self.assertIn("duplicate_or_alternative", prompt_text)
+        self.assertIn("topical_only", prompt_text)
+
+    def test_compact_prompt_uses_same_handoff_taxonomy_as_full_prompt(self) -> None:
+        messages = build_compact_execution_validation_messages(
+            self._candidate(),
+            self._skills()[0],
+            self._skills()[1],
+            interfaces=self._interfaces(),
+        )
+        prompt_text = json.dumps(messages, ensure_ascii=False)
+        payload = json.loads(messages[1]["content"])
+
+        self.assertEqual(payload["prompt_id"], "execution_validation_compact_interface_first")
+        self.assertIn("post-state", prompt_text)
+        self.assertIn("pre-state", prompt_text)
+        self.assertIn("strict consumable handoff", prompt_text)
+        self.assertIn("non-strict workflow progression", prompt_text)
+        self.assertIn("duplicate_or_alternative", prompt_text)
+        self.assertIn("topical_only", prompt_text)
+        self.assertEqual(
+            set(payload["output_schema"]),
+            {"accepted", "flow_type", "projected_edge_type", "confidence", "evidence", "reason"},
+        )
 
     def test_invalid_json_and_api_exception_are_rejected(self) -> None:
         self._install_fake_litellm("not json")

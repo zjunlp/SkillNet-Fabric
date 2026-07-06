@@ -12,6 +12,72 @@ from skillfabric.registry.models import SkillNode
 EXECUTION_PROMPT_ID = "execution_validation_handoff_precision"
 COMPACT_EXECUTION_PROMPT_ID = "execution_validation_compact_interface_first"
 
+_OUTPUT_SCHEMA: dict[str, Any] = {
+    "accepted": True,
+    "flow_type": "artifact_flow|scenario_transition|none",
+    "projected_edge_type": "depend_on|compose_with|none",
+    "confidence": "float between 0 and 1",
+    "evidence": [{"skill": "skill id", "line": 1, "text": "verbatim evidence"}],
+    "reason": "short reason",
+}
+
+_OUTPUT_CONTRACT: dict[str, Any] = {
+    "format": "Return exactly one strict JSON object, with no markdown, comments, or extra keys.",
+    "required_top_level_keys": list(_OUTPUT_SCHEMA),
+    "flow_type_values": ["artifact_flow", "scenario_transition", "none"],
+    "projected_edge_type_values": ["depend_on", "compose_with", "none"],
+    "purpose": "Accepted flows become SkillFabric graph evidence and execution ordering hints.",
+}
+
+_EDGE_SEMANTICS: dict[str, str] = {
+    "candidate_direction": "source_skill produces or enables a post-state; target_skill consumes or requires a pre-state",
+    "depend_on": (
+        "Use projected_edge_type=depend_on for a strict consumable handoff: "
+        "target_skill cannot run correctly, or loses its core purpose, without the concrete artifact/state from source_skill. "
+        "For projected_edge_type=depend_on, the target skill depends on the source skill."
+    ),
+    "compose_with": (
+        "Use projected_edge_type=compose_with for a non-strict workflow progression: "
+        "source_skill creates context or partial material that makes target_skill materially better, "
+        "but target_skill is not a hard consumer of that exact handoff."
+    ),
+    "none": (
+        "Use projected_edge_type=none when the pair is only topically related, interchangeable, "
+        "directionally wrong, generic, local-only, or not a reusable handoff."
+    ),
+    "artifact_flow": "source_skill produces a concrete artifact/data/text/report and target_skill consumes that artifact.",
+    "scenario_transition": "source_skill establishes a reusable workflow state, credential, or environment condition required by target_skill.",
+    "state_taxonomy": (
+        "A world_state is a physical/environment state actually established by execution. "
+        "A belief_state or planning_state is not a world-state producer and must not create depend_on workflow order."
+    ),
+    "precision_goal": "Execution flows should be small and high precision. A missing weak hint is safer than a false dependency.",
+}
+
+_REJECTION_TAXONOMY: dict[str, str] = {
+    "topical_only": "Reject shared topic, shared tool, broad domain overlap, or both skills being useful in the same overall task.",
+    "duplicate_or_alternative": "Reject skills that solve the same step, are substitutes, or restate the same state without a consumer handoff.",
+    "wrong_direction": "Reject when target_skill produces the state or source_skill consumes it; do not reverse the candidate.",
+    "generic_or_underspecified": "Reject generic data, text, output, result, object, observation, file, or command matches.",
+    "local_only": "Reject examples, logs, prompts, temporary paths, setup notes, and intermediate text that do not transfer across skills.",
+    "state_mismatch": "Reject belief_state or planning_state as evidence for required world_state, inventory, or physical environment state.",
+    "unsupported_by_evidence": "Reject when candidate.evidence, skill_interface, or full_skill_md does not prove both sides of the handoff.",
+}
+
+_COMPACT_REJECTION_TAXONOMY = {
+    key: value.replace(", or full_skill_md", "")
+    for key, value in _REJECTION_TAXONOMY.items()
+}
+
+_DECISION_PROCEDURE: list[str] = [
+    "Identify the exact post-state claimed by source_skill and the exact pre-state claimed by target_skill.",
+    "Verify source_skill actually produces, establishes, validates, or makes available that post-state.",
+    "Verify target_skill actually requires, consumes, or materially benefits from that same pre-state.",
+    "Classify as depend_on only for a strict consumable handoff.",
+    "Classify as compose_with only for a non-strict workflow progression with material handoff value.",
+    "Return accepted=false for topical_only, duplicate_or_alternative, wrong_direction, generic_or_underspecified, local_only, state_mismatch, or unsupported_by_evidence.",
+]
+
 
 def build_compact_execution_validation_messages(
     candidate: ExecutionFlowCandidate,
@@ -22,50 +88,30 @@ def build_compact_execution_validation_messages(
 ) -> list[dict[str, str]]:
     """Build a compact interface-first execution validation prompt."""
 
-    payload = {
-        "todo": (
-            "Validate one execution handoff candidate from compressed interface and candidate evidence. "
-            "Use the available contract fields to decide whether the handoff should become orchestration evidence."
-        ),
-        "task": (
-            "Validate whether source_skill makes a concrete artifact, data object, state, credential, environment condition, "
-            "or validation result available for target_skill. Prefer accepted=false when the compressed evidence is not precise."
+    payload: dict[str, Any] = {
+        "role": "You are a precise SkillFabric execution handoff judge.",
+        "goal": (
+            "Decide whether source_skill's produced post-state can satisfy target_skill's required pre-state. "
+            "Use compact interface evidence first; reject or report uncertainty instead of guessing."
         ),
         "prompt_id": COMPACT_EXECUTION_PROMPT_ID,
         "input": {
-            "candidate": "A directioned source_skill -> target_skill flow from canonical requires/produces matching.",
-            "source_skill": "Possible producer or enabler represented by metadata and skill_interface.",
-            "target_skill": "Possible consumer or dependent represented by metadata and skill_interface.",
-            "matched_name": "The proposed reusable handoff object.",
+            "candidate": "A directed source_skill -> target_skill candidate from canonical produces/requires matching.",
+            "source_skill": "Possible post-state producer/enabler represented by metadata and skill_interface.",
+            "target_skill": "Possible pre-state consumer/dependent represented by metadata and skill_interface.",
+            "matched_name": "The proposed reusable artifact/state handoff.",
         },
-        "output": {
-            "format": "Return one strict JSON object, with no markdown, comments, or extra keys.",
-            "required_top_level_keys": [
-                "accepted",
-                "flow_type",
-                "projected_edge_type",
-                "confidence",
-                "evidence",
-                "reason",
-            ],
-            "flow_type_values": ["artifact_flow", "scenario_transition", "none"],
-            "projected_edge_type_values": ["depend_on", "compose_with", "none"],
-            "purpose": "Accepted flows become evidence for KG relations and execution ordering hints.",
-        },
-        "workflow": [
-            "Step 1: Inspect candidate.matched_name, source_skill.skill_interface, and target_skill.skill_interface.",
-            "Step 2: Verify source_skill produces, establishes, validates, or makes available the handoff.",
-            "Step 3: Verify target_skill requires, consumes, or materially benefits from the same handoff.",
-            "Step 4: Project strict prerequisites to depend_on and weaker collaboration handoffs to compose_with.",
-            "Step 5: Return accepted=false when the evidence is generic, local-only, or not useful for routing order.",
-        ],
+        "output": _OUTPUT_CONTRACT,
+        "edge_semantics": _EDGE_SEMANTICS,
+        "decision_procedure": _DECISION_PROCEDURE,
+        "rejection_taxonomy": _COMPACT_REJECTION_TAXONOMY,
         "rules": [
             "Return JSON only.",
-            "Use artifact_flow for concrete artifact, data, text, or report handoffs.",
-            "Use scenario_transition for workflow state, credential, environment, or condition handoffs.",
+            "Use artifact_flow when the post-state/pre-state is a concrete artifact, data object, text, or report.",
+            "Use scenario_transition when the post-state/pre-state is a reusable workflow state, credential, environment, or condition.",
             "For projected_edge_type=depend_on, target_skill depends on source_skill.",
-            "Reject broad matches based only on generic words such as data, output, result, text, or observation.",
-            "Prefer accepted=false when the compressed evidence does not support reusable ordering or handoff value.",
+            "Reject broad matches based only on generic data, text, output, result, object, observation, file, or command.",
+            "Prefer accepted=false when compact evidence does not prove a reusable state or artifact handoff.",
         ],
         "constraints": [
             "Do not reverse source_skill and target_skill.",
@@ -73,20 +119,13 @@ def build_compact_execution_validation_messages(
             "Do not treat planning_state or belief_state as physical world_state.",
             "Do not add schema fields beyond output_schema.",
         ],
-        "output_schema": {
-            "accepted": True,
-            "flow_type": "artifact_flow|scenario_transition|none",
-            "projected_edge_type": "depend_on|compose_with|none",
-            "confidence": "float between 0 and 1",
-            "evidence": [{"skill": "skill id", "line": 1, "text": "verbatim evidence"}],
-            "reason": "short reason",
-        },
+        "output_schema": _OUTPUT_SCHEMA,
         "candidate": candidate.to_dict(),
         "source_skill": _compact_skill_payload(source_skill, interfaces),
         "target_skill": _compact_skill_payload(target_skill, interfaces),
     }
     return [
-        {"role": "system", "content": "You validate SkillFabric execution flows from compact interface evidence."},
+        {"role": "system", "content": "You validate SkillFabric post-state to pre-state handoffs from compact evidence."},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
     ]
 
@@ -100,87 +139,37 @@ def build_execution_validation_messages(
 ) -> list[dict[str, str]]:
     """Build LiteLLM messages for validating an execution flow candidate."""
 
-    payload = {
-        "todo": (
-            "Validate one proposed execution handoff from source_skill to target_skill. Accept it only when the handoff is "
-            "specific, reusable, and useful for routing, ordering, or downstream execution quality."
-        ),
-        "task": (
-            "Validate whether an execution-level flow exists between two skills. "
-            "The candidate is already directioned: source_skill is the possible producer/enabler, "
-            "and target_skill is the possible consumer/dependent. Accept only flows that provide reusable "
-            "ordering or handoff value for later orchestration."
+    payload: dict[str, Any] = {
+        "role": "You are a precise SkillFabric execution handoff judge.",
+        "goal": (
+            "Decide whether source_skill's produced post-state can satisfy target_skill's required pre-state. "
+            "Accept only evidence-backed handoffs that improve graph routing, wiki exploration, or final execution prompts."
         ),
         "prompt_id": EXECUTION_PROMPT_ID,
         "input": {
-            "candidate": "A directioned source_skill -> target_skill flow proposed from canonical requires/produces matching.",
-            "source_skill": "Possible producer or enabler, including full_skill_md and optional skill_interface.",
-            "target_skill": "Possible consumer or dependent, including full_skill_md and optional skill_interface.",
-            "matched_name": "The proposed artifact, data object, state, environment condition, or validation result.",
+            "candidate": "A directed source_skill -> target_skill candidate from canonical produces/requires matching.",
+            "source_skill": "Possible post-state producer/enabler, including full_skill_md and optional skill_interface.",
+            "target_skill": "Possible pre-state consumer/dependent, including full_skill_md and optional skill_interface.",
+            "matched_name": "The proposed artifact, data object, state, environment condition, credential, or validation result.",
         },
-        "output": {
-            "format": "Return one strict JSON object, with no markdown, comments, or extra keys.",
-            "required_top_level_keys": [
-                "accepted",
-                "flow_type",
-                "projected_edge_type",
-                "confidence",
-                "evidence",
-                "reason",
-            ],
-            "flow_type_values": ["artifact_flow", "scenario_transition", "none"],
-            "projected_edge_type_values": ["depend_on", "compose_with", "none"],
-            "purpose": "Accepted flows become evidence for KG relation validation and execution ordering hints.",
-        },
+        "output": _OUTPUT_CONTRACT,
         "workflow": [
-            "Step 1: Name the exact handoff claimed by candidate.matched_name and candidate.flow_type.",
-            "Step 2: Verify source_skill actually produces, establishes, validates, or makes available that handoff.",
-            "Step 3: Verify target_skill actually consumes, requires, or is materially improved by that handoff.",
+            "Step 1: Name the exact post-state claimed by source_skill and pre-state claimed by target_skill.",
+            "Step 2: Verify source_skill actually produces, establishes, validates, or makes available that post-state.",
+            "Step 3: Verify target_skill actually consumes, requires, or is materially improved by the same pre-state.",
             "Step 4: Distinguish artifacts/data/text/reports from world_state, belief_state, planning_state, credentials, and environment conditions.",
-            "Step 5: Reject generic matches where the handoff is only object, data, text, output, result, observation, or command.",
-            "Step 6: Reject local-only outputs, examples, logs, or intermediate text that do not transfer across tasks.",
-            "Step 7: Project accepted strict prerequisites to depend_on and weaker collaboration hints to compose_with.",
-            "Step 8: Return accepted=false when the flow would not change routing, ordering, or downstream execution quality.",
+            "Step 5: Project strict consumable handoff cases to depend_on.",
+            "Step 6: Project non-strict workflow progression cases to compose_with.",
+            "Step 7: Return accepted=false when the pair matches a rejection taxonomy item or would not help routing, wiki search, or prompt assembly.",
         ],
-        "decision_workflow": [
-            "Identify the exact artifact, data object, world state, environment condition, or validation result claimed as the handoff.",
-            "Verify that source_skill actually produces or establishes that handoff, not merely describes, plans, observes, or recommends it.",
-            "Verify that target_skill actually consumes, requires, or is materially improved by that handoff.",
-            "Reject broad topical matches, shared tools, generic output words, and local-only artifacts that do not transfer across tasks.",
-            "Prefer accepted=false when the flow would not change routing, ordering, or downstream execution quality.",
-        ],
-        "direction_semantics": {
-            "candidate_direction": "source_skill produces or enables; target_skill consumes or requires",
-            "artifact_flow": "source_skill produces a concrete artifact/data/text/report that target_skill consumes.",
-            "scenario_transition": "source_skill establishes a workflow state that target_skill requires.",
-            "state_taxonomy": (
-                "A world_state is a physical/environment state actually established by execution. "
-                "A belief_state or planning_state is not a world-state producer and must not create depend_on workflow order."
-            ),
-            "projected_depend_on": (
-                "For projected_edge_type=depend_on, the target skill depends on the source skill. "
-                "The canonical KG edge will point target_skill -> source_skill."
-            ),
-            "projected_compose_with": (
-                "Use projected_edge_type=compose_with only when the flow is useful as a collaboration hint "
-                "but does not impose a strict prerequisite."
-            ),
-            "precision_goal": (
-                "Execution flows should be small and high precision. A missing weak hint is safer than a false dependency."
-            ),
-        },
-        "output_schema": {
-            "accepted": True,
-            "flow_type": "artifact_flow|scenario_transition|none",
-            "projected_edge_type": "depend_on|compose_with|none",
-            "confidence": "float between 0 and 1",
-            "evidence": [{"skill": "skill id", "line": 1, "text": "verbatim evidence"}],
-            "reason": "short reason",
-        },
+        "decision_workflow": _DECISION_PROCEDURE,
+        "direction_semantics": _EDGE_SEMANTICS,
+        "rejection_taxonomy": _REJECTION_TAXONOMY,
+        "output_schema": _OUTPUT_SCHEMA,
         "rules": [
             "Return JSON only.",
-            "Use artifact_flow only when the target skill consumes an artifact produced by the source skill.",
-            "Use scenario_transition only when the source skill enables a scenario required by the target skill.",
+            "Use artifact_flow only when target_skill consumes an artifact produced by source_skill.",
+            "Use scenario_transition only when source_skill establishes a scenario required by target_skill.",
             "The artifact or scenario must be named specifically enough to support reuse; generic data, text, output, result, observation, or command is not enough.",
             "For projected_edge_type=depend_on, the target skill depends on the source skill; do not describe the reverse direction.",
             "Reject flows where source_skill only produces belief_state or planning_state while target_skill requires a world_state.",
@@ -190,9 +179,9 @@ def build_execution_validation_messages(
             "Do not accept generic matches such as object, data, text, output, result, observation, or command unless the evidence names a specific reusable workflow object.",
             "Do not accept a flow from shared tools or broad topical similarity.",
             "Do not accept a flow merely because the two skills could be useful in the same overall task.",
-            "Cite evidence lines from full_skill_md, skill_interface, or candidate_evidence.",
+            "Cite evidence lines from full_skill_md, skill_interface, or candidate.evidence.",
             "Do not invent evidence not present in the input.",
-            "Prefer accepted=false when the flow would not help route ordering or state/data handoff.",
+            "Prefer accepted=false when the flow would not help graph routing, wiki search, or prompt assembly.",
         ],
         "constraints": [
             "Do not reverse source_skill and target_skill. The candidate is already directioned.",
@@ -207,7 +196,7 @@ def build_execution_validation_messages(
         "target_skill": _skill_payload(target_skill, interfaces),
     }
     return [
-        {"role": "system", "content": "You validate SkillFabric execution flows using strict textual evidence."},
+        {"role": "system", "content": "You validate SkillFabric post-state to pre-state handoffs using strict textual evidence."},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
     ]
 
