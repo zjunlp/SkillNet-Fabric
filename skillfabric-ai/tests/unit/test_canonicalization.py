@@ -315,6 +315,57 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.lookup("skill:consumer", "requires", "csv tables", "artifact"), "artifact:csv_table")
         self.assertTrue(any(item.raw_name == "output" for item in build.rejected_terms))
 
+    def test_singleton_component_is_canonicalized_without_provider_call(self) -> None:
+        provider = StaticCanonicalizationProvider()
+        producer = _interface(
+            "skill:producer",
+            produces=[_field("skill:producer", "isolated artifact")],
+        )
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer},
+            provider=provider,
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=NoSimilarityEmbedder(),
+        )
+
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(build.assignments[0].canonical_id, "artifact:isolated_artifact")
+        self.assertEqual(build.assignments[0].provenance, "deterministic_exact")
+        self.assertFalse(build.objects[0].promoted)
+
+    def test_normalized_exact_duplicates_are_canonicalized_without_provider_call(self) -> None:
+        provider = StaticCanonicalizationProvider()
+        producer = _interface("skill:producer", produces=[_field("skill:producer", "CSV-table")])
+        consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "csv table")])
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=provider,
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=NoSimilarityEmbedder(),
+        )
+
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(build.lookup("skill:producer", "produces", "CSV-table", "artifact"), "artifact:csv_table")
+        self.assertEqual(build.lookup("skill:consumer", "requires", "csv table", "artifact"), "artifact:csv_table")
+        self.assertEqual(build.objects[0].provenance, "deterministic_exact")
+
+    def test_non_exact_candidate_component_still_uses_provider(self) -> None:
+        provider = StaticCanonicalizationProvider()
+        producer = _interface("skill:producer", produces=[_field("skill:producer", "spreadsheet export")])
+        consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "worksheet rows")])
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=provider,
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=FixedSemanticEmbedder(),
+        )
+
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(build.objects[0].canonical_id, "artifact:spreadsheet_table")
+
     def test_duplicate_raw_names_in_one_cluster_keep_all_skill_roles(self) -> None:
         producer = _interface("skill:producer", produces=[_field("skill:producer", "csv")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "csv")])
@@ -388,7 +439,7 @@ class CanonicalizationTests(unittest.TestCase):
             semantic_embedder=FixedSemanticEmbedder(),
         )
 
-        self.assertEqual(provider.calls, 2)
+        self.assertEqual(provider.calls, 0)
         component_types = {item.object_type for item in canonicalization.candidate_components}
         self.assertEqual(component_types, {"state", "text"})
 
@@ -427,20 +478,21 @@ class CanonicalizationTests(unittest.TestCase):
         )
 
     def test_llm_canonicalization_uses_cache_and_falls_back_on_failure(self) -> None:
-        interface = _interface("skill:producer", produces=[_field("skill:producer", "spreadsheet export")])
+        producer = _interface("skill:producer", produces=[_field("skill:producer", "spreadsheet export")])
+        consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "worksheet rows")])
         provider = StaticCanonicalizationProvider()
 
         with TemporaryDirectory() as tmp:
             cache_path = Path(tmp) / "canonicalization_cache.json"
             first = canonicalize_contract_objects(
-                {interface.skill_id: interface},
+                {producer.skill_id: producer, consumer.skill_id: consumer},
                 provider=provider,
                 cache_path=cache_path,
                 job_options=LLMJobOptions(progress_every=0),
                 semantic_embedder=FixedSemanticEmbedder(),
             )
             second = canonicalize_contract_objects(
-                {interface.skill_id: interface},
+                {producer.skill_id: producer, consumer.skill_id: consumer},
                 provider=provider,
                 cache_path=cache_path,
                 job_options=LLMJobOptions(progress_every=0),
@@ -451,7 +503,7 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(first.objects[0].canonical_id, second.objects[0].canonical_id)
 
         fallback = canonicalize_contract_objects(
-            {interface.skill_id: interface},
+            {producer.skill_id: producer, consumer.skill_id: consumer},
             provider=StaticCanonicalizationProvider(fail=True),
             job_options=LLMJobOptions(progress_every=0, max_retries=0),
             semantic_embedder=FixedSemanticEmbedder(),

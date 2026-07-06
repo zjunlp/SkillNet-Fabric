@@ -131,6 +131,10 @@ def canonicalize_contract_objects(
     pending: list[CanonicalizationCluster] = []
 
     for cluster in clusters:
+        deterministic = _deterministic_cluster_result(cluster)
+        if deterministic is not None:
+            results[cluster.cluster_id] = deterministic
+            continue
         key = _cache_key(cluster, provider.model_id)
         cached = cache.get(key)
         if isinstance(cached, dict):
@@ -234,6 +238,64 @@ def _clusters_from_components(
             )
         )
     return sorted(clusters, key=lambda item: item.cluster_id)
+
+
+def _deterministic_cluster_result(cluster: CanonicalizationCluster) -> dict[str, Any] | None:
+    if not _deterministic_cluster_eligible(cluster):
+        return None
+    canonical_name = _deterministic_canonical_name(cluster.terms, cluster.object_type)
+    if not canonical_name or _is_generic(canonical_name):
+        return {
+            "_provenance": "deterministic_exact",
+            "canonical_objects": [],
+            "assignments": [],
+            "rejected_terms": [
+                {"raw_name": term.name, "reason": "generic"}
+                for term in _unique_terms_by_name(cluster.terms)
+            ],
+        }
+    reason = "Deterministic singleton or normalized-exact contract term."
+    return {
+        "_provenance": "deterministic_exact",
+        "canonical_objects": [
+            {
+                "canonical_name": canonical_name,
+                "type": cluster.object_type,
+                "description": f"Canonical {cluster.object_type} object for {canonical_name}.",
+                "aliases": sorted({term.name for term in cluster.terms}),
+                "promoted": True,
+                "confidence": 0.95,
+                "reason": reason,
+            }
+        ],
+        "assignments": [
+            {
+                "raw_name": term.name,
+                "canonical_name": canonical_name,
+                "confidence": 0.95,
+                "reason": reason,
+            }
+            for term in _unique_terms_by_name(cluster.terms)
+        ],
+        "rejected_terms": [],
+    }
+
+
+def _deterministic_cluster_eligible(cluster: CanonicalizationCluster) -> bool:
+    if cluster.ambiguous:
+        return False
+    if len(cluster.terms) == 1:
+        return True
+    normalized_names = {_normalize_name(term.name) for term in cluster.terms}
+    normalized_names.discard("")
+    return len(normalized_names) == 1
+
+
+def _unique_terms_by_name(terms: list[RawContractObject]) -> list[RawContractObject]:
+    by_name: dict[str, RawContractObject] = {}
+    for term in terms:
+        by_name.setdefault(term.name.lower(), term)
+    return sorted(by_name.values(), key=lambda item: item.key)
 
 
 def _cluster_object_type(terms: list[RawContractObject]) -> str:
