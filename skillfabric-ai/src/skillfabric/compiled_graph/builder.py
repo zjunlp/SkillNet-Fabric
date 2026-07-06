@@ -31,7 +31,6 @@ from skillfabric.compiled_graph.communities.assignment import (
 from skillfabric.compiled_graph.communities.providers import (
     CommunityRefinementProvider,
     DeterministicCommunityRefinementProvider,
-    LiteLLMCommunityRefinementProvider,
 )
 from skillfabric.compiled_graph.execution.compiler import (
     ExecutionGraphBuild,
@@ -922,19 +921,7 @@ def _resolve_canonicalization_provider(config: BuildConfig) -> CanonicalizationP
 def _resolve_community_refinement_provider(config: BuildConfig) -> CommunityRefinementProvider:
     if config.community_refinement_provider is not None:
         return config.community_refinement_provider
-    if config.skip_llm_validation:
-        return DeterministicCommunityRefinementProvider()
-    if any(
-        item is not None
-        for item in (
-            config.validator,
-            config.execution_validator,
-            config.interface_extractor,
-            config.canonicalization_provider,
-        )
-    ):
-        return DeterministicCommunityRefinementProvider()
-    return LiteLLMCommunityRefinementProvider.from_env(env_path=config.llm_env_path)
+    return DeterministicCommunityRefinementProvider()
 
 
 def _resolve_execution_validator(config: BuildConfig) -> ExecutionFlowValidator:

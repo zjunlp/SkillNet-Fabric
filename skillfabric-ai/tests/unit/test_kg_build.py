@@ -12,9 +12,16 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from skillfabric.cli import main as cli_main
-from skillfabric.compiled_graph.builder import BuildConfig, build_graph
+from skillfabric.compiled_graph.builder import (
+    BuildConfig,
+    _resolve_community_refinement_provider,
+    build_graph,
+)
 from skillfabric.compiled_graph.canonicalization.compiler import (
     DeterministicCanonicalizationProvider,
+)
+from skillfabric.compiled_graph.communities.providers import (
+    DeterministicCommunityRefinementProvider,
 )
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.health import analyze_health
@@ -88,6 +95,13 @@ def _health_community(
 
 
 class KGBuildTests(unittest.TestCase):
+    def test_default_community_refinement_is_deterministic(self) -> None:
+        provider = _resolve_community_refinement_provider(
+            BuildConfig(skill_root=FIXTURE_SKILLS)
+        )
+
+        self.assertIsInstance(provider, DeterministicCommunityRefinementProvider)
+
     def test_parser_uses_frontmatter_without_removed_metadata_field(self) -> None:
         skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
         removed_field = "routing_" + "metadata"
