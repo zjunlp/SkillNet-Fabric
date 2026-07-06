@@ -8,7 +8,6 @@ from collections.abc import Iterable
 from skillfabric.compiled_graph.execution.models import ExecutionValidationRecord
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge
-from skillfabric.compiled_graph.relations.mentions import extract_skill_mentions
 from skillfabric.compiled_graph.relations.models import CandidatePair, RelationEvidence
 from skillfabric.registry.models import SkillNode
 
@@ -21,37 +20,20 @@ def generate_relation_candidates(
     interfaces: dict[str, SkillInterface] | None = None,
     execution_records: list[ExecutionValidationRecord] | None = None,
 ) -> list[CandidatePair]:
-    """Generate bounded candidates for compose_with and depend_on validation."""
+    """Generate bounded workflow-relation candidates from interface contracts.
 
-    by_id = {skill.id: skill for skill in skills}
+    ``similar_to`` edges are retrieval/community signals, not workflow evidence.
+    Explicit textual mentions are intentionally ignored here because broad tool
+    names and examples create noisy graph frontier edges. Accepted execution
+    flows are projected directly into graph edges by the execution layer, so
+    re-validating them as relation candidates would duplicate cost.
+    """
+
     pairs: dict[tuple[str, str], CandidatePair] = {}
-    for mention in extract_skill_mentions(skills):
-        if mention.from_skill not in by_id or mention.to_skill not in by_id:
-            continue
-        _merge_pair(
-            pairs,
-            CandidatePair(
-                mention.from_skill,
-                mention.to_skill,
-                1.0,
-                sources=["explicit_mention"],
-                evidence=[mention.to_evidence()],
-                direction_hint=mention.direction_hint,
-            ),
-        )
-    for edge in similar_edges:
-        _merge_pair(
-            pairs,
-            CandidatePair(
-                edge.source,
-                edge.target,
-                0.55 + min(edge.weight, 0.4),
-                sources=["similar_neighbor"],
-            ),
-        )
+    execution_covered_keys = _execution_covered_pair_keys(execution_records or [])
     for pair in _interface_candidate_pairs(interfaces or {}):
-        _merge_pair(pairs, pair)
-    for pair in _execution_candidate_pairs(execution_records or []):
+        if pair.key in execution_covered_keys:
+            continue
         _merge_pair(pairs, pair)
     ordered = sorted(pairs.values(), key=lambda item: (-item.prior, -len(item.evidence), item.key))
     return _limit_per_skill(ordered, per_skill_limit)
@@ -181,52 +163,11 @@ def _normalize_field_name(value: str) -> str:
     return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
 
 
-def _execution_candidate_pairs(records: list[ExecutionValidationRecord]) -> list[CandidatePair]:
-    pairs: list[CandidatePair] = []
+def _execution_covered_pair_keys(records: Iterable[ExecutionValidationRecord]) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
     for record in records:
-        if not record.accepted or record.flow_edge is None:
+        candidate = getattr(record, "candidate", None)
+        if candidate is None:
             continue
-        projected_edge_type = str(record.normalized.get("projected_edge_type", "none"))
-        if projected_edge_type == "depend_on":
-            pairs.append(
-                CandidatePair(
-                    record.candidate.target_skill,
-                    record.candidate.source_skill,
-                    0.95,
-                    sources=["execution_flow"],
-                    evidence=_execution_evidence(record),
-                    direction_hint="A->B",
-                )
-            )
-        elif projected_edge_type == "compose_with":
-            pairs.append(
-                CandidatePair(
-                    record.candidate.source_skill,
-                    record.candidate.target_skill,
-                    0.9,
-                    sources=["execution_flow"],
-                    evidence=_execution_evidence(record),
-                    direction_hint="undirected",
-                )
-            )
-    return pairs
-
-
-def _execution_evidence(record: ExecutionValidationRecord) -> list[RelationEvidence]:
-    if record.flow_edge is None:
-        return []
-    return [
-        RelationEvidence(
-            source="execution_flow",
-            skill_id=item.skill,
-            line=item.line,
-            text=item.text,
-            kind=record.candidate.flow_type,
-            metadata={
-                "matched_node_id": record.candidate.matched_node_id,
-                "matched_name": record.candidate.matched_name,
-                "projected_edge_type": str(record.normalized.get("projected_edge_type", "none")),
-            },
-        )
-        for item in record.flow_edge.evidence
-    ]
+        keys.add(tuple(sorted([candidate.source_skill, candidate.target_skill])))
+    return keys

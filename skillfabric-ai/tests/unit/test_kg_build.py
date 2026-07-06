@@ -242,9 +242,8 @@ class KGBuildTests(unittest.TestCase):
             self.assertNotIn("artifact", node_types)
             self.assertNotIn("scenario", node_types)
             self.assertIn("depend_on", edge_types)
-            self.assertIn("compose_with", edge_types)
             self.assertGreater(result.stats["execution_projected_edge_count"], 0)
-            self.assertTrue(any(edge["provenance"] == "deterministic_accept" for edge in graph_data["edges"]))
+            self.assertTrue(any(edge["provenance"] == "execution_projected" for edge in graph_data["edges"]))
             compiled_graph = json.loads((workspace / "graph" / "compiled.json").read_text())
             self.assertIn("core_graph", compiled_graph)
             self.assertIn("interfaces", compiled_graph)
@@ -291,10 +290,10 @@ class KGBuildTests(unittest.TestCase):
                 for line in (workspace / "graph" / "edge_evidence.jsonl").read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertTrue(edge_evidence)
-            self.assertTrue(any(row["accepted"] for row in edge_evidence))
-            self.assertTrue(any(row["candidate_evidence"] for row in edge_evidence))
-            self.assertTrue(any("rejection_reason" in row for row in edge_evidence))
+            self.assertEqual(edge_evidence, [])
+            self.assertEqual(result.stats["compose_depend_candidate_count"], 0)
+            self.assertEqual(result.stats["compose_depend_edge_count"], 0)
+            self.assertEqual(result.stats["relation_validation"]["validator_calls"], 0)
 
             neighbors = result.neighbors("skill:financial-kpi-extractor")
             neighbor_ids = {item["skill_id"] for item in neighbors}

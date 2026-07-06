@@ -134,10 +134,24 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         self.assertIn("Consumes CSV artifacts.", prompt)
         self.assertIn("interface_compatibility", prompt)
 
-    def test_validation_prompt_includes_execution_summary(self) -> None:
+    def test_execution_covered_pair_skips_relation_candidate(self) -> None:
         producer = make_skill("skill:producer", "producer", "Produce CSV.")
         consumer = make_skill("skill:consumer", "consumer", "Consume CSV.")
         evidence = [ExecutionEvidence(skill="skill:producer", line=2, text="Produce CSV.")]
+        interfaces = {
+            producer.id: SkillInterface(
+                skill_id=producer.id,
+                content_hash=producer.content_hash,
+                capability_summary="Produces CSV.",
+                produces=[InterfaceField(name="csv", kind="artifact", confidence=0.9)],
+            ),
+            consumer.id: SkillInterface(
+                skill_id=consumer.id,
+                content_hash=consumer.content_hash,
+                capability_summary="Consumes CSV.",
+                requires=[InterfaceField(name="csv", kind="artifact", confidence=0.9)],
+            ),
+        }
         execution_records = [
             ExecutionValidationRecord(
                 candidate=ExecutionFlowCandidate(
@@ -169,26 +183,15 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
                 ),
             )
         ]
-        pair = generate_relation_candidates(
+        pairs = generate_relation_candidates(
             [producer, consumer],
             [],
             per_skill_limit=10,
+            interfaces=interfaces,
             execution_records=execution_records,
-        )[0]
-
-        prompt = json.dumps(
-            build_pair_validation_messages(
-                producer,
-                consumer,
-                pair,
-                execution_records=execution_records,
-            ),
-            ensure_ascii=False,
         )
 
-        self.assertIn("execution_summary", prompt)
-        self.assertIn("artifact_flow", prompt)
-        self.assertIn("Consumer needs CSV.", prompt)
+        self.assertEqual(pairs, [])
 
 
 if __name__ == "__main__":
