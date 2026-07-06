@@ -43,8 +43,6 @@ class InterfaceModelTests(unittest.TestCase):
             content_hash="hash-pdf",
             capability_summary="Extract PDF tables.",
             when_to_use="Use when tabular data must be extracted from PDFs.",
-            granularity="utility",
-            execution_role="inspector",
             produces=[
                 InterfaceField(
                     name="csv tables",
@@ -63,9 +61,10 @@ class InterfaceModelTests(unittest.TestCase):
         restored = SkillInterface.from_dict(payload)
 
         self.assertEqual(restored.to_dict(), payload)
-        self.assertEqual(restored.granularity, "utility")
-        self.assertEqual(restored.execution_role, "inspector")
         self.assertEqual(restored.produces[0].evidence[0].line, 8)
+        self.assertNotIn("granularity", payload)
+        self.assertNotIn("execution_role", payload)
+        self.assertNotIn("failure_modes", payload)
         self.assertNotIn("inputs", payload)
         self.assertNotIn("outputs", payload)
         self.assertNotIn("preconditions", payload)
@@ -73,27 +72,6 @@ class InterfaceModelTests(unittest.TestCase):
         self.assertNotIn("artifacts", payload)
         self.assertNotIn("tools", payload)
         self.assertNotIn("raw_output", payload)
-
-    def test_skill_interface_normalizes_granularity_and_execution_role(self) -> None:
-        planning = SkillInterface(
-            skill_id="skill:goal-interpreter",
-            content_hash="hash-goal",
-            capability_summary="Parse goals into plans.",
-            granularity="plan",
-            execution_role="planning",
-        )
-        primitive = SkillInterface(
-            skill_id="skill:object-picker",
-            content_hash="hash-picker",
-            capability_summary="Take an object.",
-            granularity="action",
-            execution_role="take",
-        )
-
-        self.assertEqual(planning.granularity, "planning")
-        self.assertEqual(planning.execution_role, "planner")
-        self.assertEqual(primitive.granularity, "primitive")
-        self.assertEqual(primitive.execution_role, "actor")
 
 
 if __name__ == "__main__":

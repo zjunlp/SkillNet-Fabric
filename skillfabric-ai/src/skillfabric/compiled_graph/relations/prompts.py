@@ -248,12 +248,9 @@ def _skill_payload(skill: SkillNode, interfaces: dict[str, SkillInterface]) -> d
         payload["skill_interface"] = {
             "capability_summary": interface.capability_summary,
             "when_to_use": interface.when_to_use,
-            "granularity": interface.granularity,
-            "execution_role": interface.execution_role,
             "requires": [item.to_dict() for item in interface.requires],
             "produces": [item.to_dict() for item in interface.produces],
             "uses_tools": [item.to_dict() for item in interface.uses_tools],
-            "failure_modes": [item.to_dict() for item in interface.failure_modes],
         }
     return payload
 
@@ -269,12 +266,9 @@ def _compact_skill_payload(skill: SkillNode, interfaces: dict[str, SkillInterfac
         payload["skill_interface"] = {
             "capability_summary": interface.capability_summary,
             "when_to_use": interface.when_to_use,
-            "granularity": interface.granularity,
-            "execution_role": interface.execution_role,
             "requires": [item.to_dict() for item in interface.requires],
             "produces": [item.to_dict() for item in interface.produces],
             "uses_tools": [item.to_dict() for item in interface.uses_tools],
-            "failure_modes": [item.to_dict() for item in interface.failure_modes],
         }
     return payload
 

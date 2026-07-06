@@ -8,7 +8,6 @@ from skillfabric.compiled_graph.interface.models import (
     InterfaceEvidence,
     InterfaceField,
     SkillInterface,
-    normalize_execution_role,
 )
 from skillfabric.registry.models import SkillNode
 
@@ -52,8 +51,6 @@ def _fallback_interface(skill: SkillNode, *, model_id: str = "deterministic-inte
         content_hash=skill.content_hash,
         capability_summary=skill.description,
         when_to_use=skill.description,
-        granularity=_fallback_granularity(skill),
-        execution_role=_fallback_execution_role(skill),
         requires=requires,
         produces=produces,
         uses_tools=_tool_fields_from_text(skill),
@@ -61,38 +58,6 @@ def _fallback_interface(skill: SkillNode, *, model_id: str = "deterministic-inte
         provenance="deterministic_fallback",
         model_id=model_id,
     )
-
-
-def _fallback_granularity(skill: SkillNode) -> str:
-    text = _skill_text_for_classification(skill)
-    if _has_any(text, ("goal", "parse", "parser", "plan", "planning", "sub-objective", "subobjective", "interpreter")):
-        return "planning"
-    if _has_any(text, ("inspect", "scanner", "scan", "search", "locator", "finder", "explorer", "state inspector")):
-        return "utility"
-    action_count = sum(1 for item in ("locate", "search", "navigate", "go to", "open", "take", "put", "heat", "cool", "clean") if item in text)
-    if "with-appliance" in skill.name or action_count >= 4:
-        return "macro"
-    if _has_any(text, ("take", "pick", "pickup", "open", "close", "toggle", "put", "dispose")):
-        return "primitive"
-    return "utility"
-
-
-def _fallback_execution_role(skill: SkillNode) -> str:
-    text = _skill_text_for_classification(skill)
-    granularity = _fallback_granularity(skill)
-    if granularity == "planning":
-        return "planner"
-    if _has_any(text, ("navigate", "navigator", "go to", "move")):
-        return "navigator"
-    if _has_any(text, ("verify", "verifier", "validate", "validation")):
-        return "verifier"
-    if _has_any(text, ("inspect", "scanner", "scan", "search", "locator", "finder", "explorer")):
-        return "inspector"
-    if _has_any(text, ("heat", "cool", "clean", "modify", "transform", "temperature")):
-        return "transformer"
-    if granularity == "primitive":
-        return "actor"
-    return normalize_execution_role("helper", granularity=granularity)
 
 
 def _skill_text_for_classification(skill: SkillNode) -> str:

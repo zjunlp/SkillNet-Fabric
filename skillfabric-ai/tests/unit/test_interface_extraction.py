@@ -57,8 +57,6 @@ class InterfaceExtractionTests(unittest.TestCase):
                 {
                     "capability_summary": "Extract PDF tables into CSV.",
                     "when_to_use": "Use when PDF tables need structured CSV output.",
-                    "granularity": "utility",
-                    "execution_role": "inspector",
                     "produces": [
                         {
                             "name": "csv tables",
@@ -81,12 +79,10 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertTrue(records[0].accepted)
         self.assertEqual(records[0].interface.capability_summary, "Extract PDF tables into CSV.")
         self.assertEqual(records[0].interface.when_to_use, "Use when PDF tables need structured CSV output.")
-        self.assertEqual(records[0].interface.granularity, "utility")
-        self.assertEqual(records[0].interface.execution_role, "inspector")
         self.assertEqual(records[0].interface.produces[0].name, "csv tables")
         self.assertEqual(records[0].interface.provenance, "llm_extracted")
 
-    def test_deterministic_fallback_classifies_skill_granularity(self) -> None:
+    def test_deterministic_fallback_omits_routing_classification_fields(self) -> None:
         skills = [
             make_skill("skill:alfworld-goal-interpreter", "alfworld-goal-interpreter", "Parse the task and generate a sequential plan."),
             make_skill("skill:alfworld-object-picker", "alfworld-object-picker", "Execute take object from receptacle."),
@@ -97,14 +93,11 @@ class InterfaceExtractionTests(unittest.TestCase):
         records = extract_skill_interfaces(skills, extractor=DeterministicInterfaceExtractor())
         by_id = {record.skill_id: record.interface for record in records}
 
-        self.assertEqual(by_id["skill:alfworld-goal-interpreter"].granularity, "planning")
-        self.assertEqual(by_id["skill:alfworld-goal-interpreter"].execution_role, "planner")
-        self.assertEqual(by_id["skill:alfworld-object-picker"].granularity, "primitive")
-        self.assertEqual(by_id["skill:alfworld-object-picker"].execution_role, "actor")
-        self.assertEqual(by_id["skill:alfworld-heat-object-with-appliance"].granularity, "macro")
-        self.assertEqual(by_id["skill:alfworld-heat-object-with-appliance"].execution_role, "transformer")
-        self.assertEqual(by_id["skill:alfworld-object-state-inspector"].granularity, "utility")
-        self.assertEqual(by_id["skill:alfworld-object-state-inspector"].execution_role, "inspector")
+        for interface in by_id.values():
+            payload = interface.to_dict()
+            self.assertNotIn("granularity", payload)
+            self.assertNotIn("execution_role", payload)
+            self.assertNotIn("failure_modes", payload)
 
     def test_fenced_json_is_parsed(self) -> None:
         self._install_fake_litellm(
@@ -388,15 +381,18 @@ class InterfaceExtractionTests(unittest.TestCase):
         prompt = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "skill_contract_capability_facets")
+        self.assertEqual(payload["prompt_id"], "skill_contract_core_interface_v2")
         for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
             self.assertIn(field, payload)
         self.assertIn("extraction_policy", payload)
         self.assertIn("capability_facets", payload["extraction_policy"])
         self.assertEqual(
             set(payload["output_schema"]),
-            {"capability_summary", "when_to_use", "granularity", "execution_role", "requires", "produces", "uses_tools", "failure_modes"},
+            {"capability_summary", "when_to_use", "requires", "produces", "uses_tools"},
         )
+        self.assertNotIn("granularity", prompt)
+        self.assertNotIn("execution_role", prompt)
+        self.assertNotIn("failure_modes", prompt)
         self.assertIn("FULL_SKILL_LINE", prompt)
         self.assertIn("full_skill_md", prompt)
         self.assertIn("requires", prompt)

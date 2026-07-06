@@ -113,8 +113,6 @@ def _payload_for_community(
                 "description": by_skill[skill_id].description,
                 "capability_summary": interfaces[skill_id].capability_summary if skill_id in interfaces else "",
                 "when_to_use": interfaces[skill_id].when_to_use if skill_id in interfaces else "",
-                "granularity": interfaces[skill_id].granularity if skill_id in interfaces else "",
-                "execution_role": interfaces[skill_id].execution_role if skill_id in interfaces else "",
                 "requires": _interface_field_records(interfaces[skill_id].requires) if skill_id in interfaces else [],
                 "produces": _interface_field_records(interfaces[skill_id].produces) if skill_id in interfaces else [],
                 "uses_tools": _interface_field_records(interfaces[skill_id].uses_tools[:8]) if skill_id in interfaces else [],

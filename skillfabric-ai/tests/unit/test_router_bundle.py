@@ -36,7 +36,6 @@ def _interface(
     requires: list[str] | None = None,
     summary: str = "",
     when_to_use: str = "",
-    execution_role: str = "helper",
     uses_tools: list[str] | None = None,
 ) -> dict[str, object]:
     return SkillInterface(
@@ -44,7 +43,6 @@ def _interface(
         content_hash=f"hash-{skill_id}",
         capability_summary=summary,
         when_to_use=when_to_use,
-        execution_role=execution_role,
         produces=[InterfaceField(name=item, kind="artifact", confidence=0.95) for item in produces or []],
         requires=[InterfaceField(name=item, kind="artifact", confidence=0.95) for item in requires or []],
         uses_tools=[InterfaceField(name=item, kind="tool", confidence=0.95) for item in uses_tools or []],

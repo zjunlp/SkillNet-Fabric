@@ -469,24 +469,19 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertNotIn("FULL_TARGET_SHOULD_NOT_APPEAR", prompt)
         self.assertEqual(payload["prompt_id"], "execution_validation_compact_interface_first")
 
-    def test_high_confidence_execution_candidate_is_accepted_without_validator_call(self) -> None:
-        calls = 0
-
-        class CountingValidator:
-            model_id = "counting-execution"
-
-            def validate(self, candidate, source_skill, target_skill, *, interfaces):
-                nonlocal calls
-                calls += 1
-                return {
-                    "accepted": False,
-                    "flow_type": "none",
-                    "projected_edge_type": "none",
-                    "confidence": 0.0,
-                    "evidence": [],
-                    "reason": "Should not be called.",
+    def test_high_confidence_execution_candidate_still_uses_llm_validator(self) -> None:
+        calls = self._install_fake_litellm(
+            json.dumps(
+                {
+                    "accepted": True,
+                    "flow_type": "artifact_flow",
+                    "projected_edge_type": "depend_on",
+                    "confidence": 0.91,
+                    "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
+                    "reason": "LLM confirms the consumer needs producer output.",
                 }
-
+            )
+        )
         candidate = self._candidate()
         candidate.metadata["canonical_object_id"] = "artifact:csv"
 
@@ -494,19 +489,22 @@ class ExecutionValidationTests(unittest.TestCase):
             [candidate],
             self._skills(),
             interfaces=self._interfaces(),
-            validator=CountingValidator(),
+            validator=LiteLLMExecutionFlowValidator(
+                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
+            ),
         )
 
-        self.assertEqual(calls, 0)
+        self.assertEqual(len(calls), 1)
         self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].normalized["reason"], "Deterministic high-confidence interface handoff.")
+        self.assertEqual(records[0].normalized["reason"], "LLM confirms the consumer needs producer output.")
         summary = summarize_execution_validation_records(records)
-        self.assertEqual(summary["deterministic_accept"], 1)
-        self.assertEqual(summary["validator_calls"], 0)
+        self.assertEqual(summary["deterministic_accept"], 0)
+        self.assertEqual(summary["llm_compact"], 1)
+        self.assertEqual(summary["validator_calls"], 1)
         audit = execution_validation_audit_rows(records)
-        self.assertEqual(audit[0]["source"], "deterministic_accept")
-        self.assertEqual(audit[0]["action"], "deterministic_accept")
-        self.assertIn("Deterministic high-confidence", audit[0]["reason"])
+        self.assertEqual(audit[0]["source"], "llm")
+        self.assertEqual(audit[0]["action"], "llm_compact")
+        self.assertIn("LLM confirms", audit[0]["reason"])
         self.assertIn("policy_digest", audit[0])
 
     def test_compact_execution_validation_escalation_records_both_prompt_tiers(self) -> None:

@@ -81,19 +81,12 @@ class SkillInterface:
     content_hash: str
     capability_summary: str
     when_to_use: str = ""
-    granularity: str = "utility"
-    execution_role: str = "helper"
     requires: list[InterfaceField] = field(default_factory=list)
     produces: list[InterfaceField] = field(default_factory=list)
     uses_tools: list[InterfaceField] = field(default_factory=list)
-    failure_modes: list[InterfaceField] = field(default_factory=list)
     evidence: list[InterfaceEvidence] = field(default_factory=list)
     provenance: str = "deterministic_fallback"
     model_id: str = "deterministic-interface"
-
-    def __post_init__(self) -> None:
-        self.granularity = normalize_granularity(self.granularity)
-        self.execution_role = normalize_execution_role(self.execution_role, granularity=self.granularity)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,12 +94,9 @@ class SkillInterface:
             "content_hash": self.content_hash,
             "capability_summary": self.capability_summary,
             "when_to_use": self.when_to_use,
-            "granularity": self.granularity,
-            "execution_role": self.execution_role,
             "requires": _fields_to_dict(self.requires),
             "produces": _fields_to_dict(self.produces),
             "uses_tools": _fields_to_dict(self.uses_tools),
-            "failure_modes": _fields_to_dict(self.failure_modes),
             "evidence": [item.to_dict() for item in self.evidence],
             "provenance": self.provenance,
             "model_id": self.model_id,
@@ -119,12 +109,9 @@ class SkillInterface:
             content_hash=str(payload.get("content_hash", "")),
             capability_summary=str(payload.get("capability_summary", "")),
             when_to_use=str(payload.get("when_to_use", "")),
-            granularity=str(payload.get("granularity", "utility")),
-            execution_role=str(payload.get("execution_role", "helper")),
             requires=_fields_from_payload(payload.get("requires", [])),
             produces=_fields_from_payload(payload.get("produces", [])),
             uses_tools=_fields_from_payload(payload.get("uses_tools", [])),
-            failure_modes=_fields_from_payload(payload.get("failure_modes", [])),
             evidence=[
                 InterfaceEvidence.from_dict(item)
                 for item in payload.get("evidence", [])
@@ -167,76 +154,6 @@ def _fields_from_payload(payload: Any) -> list[InterfaceField]:
 
 def _normalize_token(value: str) -> str:
     return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
-
-
-def normalize_granularity(value: str) -> str:
-    normalized = value.lower().strip().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "macro": "macro",
-        "macro_skill": "macro",
-        "workflow": "macro",
-        "multi_step": "macro",
-        "end_to_end": "macro",
-        "primitive": "primitive",
-        "primitive_skill": "primitive",
-        "action": "primitive",
-        "single_action": "primitive",
-        "atomic": "primitive",
-        "utility": "utility",
-        "helper": "utility",
-        "support": "utility",
-        "inspection": "utility",
-        "planning": "planning",
-        "planner": "planning",
-        "plan": "planning",
-        "routing": "planning",
-        "goal_parser": "planning",
-    }
-    return aliases.get(normalized, "utility")
-
-
-def normalize_execution_role(value: str, *, granularity: str = "utility") -> str:
-    normalized = value.lower().strip().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "actor": "actor",
-        "act": "actor",
-        "action": "actor",
-        "take": "actor",
-        "pickup": "actor",
-        "picker": "actor",
-        "navigator": "navigator",
-        "navigation": "navigator",
-        "move": "navigator",
-        "inspector": "inspector",
-        "inspect": "inspector",
-        "scanner": "inspector",
-        "searcher": "inspector",
-        "locator": "inspector",
-        "transformer": "transformer",
-        "transform": "transformer",
-        "modifier": "transformer",
-        "cleaner": "transformer",
-        "heater": "transformer",
-        "cooler": "transformer",
-        "verifier": "verifier",
-        "verify": "verifier",
-        "validator": "verifier",
-        "planner": "planner",
-        "planning": "planner",
-        "parser": "planner",
-        "helper": "helper",
-        "utility": "helper",
-    }
-    resolved = aliases.get(normalized)
-    if resolved:
-        return resolved
-    defaults = {
-        "planning": "planner",
-        "primitive": "actor",
-        "macro": "actor",
-        "utility": "helper",
-    }
-    return defaults.get(granularity, "helper")
 
 
 def normalize_interface_kind(kind: str, *, name: str = "") -> str:

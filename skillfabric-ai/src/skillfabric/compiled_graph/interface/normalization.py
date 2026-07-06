@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from skillfabric.compiled_graph.interface.fallback import (
-    _fallback_execution_role,
-    _fallback_granularity,
-)
 from skillfabric.compiled_graph.interface.models import (
     InterfaceEvidence,
     InterfaceField,
@@ -24,12 +20,9 @@ def _interface_from_raw(skill: SkillNode, raw: dict[str, Any], *, model_id: str,
         content_hash=skill.content_hash,
         capability_summary=_string_value(raw.get("capability_summary") or skill.description),
         when_to_use=_string_value(raw.get("when_to_use") or ""),
-        granularity=_string_value(raw.get("granularity") or _fallback_granularity(skill)),
-        execution_role=_string_value(raw.get("execution_role") or _fallback_execution_role(skill)),
         requires=_fields_from_raw(skill, raw.get("requires", []), default_kind="data"),
         produces=_fields_from_raw(skill, raw.get("produces", []), default_kind="data"),
         uses_tools=_fields_from_raw(skill, raw.get("uses_tools", []), default_kind="tool"),
-        failure_modes=_fields_from_raw(skill, raw.get("failure_modes", []), default_kind="condition"),
         evidence=_evidence_from_raw(skill, raw.get("evidence", [])),
         provenance=provenance,
         model_id=model_id,
@@ -41,10 +34,7 @@ def _normalize_recoverable_interface_payload(raw: dict[str, Any]) -> dict[str, A
     for key in ("capability_summary", "when_to_use"):
         if key in normalized:
             normalized[key] = _string_value(normalized[key])
-    for key in ("granularity", "execution_role"):
-        if key in normalized:
-            normalized[key] = _string_value(normalized[key])
-    for key in ("requires", "produces", "uses_tools", "failure_modes"):
+    for key in ("requires", "produces", "uses_tools"):
         payload = normalized.get(key)
         if not isinstance(payload, list):
             continue
@@ -98,7 +88,6 @@ def _validate_interface_payload(raw: dict[str, Any]) -> None:
         "requires",
         "produces",
         "uses_tools",
-        "failure_modes",
     }
     list_fields = {
         *structural_fields,
@@ -110,10 +99,6 @@ def _validate_interface_payload(raw: dict[str, Any]) -> None:
         raise InterfaceSchemaError("capability_summary must be a string")
     if "when_to_use" in raw and not isinstance(raw["when_to_use"], str):
         raise InterfaceSchemaError("when_to_use must be a string")
-    if "granularity" in raw and not isinstance(raw["granularity"], str):
-        raise InterfaceSchemaError("granularity must be a string")
-    if "execution_role" in raw and not isinstance(raw["execution_role"], str):
-        raise InterfaceSchemaError("execution_role must be a string")
     for key in list_fields:
         if key not in raw:
             continue

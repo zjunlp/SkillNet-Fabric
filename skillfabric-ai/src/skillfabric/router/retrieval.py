@@ -161,8 +161,6 @@ def _interface_text(interface: SkillInterface, skill: SkillNode) -> str:
     fields = [
         interface.capability_summary,
         interface.when_to_use,
-        interface.granularity,
-        interface.execution_role,
         _fields_text(interface.requires),
         _fields_text(interface.produces),
         _fields_text(interface.uses_tools),

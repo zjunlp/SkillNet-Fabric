@@ -57,7 +57,6 @@ def _skill_page(
                 current_skill_id=skill.id,
                 limit=config.max_neighbors_per_section,
             ),
-            "## Failure Modes\n\n" + _render_failure_modes(interface),
             "## Read Full Source\n\n"
             + f"Open [full SKILL.md]({source_slug}) when the card is insufficient to decide routing boundaries or execution requirements.",
         ]
@@ -214,12 +213,6 @@ def _debug_pages(source: WikiSource, workspace: Workspace) -> list[WikiPage]:
     return pages
 
 
-def _render_failure_modes(interface: SkillInterface | None) -> str:
-    if interface is None:
-        return "- None"
-    return bullet_list(_field_names(interface.failure_modes))
-
-
 def _render_use_when(interface: SkillInterface | None, summary: WikiSummaryRecord) -> str:
     values = []
     if interface is not None and interface.when_to_use:
@@ -231,13 +224,6 @@ def _render_use_when(interface: SkillInterface | None, summary: WikiSummaryRecor
 def _render_do_not_use(interface: SkillInterface | None) -> str:
     if interface is None:
         return "- When the task does not match this skill's inputs, outputs, or declared tools."
-    values = [
-        field.description or field.name
-        for field in interface.failure_modes
-        if field.name or field.description
-    ]
-    if values:
-        return bullet_list([_one_line(value) for value in values])
     return "- When the task requires unrelated inputs, outputs, tools, or execution responsibilities."
 
 

@@ -65,7 +65,6 @@ def _iter_field_groups(interface: SkillInterface):
     yield "requires", interface.requires
     yield "produces", interface.produces
     yield "uses_tools", interface.uses_tools
-    yield "failure_modes", interface.failure_modes
 
 
 def _field_ref(interface: SkillInterface, field_name: str, field: InterfaceField) -> dict[str, str]:

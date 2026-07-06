@@ -23,9 +23,6 @@ EXECUTION_POLICY_CONFIG = {
             "text",
         }
     ),
-    "accept_prior_at_least": 0.9,
-    "accept_min_evidence": 2,
-    "accept_confidence": 0.9,
 }
 EXECUTION_POLICY_DIGEST = hashlib.sha256(
     json.dumps(
@@ -62,19 +59,5 @@ def classify_execution_candidate(candidate: ExecutionFlowCandidate) -> Execution
         return ExecutionValidationDecision(
             action="reject",
             reason="deterministic generic execution handoff candidate",
-        )
-    if (
-        candidate.prior >= EXECUTION_POLICY_CONFIG["accept_prior_at_least"]
-        and len(candidate.evidence) >= EXECUTION_POLICY_CONFIG["accept_min_evidence"]
-        and candidate.flow_type in {"artifact_flow", "scenario_transition"}
-        and candidate.metadata.get("canonical_object_id")
-    ):
-        return ExecutionValidationDecision(
-            action="accept",
-            reason="Deterministic high-confidence interface handoff.",
-            accepted=True,
-            flow_type=candidate.flow_type,
-            projected_edge_type="depend_on",
-            confidence=EXECUTION_POLICY_CONFIG["accept_confidence"],
         )
     return ExecutionValidationDecision(action="llm", reason="candidate requires LLM validation")

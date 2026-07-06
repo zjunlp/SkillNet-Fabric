@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from skillfabric.compiled_graph.interface.models import SkillInterface
+from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.relations.models import CandidatePair, RelationEvidence
 from skillfabric.compiled_graph.relations.prompts import (
     build_compact_pair_validation_messages,
@@ -265,7 +265,7 @@ class RelationValidationTests(unittest.TestCase):
             {"edge_type", "direction", "confidence", "evidence", "reason"},
         )
 
-    def test_prompt_includes_skill_granularity_and_execution_role(self) -> None:
+    def test_prompt_includes_compact_skill_interface_without_routing_labels(self) -> None:
         skill_a = make_skill("skill:goal-interpreter", "goal-interpreter", "Parse task and generate plan.")
         skill_b = make_skill("skill:object-picker", "object-picker", "Take object from receptacle.")
         pair = CandidatePair("skill:goal-interpreter", "skill:object-picker", 0.9, sources=["explicit_mention"])
@@ -274,15 +274,13 @@ class RelationValidationTests(unittest.TestCase):
                 skill_id="skill:goal-interpreter",
                 content_hash="hash-a",
                 capability_summary="Parse goals into a plan.",
-                granularity="planning",
-                execution_role="planner",
+                when_to_use="Use when a task needs a parsed plan.",
             ),
             "skill:object-picker": SkillInterface(
                 skill_id="skill:object-picker",
                 content_hash="hash-b",
                 capability_summary="Pick up a known object.",
-                granularity="primitive",
-                execution_role="actor",
+                produces=[InterfaceField(name="object_in_inventory", kind="world_state", confidence=0.9)],
             ),
         }
 
@@ -290,8 +288,11 @@ class RelationValidationTests(unittest.TestCase):
         payload = json.loads(messages[1]["content"])
 
         skill_payload = payload["candidate"]["skill_a"]["skill_interface"]
-        self.assertEqual(skill_payload["granularity"], "planning")
-        self.assertEqual(skill_payload["execution_role"], "planner")
+        self.assertEqual(skill_payload["capability_summary"], "Parse goals into a plan.")
+        self.assertEqual(skill_payload["when_to_use"], "Use when a task needs a parsed plan.")
+        self.assertNotIn("granularity", skill_payload)
+        self.assertNotIn("execution_role", skill_payload)
+        self.assertNotIn("failure_modes", skill_payload)
 
     def test_accepts_conditional_depend_on_with_lower_confidence(self) -> None:
         skill_a = make_skill("skill:receptacle-finder", "receptacle-finder", "May require clean object before searching.")

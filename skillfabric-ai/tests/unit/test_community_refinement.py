@@ -105,7 +105,6 @@ class CommunityRefinementTests(unittest.TestCase):
                 skill_id="skill:pdf",
                 content_hash="hash-pdf",
                 capability_summary="Extract table artifacts from PDF files.",
-                execution_role="producer",
                 produces=[InterfaceField(name="tables", kind="artifact", confidence=0.9)],
             )
         }
