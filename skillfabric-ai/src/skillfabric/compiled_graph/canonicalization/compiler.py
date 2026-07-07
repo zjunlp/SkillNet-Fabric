@@ -25,7 +25,6 @@ from skillfabric.compiled_graph.canonicalization.models import (
     CanonicalizationProvider,
     CanonicalObject,
     RawContractObject,
-    RejectedCanonicalTerm,
 )
 from skillfabric.compiled_graph.canonicalization.prompts import (
     CANONICALIZATION_PROMPT_ID,
@@ -49,10 +48,6 @@ class DeterministicCanonicalizationProvider:
             return {
                 "canonical_objects": [],
                 "assignments": [],
-                "rejected_terms": [
-                    {"raw_name": term.name, "reason": "generic"}
-                    for term in cluster.terms
-                ],
             }
         return {
             "canonical_objects": [
@@ -75,7 +70,6 @@ class DeterministicCanonicalizationProvider:
                 }
                 for term in cluster.terms
             ],
-            "rejected_terms": [],
         }
 
 
@@ -249,10 +243,6 @@ def _deterministic_cluster_result(cluster: CanonicalizationCluster) -> dict[str,
             "_provenance": "deterministic_exact",
             "canonical_objects": [],
             "assignments": [],
-            "rejected_terms": [
-                {"raw_name": term.name, "reason": "generic"}
-                for term in _unique_terms_by_name(cluster.terms)
-            ],
         }
     reason = "Deterministic singleton or normalized-exact contract term."
     return {
@@ -277,7 +267,6 @@ def _deterministic_cluster_result(cluster: CanonicalizationCluster) -> dict[str,
             }
             for term in _unique_terms_by_name(cluster.terms)
         ],
-        "rejected_terms": [],
     }
 
 
@@ -322,13 +311,11 @@ def _build_from_results(
     raw_by_cluster = {cluster.cluster_id: cluster for cluster in clusters}
     objects: dict[str, CanonicalObject] = {}
     assignments: list[CanonicalAssignment] = []
-    rejected: list[RejectedCanonicalTerm] = []
     term_lookup: dict[tuple[str, str], list[RawContractObject]] = defaultdict(list)
     for cluster in clusters:
         for term in cluster.terms:
             term_lookup[(term.name.lower(), cluster.cluster_id)].append(term)
     seen_assignments: set[tuple[str, str]] = set()
-    seen_rejections: set[str] = set()
 
     for cluster_id, raw in sorted(results.items()):
         cluster = raw_by_cluster[cluster_id]
@@ -399,29 +386,6 @@ def _build_from_results(
                     canonical.produced_by.append(term.skill_id)
                 canonical.aliases.append(term.name)
 
-        for item in raw.get("rejected_terms", []):
-            if not isinstance(item, dict):
-                continue
-            raw_name = str(item.get("raw_name", ""))
-            terms = term_lookup.get((raw_name.lower(), cluster_id), [])
-            if not terms:
-                continue
-            for term in terms:
-                if term.key in seen_rejections:
-                    continue
-                seen_rejections.add(term.key)
-                rejected.append(
-                    RejectedCanonicalTerm(
-                        raw_key=term.key,
-                        skill_id=term.skill_id,
-                        role=term.role,
-                        raw_name=term.name,
-                        raw_kind=term.kind,
-                        reason=str(item.get("reason", "rejected")),
-                        provenance=str(raw.get("_provenance") or _provenance(model_id)),
-                    )
-                )
-
     for canonical in objects.values():
         canonical.required_by = sorted(set(canonical.required_by))
         canonical.produced_by = sorted(set(canonical.produced_by))
@@ -432,7 +396,6 @@ def _build_from_results(
     return CanonicalizationBuild(
         objects=sorted(objects.values(), key=lambda item: item.canonical_id),
         assignments=sorted(assignments, key=lambda item: item.raw_key),
-        rejected_terms=sorted(rejected, key=lambda item: item.raw_key),
         raw_terms=sorted(raw_terms, key=lambda item: item.key),
         candidate_edges=sorted(candidate_edges, key=lambda item: (item.left_object_id, item.right_object_id, item.method)),
         candidate_components=sorted(candidate_components, key=lambda item: item.component_id),
@@ -482,7 +445,7 @@ def _second_pass_merge_audit(objects: list[CanonicalObject]) -> list[dict[str, A
 
 
 def _validate_provider_payload(raw: dict[str, Any]) -> None:
-    for key in ("canonical_objects", "assignments", "rejected_terms"):
+    for key in ("canonical_objects", "assignments"):
         if key in raw and not isinstance(raw[key], list):
             raise ValueError(f"{key} must be a list")
 

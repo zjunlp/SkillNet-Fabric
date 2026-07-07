@@ -6,7 +6,6 @@ from skillfabric.compiled_graph.canonicalization.models import (
     CanonicalAssignment,
     CanonicalizationBuild,
     CanonicalObject,
-    RejectedCanonicalTerm,
 )
 from skillfabric.compiled_graph.execution.compiler import (
     compile_execution_graph,
@@ -807,37 +806,6 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(accepted_compiled.candidates[0].matched_name, "spreadsheet_table")
         self.assertEqual(accepted_compiled.candidates[0].source_skill, "skill:financial-analysis")
         self.assertEqual(accepted_compiled.candidates[0].target_skill, "skill:xlsx")
-
-    def test_canonicalization_rejected_terms_do_not_fall_back_to_format_ontology(self) -> None:
-        producer = _interface(
-            "skill:image-producer",
-            produces=[_field("skill:image-producer", "generated_image_png", "artifact")],
-        )
-        consumer = _interface(
-            "skill:image-consumer",
-            requires=[_field("skill:image-consumer", "rendered_image_file", "artifact")],
-        )
-        canonicalization = CanonicalizationBuild(
-            rejected_terms=[
-                RejectedCanonicalTerm(
-                    raw_key="skill:image-consumer|requires|rendered_image_file|artifact",
-                    skill_id="skill:image-consumer",
-                    role="requires",
-                    raw_name="rendered_image_file",
-                    raw_kind="artifact",
-                    reason="local_only",
-                )
-            ]
-        )
-
-        compiled = compile_execution_graph(
-            {producer.skill_id: producer, consumer.skill_id: consumer},
-            bucket_limit=100,
-            canonicalization=canonicalization,
-        )
-
-        self.assertEqual(compiled.candidates, [])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -422,7 +422,6 @@ class KGBuildTests(unittest.TestCase):
                                     {
                                         "canonical_objects": [],
                                         "assignments": [],
-                                        "rejected_terms": [],
                                     }
                                 )
                             }

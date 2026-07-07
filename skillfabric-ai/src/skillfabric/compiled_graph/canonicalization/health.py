@@ -12,7 +12,6 @@ class CanonicalizationHealthReport:
     raw_contract_object_count: int
     canonical_object_count: int
     promoted_object_count: int
-    rejected_term_count: int
     alias_merge_ratio: float
     producer_consumer_match_count: int
     candidate_edge_count: int = 0
@@ -37,7 +36,6 @@ def analyze_canonicalization_health(build: CanonicalizationBuild) -> Canonicaliz
         raw_contract_object_count=raw_count,
         canonical_object_count=canonical_count,
         promoted_object_count=sum(1 for item in build.objects if item.promoted),
-        rejected_term_count=len(build.rejected_terms),
         alias_merge_ratio=merge_ratio,
         producer_consumer_match_count=producer_consumer,
         candidate_edge_count=len(build.candidate_edges),
@@ -66,7 +64,6 @@ def render_canonicalization_health_report(report: CanonicalizationHealthReport) 
             f"- raw contract objects: {report.raw_contract_object_count}",
             f"- canonical objects: {report.canonical_object_count}",
             f"- promoted objects: {report.promoted_object_count}",
-            f"- rejected terms: {report.rejected_term_count}",
             f"- alias merge ratio: {report.alias_merge_ratio}",
             f"- producer-consumer matches: {report.producer_consumer_match_count}",
             f"- candidate edges: {report.candidate_edge_count}",

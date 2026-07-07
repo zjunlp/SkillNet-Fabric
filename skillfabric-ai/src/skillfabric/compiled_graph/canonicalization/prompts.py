@@ -30,9 +30,9 @@ def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[di
         },
         "output": {
             "format": "Return one strict JSON object, with no markdown, comments, or extra keys.",
-            "required_top_level_keys": ["canonical_objects", "assignments", "rejected_terms"],
+            "required_top_level_keys": ["canonical_objects", "assignments"],
             "purpose": (
-                "Canonical objects support cross-skill routing and orchestration. Rejected terms document why noisy terms should not be promoted."
+                "Canonical objects support cross-skill routing and orchestration. Leave noisy terms unassigned instead of preserving them."
             ),
         },
         "workflow": [
@@ -40,16 +40,16 @@ def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[di
             "Step 2: Separate final deliverables, intermediate artifacts, data objects, reports, text, environment prerequisites, credentials, world states, belief states, and planning states.",
             "Step 3: Use candidate_edges as evidence, but split terms that are only topically or lexically similar.",
             "Step 4: Merge aliases only when they are substitutable in routing or workflow planning.",
-            "Step 5: Reject generic, local-only, placeholder, section-heading, example-only, and unsupported terms.",
+            "Step 5: Leave generic, local-only, placeholder, section-heading, example-only, and unsupported terms unassigned.",
             "Step 6: Decide promotion by cross-skill utility, not by whether a phrase appears in a skill.",
-            "Step 7: Assign each raw term exactly once: either to one canonical object or to rejected_terms.",
+            "Step 7: Assign only raw terms that map to a useful canonical object.",
             "Step 8: Return a small, high-precision registry that favors useful workflow gates over exhaustive preservation.",
         ],
         "decision_workflow": [
             "Group raw terms by the operational thing a downstream agent can require, produce, inspect, verify, or hand off.",
             "Separate final deliverables, intermediate artifacts, data objects, environment prerequisites, credentials, world states, belief states, and planning states.",
             "Merge aliases only when they are substitutable in routing or workflow planning.",
-            "Reject terms that are too generic, local-only, example-only, or unsupported by reusable operational semantics.",
+            "Do not assign terms that are too generic, local-only, example-only, or unsupported by reusable operational semantics.",
             "Promote only objects that can help connect skills or explain coverage; do not preserve every phrase from the source contracts.",
         ],
         "output_schema": {
@@ -72,18 +72,12 @@ def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[di
                     "reason": "",
                 }
             ],
-            "rejected_terms": [
-                {
-                    "raw_name": "",
-                    "reason": "generic|local_only|ambiguous|unsupported",
-                }
-            ],
         },
         "rules": [
             "Return JSON only.",
             "Use stable snake_case canonical names. Do not include spaces, slashes, punctuation, or skill names.",
             "Every assignment raw_name must exactly match one input term name.",
-            "A raw term must appear in exactly one of assignments or rejected_terms.",
+            "Omit raw terms from assignments when they do not map to a useful canonical object.",
             "Use candidate_edges as merge evidence, but reject weak candidate edges when the raw terms name different operational objects.",
             "If the component is marked ambiguous, be conservative and split or reject instead of forcing one canonical object.",
             "Merge aliases aggressively when the terms describe the same operational object, even if their raw kind differs across artifact, data, text, state, report, or environment.",
@@ -95,12 +89,12 @@ def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[di
             "Only world_state objects may represent physical gates such as object_in_inventory, receptacle_open, cleaned_object_state, heated_object_state, cooled_object_state, or agent_at_target_location.",
             "Prefer reusable state/data names for workflow gates: object_in_inventory, agent_at_target_location, receptacle_open, target_object_located, appliance_ready, cleaned_object_state, heated_object_state, cooled_object_state, task_verified.",
             "Do not keep separate canonical objects for spelling variants such as object in inventory vs object_in_inventory, target receptacle vs target_receptacle_identifier, current observation vs environment_observation.",
-            "Reject or demote generic parameters that cannot connect producer to consumer by themselves: object, data, result, output, content, file, text, target, item, command.",
-            "Reject terms that only name an example, placeholder, section heading, or local implementation detail unless they identify a reusable artifact or state.",
+            "Do not assign generic parameters that cannot connect producer to consumer by themselves: object, data, result, output, content, file, text, target, item, command.",
+            "Do not assign terms that only name an example, placeholder, section heading, or local implementation detail unless they identify a reusable artifact or state.",
             "Promote=true only when the object can support cross-skill routing or workflow planning. Strong cases: at least one producing skill and one requiring skill; or a state/credential/environment shared by multiple skills as a real workflow gate.",
             "Promote=false for local-only outputs, one-off reports, isolated action strings, examples, and final task-completion descriptions that no other skill can consume.",
             "Do not merge semantically different objects just because they share common words. A target object, target receptacle, target tool, and task target are different.",
-            "If all terms are local-only or generic, return no canonical_objects, no assignments, and put each raw term in rejected_terms with a short reason.",
+            "If all terms are local-only or generic, return empty canonical_objects and empty assignments.",
             "Use confidence >= 0.9 only for evidence-backed exact or near-exact aliases; use lower confidence when an assignment is inferred from context.",
         ],
         "constraints": [

@@ -335,7 +335,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
             "raw_contract_object_count": len(canonicalization.raw_terms),
             "canonical_object_count": len(canonicalization.objects),
             "promoted_object_count": sum(1 for item in canonicalization.objects if item.promoted),
-            "rejected_canonical_term_count": len(canonicalization.rejected_terms),
             "canonical_candidate_edge_count": len(canonicalization.candidate_edges),
             "canonical_candidate_component_count": len(canonicalization.candidate_components),
             "canonical_ambiguous_component_count": sum(
@@ -415,7 +414,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "raw_contract_object_count": stats["raw_contract_object_count"],
                 "canonical_object_count": stats["canonical_object_count"],
                 "promoted_object_count": stats["promoted_object_count"],
-                "rejected_canonical_term_count": stats["rejected_canonical_term_count"],
                 "raw_artifact_count": stats["raw_artifact_count"],
                 "raw_scenario_count": stats["raw_scenario_count"],
                 "canonical_artifact_count": stats["canonical_artifact_count"],
@@ -644,7 +642,6 @@ def _write_compiled_graph_artifact(
             "canonicalization": {
                 "objects": [item.to_dict() for item in canonicalization.objects],
                 "aliases": [item.to_dict() for item in canonicalization.assignments],
-                "rejected_terms": [item.to_dict() for item in canonicalization.rejected_terms],
                 "model_id": canonicalization.model_id,
             },
             "execution_graph": {
@@ -811,7 +808,6 @@ def _canonicalization_evidence_rows(build: CanonicalizationBuild) -> list[dict[s
     rows: list[dict[str, Any]] = []
     rows.extend({"record_type": "canonical_object", **item.to_dict()} for item in build.objects)
     rows.extend({"record_type": "assignment", **item.to_dict()} for item in build.assignments)
-    rows.extend({"record_type": "rejected_term", **item.to_dict()} for item in build.rejected_terms)
     return rows
 
 

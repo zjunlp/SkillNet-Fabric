@@ -88,7 +88,6 @@ class StaticCanonicalizationProvider:
                 }
                 for term in cluster.terms
             ],
-            "rejected_terms": [],
         }
 
 
@@ -117,7 +116,6 @@ class StaticInventoryStateCanonicalizationProvider:
                 }
                 for term in cluster.terms
             ],
-            "rejected_terms": [],
         }
 
 
@@ -176,7 +174,7 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertIn("decision_workflow", payload)
         self.assertEqual(
             set(payload["output_schema"]),
-            {"canonical_objects", "assignments", "rejected_terms"},
+            {"canonical_objects", "assignments"},
         )
         self.assertIn("Do not merge terms that merely belong to the same broad domain", prompt_text)
         self.assertIn("example, placeholder, section heading", prompt_text)
@@ -246,7 +244,6 @@ class CanonicalizationTests(unittest.TestCase):
                                 {
                                     "canonical_objects": [],
                                     "assignments": [],
-                                    "rejected_terms": [],
                                 }
                             )
                         }
@@ -315,7 +312,6 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.lookup("skill:consumer", "requires", "csv tables", "artifact"), "artifact:csv_table")
         self.assertFalse(any(item.name == "output" for item in build.raw_terms))
         self.assertFalse(any(item.raw_name == "output" for item in build.assignments))
-        self.assertFalse(any(item.raw_name == "output" for item in build.rejected_terms))
 
     def test_singleton_component_is_canonicalized_without_provider_call(self) -> None:
         provider = StaticCanonicalizationProvider()

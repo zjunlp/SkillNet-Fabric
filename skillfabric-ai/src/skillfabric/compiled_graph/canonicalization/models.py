@@ -152,36 +152,11 @@ class CanonicalAssignment:
 
 
 @dataclass(slots=True)
-class RejectedCanonicalTerm:
-    """Raw term that should stay out of execution compatibility."""
-
-    raw_key: str
-    skill_id: str
-    role: str
-    raw_name: str
-    raw_kind: str
-    reason: str
-    provenance: str = "deterministic_fallback"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "raw_key": self.raw_key,
-            "skill_id": self.skill_id,
-            "role": self.role,
-            "raw_name": self.raw_name,
-            "raw_kind": self.raw_kind,
-            "reason": self.reason,
-            "provenance": self.provenance,
-        }
-
-
-@dataclass(slots=True)
 class CanonicalizationBuild:
     """Pool-level canonicalization result."""
 
     objects: list[CanonicalObject] = field(default_factory=list)
     assignments: list[CanonicalAssignment] = field(default_factory=list)
-    rejected_terms: list[RejectedCanonicalTerm] = field(default_factory=list)
     raw_terms: list[RawContractObject] = field(default_factory=list)
     candidate_edges: list[Any] = field(default_factory=list)
     candidate_components: list[Any] = field(default_factory=list)
