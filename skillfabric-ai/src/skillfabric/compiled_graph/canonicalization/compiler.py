@@ -455,6 +455,8 @@ def _should_promote(canonical: CanonicalObject) -> bool:
         return False
     if _is_generic(canonical.name):
         return False
+    if _is_broad_handoff_name(canonical.name):
+        return False
     if canonical.type in {"belief_state", "planning_state"}:
         return False
     if canonical.type in {"state", "credential", "environment"}:
@@ -519,6 +521,52 @@ def _is_generic(value: str) -> bool:
         "state",
         "text",
     }
+
+
+def _is_broad_handoff_name(value: str) -> bool:
+    tokens = set(_normalize_name(value).split())
+    if not tokens:
+        return True
+    if _looks_like_context_or_input_placeholder(tokens):
+        return True
+    if _looks_like_path_placeholder(tokens):
+        return True
+    return False
+
+
+def _looks_like_context_or_input_placeholder(tokens: set[str]) -> bool:
+    broad_context_tokens = {
+        "context",
+        "input",
+        "material",
+        "materials",
+        "reference",
+        "references",
+        "snippet",
+        "snippets",
+        "source",
+    }
+    if not (tokens & broad_context_tokens):
+        return False
+    informative_tokens = tokens - broad_context_tokens - {
+        "artifact",
+        "artifacts",
+        "data",
+        "document",
+        "documents",
+        "file",
+        "files",
+        "project",
+        "task",
+        "text",
+    }
+    return not informative_tokens
+
+
+def _looks_like_path_placeholder(tokens: set[str]) -> bool:
+    if not ({"path", "directory"} & tokens):
+        return False
+    return tokens <= {"directory", "file", "input", "output", "path", "project", "target"}
 
 
 def _cluster_object_type_compatible(cluster_type: str, object_type: str) -> bool:

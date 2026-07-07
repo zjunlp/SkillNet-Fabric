@@ -47,7 +47,12 @@ def _field(skill_id: str, name: str, kind: str) -> InterfaceField:
     )
 
 
-def _build_canonicalization(canonical_id: str, assignments: list[tuple[str, str, InterfaceField]]) -> CanonicalizationBuild:
+def _build_canonicalization(
+    canonical_id: str,
+    assignments: list[tuple[str, str, InterfaceField]],
+    *,
+    promoted: bool = True,
+) -> CanonicalizationBuild:
     object_type, _, name = canonical_id.partition(":")
     return CanonicalizationBuild(
         objects=[
@@ -55,7 +60,7 @@ def _build_canonicalization(canonical_id: str, assignments: list[tuple[str, str,
                 canonical_id=canonical_id,
                 name=name,
                 type=object_type,
-                promoted=True,
+                promoted=promoted,
                 confidence=0.9,
             )
         ],
@@ -116,7 +121,7 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(compiled.candidates[0].matched_name, "docx_document")
         self.assertEqual(compiled.execution_index, [])
 
-    def test_broad_context_object_does_not_generate_execution_candidates(self) -> None:
+    def test_non_promoted_shared_object_does_not_generate_execution_candidates(self) -> None:
         produced = _field("skill:producer", "source_data", "data")
         consumed = _field("skill:consumer", "source_data", "data")
         producer = _interface("skill:producer", produces=[produced])
@@ -127,6 +132,7 @@ class ExecutionCompilerTests(unittest.TestCase):
                 ("skill:producer", "produces", produced),
                 ("skill:consumer", "requires", consumed),
             ],
+            promoted=False,
         )
 
         compiled = compile_execution_graph(

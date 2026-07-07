@@ -332,6 +332,28 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.assignments[0].provenance, "deterministic_exact")
         self.assertFalse(build.objects[0].promoted)
 
+    def test_broad_handoff_object_is_not_promoted_by_canonicalization(self) -> None:
+        producer = _interface("skill:producer", produces=[_field("skill:producer", "source_data", "data")])
+        consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "source_data", "data")])
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=DeterministicCanonicalizationProvider(),
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=NoSimilarityEmbedder(),
+        )
+
+        source_data = {item.canonical_id: item for item in build.objects}["data:source_data"]
+        self.assertFalse(source_data.promoted)
+        self.assertEqual(
+            build.lookup("skill:producer", "produces", "source_data", "data"),
+            "",
+        )
+        self.assertEqual(
+            build.lookup("skill:consumer", "requires", "source_data", "data"),
+            "",
+        )
+
     def test_normalized_exact_duplicates_are_canonicalized_without_provider_call(self) -> None:
         provider = StaticCanonicalizationProvider()
         producer = _interface("skill:producer", produces=[_field("skill:producer", "CSV-table")])
