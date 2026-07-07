@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from skillfabric.compiled_graph.interface.models import (
+    INTERFACE_FIELD_KINDS,
     InterfaceEvidence,
     InterfaceField,
     SkillInterface,
@@ -46,7 +47,7 @@ def _normalize_recoverable_interface_payload(raw: dict[str, Any]) -> dict[str, A
             copy = dict(item)
             copy["name"] = _string_value(copy.get("name", ""))
             copy["description"] = _string_value(copy.get("description", ""))
-            copy["kind"] = _normalize_kind(_string_value(copy.get("kind", "")), name=copy["name"])
+            copy["kind"] = _normalize_kind(_string_value(copy.get("kind", "")))
             copy["evidence"] = _recover_evidence_items(copy.get("evidence", []))
             items.append(copy)
         normalized[key] = items
@@ -110,6 +111,7 @@ def _validate_interface_payload(raw: dict[str, Any]) -> None:
             _validate_evidence_items(key, raw[key])
         else:
             for item in raw[key]:
+                _validate_field_kind(key, item.get("kind", ""))
                 _validate_evidence_items(key, item.get("evidence", []))
     for key in list_fields - {"evidence"}:
         for item in raw.get(key, []):
@@ -148,6 +150,12 @@ def _is_int(value: Any) -> bool:
     return True
 
 
+def _validate_field_kind(field_name: str, value: Any) -> None:
+    kind = _normalize_kind(_string_value(value))
+    if kind not in INTERFACE_FIELD_KINDS:
+        raise InterfaceSchemaError(f"{field_name}.kind must be one of {sorted(INTERFACE_FIELD_KINDS)}")
+
+
 def _fields_from_raw(
     skill: SkillNode,
     payload: Any,
@@ -166,7 +174,7 @@ def _fields_from_raw(
         if not name:
             continue
         evidence = _evidence_from_raw(skill, item.get("evidence", []))
-        kind = _normalize_kind(str(item.get("kind", default_kind) or default_kind), name=name)
+        kind = _normalize_kind(str(item.get("kind", default_kind) or default_kind))
         if only_tool and kind != "tool":
             kind = "tool"
         if not allow_tool and kind == "tool":
@@ -183,8 +191,8 @@ def _fields_from_raw(
     return fields
 
 
-def _normalize_kind(value: str, *, name: str = "") -> str:
-    return normalize_interface_kind(value, name=name)
+def _normalize_kind(value: str) -> str:
+    return normalize_interface_kind(value)
 
 
 def _evidence_from_raw(skill: SkillNode, payload: Any) -> list[InterfaceEvidence]:

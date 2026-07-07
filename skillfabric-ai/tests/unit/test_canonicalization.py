@@ -466,7 +466,7 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(compiled.candidates[0].metadata["canonical_object_id"], "artifact:spreadsheet_table")
 
     def test_candidate_components_split_by_object_type(self) -> None:
-        producer = _interface("skill:picker", produces=[_field("skill:picker", "object_in_inventory", "state")])
+        producer = _interface("skill:picker", produces=[_field("skill:picker", "object_in_inventory", "world_state")])
         consumer = _interface("skill:storer", requires=[_field("skill:storer", "object description note", "text")])
         provider = StaticCanonicalizationProvider()
         canonicalization = canonicalize_contract_objects(

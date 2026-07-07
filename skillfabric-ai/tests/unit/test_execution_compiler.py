@@ -211,11 +211,11 @@ class ExecutionCompilerTests(unittest.TestCase):
     def test_reusable_postconditions_and_preconditions_generate_state_candidate(self) -> None:
         enabler = _interface(
             "skill:login",
-            produces=[_field("skill:login", "authenticated session", "state")],
+            produces=[_field("skill:login", "authenticated session", "world_state")],
         )
         requiring = _interface(
             "skill:purchase",
-            requires=[_field("skill:purchase", "authenticated session", "state")],
+            requires=[_field("skill:purchase", "authenticated session", "world_state")],
         )
         canonicalization = _build_canonicalization(
             "state:authenticated_session",
@@ -394,7 +394,7 @@ class ExecutionCompilerTests(unittest.TestCase):
     def test_local_conditions_do_not_generate_global_scenario_records(self) -> None:
         only_enabler = _interface(
             "skill:algorithmic-art",
-            produces=[_field("skill:algorithmic-art", "algorithmic philosophy created", "state")],
+            produces=[_field("skill:algorithmic-art", "algorithmic philosophy created", "world_state")],
         )
 
         compiled = compile_execution_graph({only_enabler.skill_id: only_enabler})

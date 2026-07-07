@@ -230,7 +230,7 @@ class InterfaceExtractionTests(unittest.TestCase):
                     "produces": [
                         {
                             "name": "clean_object_state",
-                            "kind": "state",
+                            "kind": "world_state",
                             "confidence": 0.93,
                             "evidence": ["line 12: The object is now clean."],
                         }
@@ -251,7 +251,7 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertEqual(records[0].interface.produces[0].name, "clean_object_state")
         self.assertEqual(records[0].interface.produces[0].evidence, [])
 
-    def test_recoverable_state_name_is_reclassified_even_when_kind_is_generic_state(self) -> None:
+    def test_invalid_field_kind_uses_fallback_and_records_rejection(self) -> None:
         self._install_fake_litellm(
             json.dumps(
                 {
@@ -273,8 +273,9 @@ class InterfaceExtractionTests(unittest.TestCase):
             extractor=LiteLLMInterfaceExtractor(LLMConfig(api_base="https://example.test/api", api_key="sk-test")),
         )
 
-        self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].interface.produces[0].kind, "belief_state")
+        self.assertFalse(records[0].accepted)
+        self.assertIn("schema_error", records[0].rejection_reason)
+        self.assertEqual(records[0].interface.provenance, "deterministic_fallback")
 
     def test_tool_kind_is_not_kept_in_requires_or_produces(self) -> None:
         self._install_fake_litellm(

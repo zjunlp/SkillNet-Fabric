@@ -10,43 +10,29 @@ from skillfabric.compiled_graph.interface.models import (
 
 
 class InterfaceModelTests(unittest.TestCase):
-    def test_interface_field_normalizes_state_semantics_by_name(self) -> None:
-        belief = InterfaceField(
-            name="object_permanence_state",
-            kind="state",
-            confidence=0.7,
-        )
-        planning = InterfaceField(
-            name="sequential_sub_objective_plan",
-            kind="state",
-            confidence=0.7,
-        )
-        inventory = InterfaceField(
+    def test_interface_field_normalizes_kind_format_only(self) -> None:
+        field = InterfaceField(
             name="object_in_inventory",
-            kind="state",
-            confidence=0.7,
-        )
-        verified = InterfaceField(
-            name="task_verified",
-            kind="state",
+            kind="World State",
             confidence=0.7,
         )
 
-        self.assertEqual(belief.kind, "belief_state")
-        self.assertEqual(planning.kind, "planning_state")
-        self.assertEqual(inventory.kind, "world_state")
-        self.assertEqual(verified.kind, "world_state")
+        self.assertEqual(field.kind, "world_state")
 
     def test_interface_field_kind_is_closed_set(self) -> None:
-        unknown = InterfaceField(name="build manifest", kind="dependency", confidence=0.7)
-        condition = InterfaceField(name="logged in browser", kind="condition", confidence=0.7)
-        observation = InterfaceField(name="current observation", kind="observation_state", confidence=0.7)
         credential = InterfaceField(name="authenticated oauth session", kind="credential", confidence=0.7)
 
-        self.assertEqual(unknown.kind, "artifact")
-        self.assertEqual(condition.kind, "world_state")
-        self.assertEqual(observation.kind, "belief_state")
         self.assertEqual(credential.kind, "credential")
+        for alias in ("state", "condition", "dependency", "observation_state"):
+            with self.subTest(alias=alias):
+                with self.assertRaises(ValueError):
+                    InterfaceField(name=f"{alias} field", kind=alias, confidence=0.7)
+
+    def test_common_kind_aliases_are_not_semantically_normalized(self) -> None:
+        for alias in ("dataset", "table", "library", "api", "command"):
+            with self.subTest(alias=alias):
+                with self.assertRaises(ValueError):
+                    InterfaceField(name=f"{alias} field", kind=alias, confidence=0.7)
 
     def test_skill_interface_round_trips_stably(self) -> None:
         interface = SkillInterface(

@@ -52,7 +52,9 @@ class InterfaceField:
     evidence: list[InterfaceEvidence] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.kind = normalize_interface_kind(self.kind, name=self.name)
+        self.kind = normalize_interface_kind(self.kind)
+        if self.kind not in INTERFACE_FIELD_KINDS:
+            raise ValueError(f"unsupported interface field kind: {self.kind}")
         self.confidence = max(0.0, min(float(self.confidence), 1.0))
 
     @property
@@ -166,113 +168,6 @@ def _normalize_token(value: str) -> str:
     return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
 
 
-def normalize_interface_kind(kind: str, *, name: str = "") -> str:
+def normalize_interface_kind(kind: str) -> str:
     normalized_kind = kind.lower().strip().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "state": "world_state",
-        "condition": "world_state",
-        "physical_state": "world_state",
-        "environment_state": "world_state",
-        "worldstate": "world_state",
-        "belief": "belief_state",
-        "memory_state": "belief_state",
-        "knowledge_state": "belief_state",
-        "observation_state": "belief_state",
-        "planning": "planning_state",
-        "plan_state": "planning_state",
-        "routing_state": "planning_state",
-        "dataset": "data",
-        "table": "data",
-        "document": "artifact",
-        "file": "artifact",
-        "dependency": "artifact",
-        "library": "tool",
-        "api": "tool",
-        "command": "tool",
-    }
-    normalized = aliases.get(normalized_kind, normalized_kind or "data")
-    if normalized in INTERFACE_FIELD_KINDS:
-        if normalized in {"world_state", "belief_state", "planning_state"}:
-            return _state_kind_from_name(name) or normalized
-        return normalized
-    return _state_kind_from_name(name) or "artifact"
-
-
-def _state_kind_from_name(name: str) -> str:
-    normalized_name = _normalize_token(name)
-    if _looks_like_belief_state_name(normalized_name):
-        return "belief_state"
-    if _looks_like_planning_state_name(normalized_name):
-        return "planning_state"
-    if _looks_like_world_state_name(normalized_name):
-        return "world_state"
-    return ""
-
-
-def _looks_like_belief_state_name(normalized_name: str) -> bool:
-    if not normalized_name:
-        return False
-    tokens = set(normalized_name.split())
-    return bool(
-        {
-            "permanence",
-            "remember",
-            "remembered",
-            "observed",
-            "observation",
-            "belief",
-            "memory",
-            "knowledge",
-            "inferred",
-            "inference",
-        }
-        & tokens
-    ) or "object permanence" in normalized_name
-
-
-def _looks_like_planning_state_name(normalized_name: str) -> bool:
-    if not normalized_name:
-        return False
-    tokens = set(normalized_name.split())
-    return bool(
-        {
-            "parsed",
-            "plan",
-            "planning",
-            "routing",
-            "objective",
-            "subobjective",
-            "goal",
-        }
-        & tokens
-    ) or any(
-        phrase in normalized_name
-        for phrase in (
-            "sequential sub objective",
-            "structured task parse",
-            "goal parse",
-            "task parse",
-            "sub objective",
-        )
-    )
-
-
-def _looks_like_world_state_name(normalized_name: str) -> bool:
-    if not normalized_name:
-        return False
-    tokens = set(normalized_name.split())
-    if {"inventory", "held", "holding", "open", "closed", "clean", "cleaned", "heated", "cooled"} & tokens:
-        return True
-    if "located" in tokens or "accessible" in tokens or "authenticated" in tokens:
-        return True
-    return any(
-        phrase in normalized_name
-        for phrase in (
-            "in hand",
-            "in inventory",
-            "object inventory",
-            "object hand",
-            "receptacle open",
-            "receptacle closed",
-        )
-    )
+    return normalized_kind

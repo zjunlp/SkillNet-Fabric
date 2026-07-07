@@ -166,13 +166,13 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
                 skill_id=setup.id,
                 content_hash=setup.content_hash,
                 capability_summary="Authenticate.",
-                produces=[InterfaceField(name="authenticated session", kind="state", confidence=0.8)],
+                produces=[InterfaceField(name="authenticated session", kind="world_state", confidence=0.8)],
             ),
             action.id: SkillInterface(
                 skill_id=action.id,
                 content_hash=action.content_hash,
                 capability_summary="Use authenticated session.",
-                requires=[InterfaceField(name="authenticated session", kind="state", confidence=0.8)],
+                requires=[InterfaceField(name="authenticated session", kind="world_state", confidence=0.8)],
             ),
         }
 
