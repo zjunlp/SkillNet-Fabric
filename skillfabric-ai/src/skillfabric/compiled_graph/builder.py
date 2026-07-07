@@ -291,8 +291,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
             {"stage": "compose_depend", "build_id": build_id, "config_digest": config_digest},
         )
         relation_candidates = generate_relation_candidates(
-            skills,
-            similar_edges,
             per_skill_limit=config.candidate_top_k,
             interfaces=interfaces,
             execution_records=execution_records,

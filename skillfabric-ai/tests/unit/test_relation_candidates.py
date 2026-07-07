@@ -8,44 +8,18 @@ from skillfabric.compiled_graph.interface.models import (
     InterfaceField,
     SkillInterface,
 )
-from skillfabric.compiled_graph.models import Edge
 from skillfabric.compiled_graph.relations.candidates import generate_relation_candidates
 from tests.unit.relation_helpers import make_skill
 
 
 class RelationCandidateTests(unittest.TestCase):
-    def test_ignores_explicit_mentions_and_similarity_edges(self) -> None:
-        parser = make_skill("skill:pdf-table-parser", "pdf-table-parser", "Parse PDF tables.")
-        kpi = make_skill(
-            "skill:financial-kpi-extractor",
-            "financial-kpi-extractor",
-            "Use after pdf-table-parser has produced CSV tables.",
-            artifacts=["csv"],
-        )
-        similar = [
-            Edge(
-                source="skill:financial-kpi-extractor",
-                target="skill:pdf-table-parser",
-                type="similar_to",
-                confidence=0.7,
-                weight=0.7,
-            )
-        ]
-
-        pairs = generate_relation_candidates(
-            [parser, kpi],
-            similar,
-            per_skill_limit=10,
-        )
+    def test_requires_interface_contracts(self) -> None:
+        pairs = generate_relation_candidates(per_skill_limit=10)
 
         self.assertEqual(pairs, [])
 
     def test_applies_per_skill_limit_stably(self) -> None:
         hub = make_skill("skill:hub", "hub", "Hub skill.")
-        skills = [hub] + [
-            make_skill(f"skill:s{i}", f"s{i}", "Use after hub.")
-            for i in range(4)
-        ]
         interfaces = {
             hub.id: SkillInterface(
                 skill_id=hub.id,
@@ -79,7 +53,7 @@ class RelationCandidateTests(unittest.TestCase):
             },
         }
 
-        pairs = generate_relation_candidates(skills, [], per_skill_limit=2, interfaces=interfaces)
+        pairs = generate_relation_candidates(per_skill_limit=2, interfaces=interfaces)
 
         self.assertLessEqual(sum(1 for pair in pairs if "skill:hub" in pair.key), 2)
 
@@ -101,20 +75,16 @@ class RelationCandidateTests(unittest.TestCase):
             ),
         }
 
-        pairs = generate_relation_candidates([alpha, zeta], [], per_skill_limit=10, interfaces=interfaces)
+        pairs = generate_relation_candidates(per_skill_limit=10, interfaces=interfaces)
 
         self.assertEqual(len(pairs), 1)
         self.assertEqual(pairs[0].key, ("skill:alpha", "skill:zeta"))
         self.assertEqual(pairs[0].direction_hint, "B->A")
 
     def test_accepted_execution_flow_does_not_generate_relation_candidate(self) -> None:
-        producer = make_skill("skill:producer", "producer", "Produce CSV.")
-        consumer = make_skill("skill:consumer", "consumer", "Consume CSV.")
         evidence = [ExecutionEvidence(skill="skill:producer", line=2, text="Produce CSV.")]
 
         pairs = generate_relation_candidates(
-            [producer, consumer],
-            [],
             per_skill_limit=10,
             execution_records=[],
         )

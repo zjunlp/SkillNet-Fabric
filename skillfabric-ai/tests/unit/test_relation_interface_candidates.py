@@ -101,8 +101,6 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         }
 
         pairs = generate_relation_candidates(
-            [producer, consumer],
-            [],
             per_skill_limit=10,
             interfaces=interfaces,
             canonicalization=_canonicalization(
@@ -142,8 +140,6 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         }
 
         pairs = generate_relation_candidates(
-            [producer, consumer],
-            [],
             per_skill_limit=10,
             interfaces=interfaces,
             canonicalization=_canonicalization(
@@ -176,7 +172,7 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
             ),
         }
 
-        pairs = generate_relation_candidates([setup, action], [], per_skill_limit=10, interfaces=interfaces)
+        pairs = generate_relation_candidates(per_skill_limit=10, interfaces=interfaces)
 
         self.assertEqual(len(pairs), 1)
         self.assertIn("interface_compatibility", pairs[0].sources)
@@ -199,7 +195,7 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
             ),
         }
 
-        pairs = generate_relation_candidates([left, right], [], per_skill_limit=10, interfaces=interfaces)
+        pairs = generate_relation_candidates(per_skill_limit=10, interfaces=interfaces)
 
         self.assertEqual(pairs, [])
 
@@ -220,7 +216,7 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
                 requires=[InterfaceField(name="csv", kind="artifact", confidence=0.9)],
             ),
         }
-        pair = generate_relation_candidates([producer, consumer], [], per_skill_limit=10, interfaces=interfaces)[0]
+        pair = generate_relation_candidates(per_skill_limit=10, interfaces=interfaces)[0]
 
         prompt = json.dumps(
             build_pair_validation_messages(producer, consumer, pair, interfaces=interfaces),
@@ -281,8 +277,6 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
             )
         ]
         pairs = generate_relation_candidates(
-            [producer, consumer],
-            [],
             per_skill_limit=10,
             interfaces=interfaces,
             execution_records=execution_records,

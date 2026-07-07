@@ -8,14 +8,10 @@ from collections.abc import Iterable
 from skillfabric.compiled_graph.canonicalization.models import CanonicalizationBuild
 from skillfabric.compiled_graph.execution.models import ExecutionValidationRecord
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
-from skillfabric.compiled_graph.models import Edge
 from skillfabric.compiled_graph.relations.models import CandidatePair, RelationEvidence
-from skillfabric.registry.models import SkillNode
 
 
 def generate_relation_candidates(
-    skills: list[SkillNode],
-    similar_edges: list[Edge],
     *,
     per_skill_limit: int,
     interfaces: dict[str, SkillInterface] | None = None,
