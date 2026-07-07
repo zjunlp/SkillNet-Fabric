@@ -276,6 +276,29 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertTrue(records[0].accepted)
         self.assertEqual(records[0].interface.produces[0].kind, "belief_state")
 
+    def test_tool_kind_is_not_kept_in_requires_or_produces(self) -> None:
+        self._install_fake_litellm(
+            json.dumps(
+                {
+                    "capability_summary": "Run tests.",
+                    "requires": [{"name": "pytest", "kind": "tool", "confidence": 0.9}],
+                    "produces": [{"name": "pytest report", "kind": "tool", "confidence": 0.9}],
+                    "uses_tools": [{"name": "pytest", "kind": "tool", "confidence": 0.9}],
+                }
+            )
+        )
+        skill = make_skill("skill:test", "test", "Run pytest.")
+
+        records = extract_skill_interfaces(
+            [skill],
+            extractor=LiteLLMInterfaceExtractor(LLMConfig(api_base="https://example.test/api", api_key="sk-test")),
+        )
+
+        self.assertTrue(records[0].accepted)
+        self.assertEqual(records[0].interface.requires, [])
+        self.assertEqual(records[0].interface.produces, [])
+        self.assertEqual(records[0].interface.uses_tools[0].kind, "tool")
+
     def test_schema_invalid_field_confidence_uses_fallback_and_records_rejection(self) -> None:
         self._install_fake_litellm(
             json.dumps(

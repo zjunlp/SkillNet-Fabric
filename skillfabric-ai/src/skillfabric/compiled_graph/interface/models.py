@@ -5,6 +5,21 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+INTERFACE_FIELD_KINDS = frozenset(
+    {
+        "artifact",
+        "data",
+        "text",
+        "world_state",
+        "belief_state",
+        "planning_state",
+        "credential",
+        "environment",
+        "report",
+        "tool",
+    }
+)
+
 
 @dataclass(slots=True)
 class InterfaceEvidence:
@@ -153,13 +168,6 @@ def _normalize_token(value: str) -> str:
 
 def normalize_interface_kind(kind: str, *, name: str = "") -> str:
     normalized_kind = kind.lower().strip().replace("-", "_").replace(" ", "_")
-    normalized_name = _normalize_token(name)
-    if _looks_like_belief_state_name(normalized_name):
-        return "belief_state"
-    if _looks_like_planning_state_name(normalized_name):
-        return "planning_state"
-    if _looks_like_world_state_name(normalized_name):
-        return "world_state"
     aliases = {
         "state": "world_state",
         "condition": "world_state",
@@ -173,8 +181,32 @@ def normalize_interface_kind(kind: str, *, name: str = "") -> str:
         "planning": "planning_state",
         "plan_state": "planning_state",
         "routing_state": "planning_state",
+        "dataset": "data",
+        "table": "data",
+        "document": "artifact",
+        "file": "artifact",
+        "dependency": "artifact",
+        "library": "tool",
+        "api": "tool",
+        "command": "tool",
     }
-    return aliases.get(normalized_kind, normalized_kind or "data")
+    normalized = aliases.get(normalized_kind, normalized_kind or "data")
+    if normalized in INTERFACE_FIELD_KINDS:
+        if normalized in {"world_state", "belief_state", "planning_state"}:
+            return _state_kind_from_name(name) or normalized
+        return normalized
+    return _state_kind_from_name(name) or "artifact"
+
+
+def _state_kind_from_name(name: str) -> str:
+    normalized_name = _normalize_token(name)
+    if _looks_like_belief_state_name(normalized_name):
+        return "belief_state"
+    if _looks_like_planning_state_name(normalized_name):
+        return "planning_state"
+    if _looks_like_world_state_name(normalized_name):
+        return "world_state"
+    return ""
 
 
 def _looks_like_belief_state_name(normalized_name: str) -> bool:

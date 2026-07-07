@@ -20,9 +20,9 @@ def _interface_from_raw(skill: SkillNode, raw: dict[str, Any], *, model_id: str,
         content_hash=skill.content_hash,
         capability_summary=_string_value(raw.get("capability_summary") or skill.description),
         when_to_use=_string_value(raw.get("when_to_use") or ""),
-        requires=_fields_from_raw(skill, raw.get("requires", []), default_kind="data"),
-        produces=_fields_from_raw(skill, raw.get("produces", []), default_kind="data"),
-        uses_tools=_fields_from_raw(skill, raw.get("uses_tools", []), default_kind="tool"),
+        requires=_fields_from_raw(skill, raw.get("requires", []), default_kind="data", allow_tool=False),
+        produces=_fields_from_raw(skill, raw.get("produces", []), default_kind="data", allow_tool=False),
+        uses_tools=_fields_from_raw(skill, raw.get("uses_tools", []), default_kind="tool", only_tool=True),
         evidence=_evidence_from_raw(skill, raw.get("evidence", [])),
         provenance=provenance,
         model_id=model_id,
@@ -148,7 +148,14 @@ def _is_int(value: Any) -> bool:
     return True
 
 
-def _fields_from_raw(skill: SkillNode, payload: Any, *, default_kind: str) -> list[InterfaceField]:
+def _fields_from_raw(
+    skill: SkillNode,
+    payload: Any,
+    *,
+    default_kind: str,
+    allow_tool: bool = True,
+    only_tool: bool = False,
+) -> list[InterfaceField]:
     if not isinstance(payload, list):
         return []
     fields: list[InterfaceField] = []
@@ -159,11 +166,16 @@ def _fields_from_raw(skill: SkillNode, payload: Any, *, default_kind: str) -> li
         if not name:
             continue
         evidence = _evidence_from_raw(skill, item.get("evidence", []))
+        kind = _normalize_kind(str(item.get("kind", default_kind) or default_kind), name=name)
+        if only_tool and kind != "tool":
+            kind = "tool"
+        if not allow_tool and kind == "tool":
+            continue
         fields.append(
             InterfaceField(
                 name=name,
                 description=str(item.get("description", "")),
-                kind=_normalize_kind(str(item.get("kind", default_kind) or default_kind), name=name),
+                kind=kind,
                 confidence=float(item.get("confidence", 0.0) or 0.0),
                 evidence=evidence,
             )

@@ -37,6 +37,17 @@ class InterfaceModelTests(unittest.TestCase):
         self.assertEqual(inventory.kind, "world_state")
         self.assertEqual(verified.kind, "world_state")
 
+    def test_interface_field_kind_is_closed_set(self) -> None:
+        unknown = InterfaceField(name="build manifest", kind="dependency", confidence=0.7)
+        condition = InterfaceField(name="logged in browser", kind="condition", confidence=0.7)
+        observation = InterfaceField(name="current observation", kind="observation_state", confidence=0.7)
+        credential = InterfaceField(name="authenticated oauth session", kind="credential", confidence=0.7)
+
+        self.assertEqual(unknown.kind, "artifact")
+        self.assertEqual(condition.kind, "world_state")
+        self.assertEqual(observation.kind, "belief_state")
+        self.assertEqual(credential.kind, "credential")
+
     def test_skill_interface_round_trips_stably(self) -> None:
         interface = SkillInterface(
             skill_id="skill:pdf-table-parser",
