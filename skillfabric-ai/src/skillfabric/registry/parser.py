@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from skillfabric.indexing.canonical import hash_text
 from skillfabric.registry.models import SkillNode
 
 try:  # pragma: no cover - fall back when PyYAML is unavailable
@@ -19,7 +18,7 @@ except Exception:  # pragma: no cover
 _NAME_RE = re.compile(r"[^a-z0-9]+")
 
 
-def parse_skill_file(path: str | Path, *, workspace: str | Path = ".skillfabric") -> SkillNode:
+def parse_skill_file(path: str | Path) -> SkillNode:
     """Parse a single SKILL.md file."""
 
     skill_path = Path(path)
@@ -34,20 +33,13 @@ def parse_skill_file(path: str | Path, *, workspace: str | Path = ".skillfabric"
         warnings.append("missing frontmatter description; used first paragraph")
 
     content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
-    token_count = len(re.findall(r"\S+", raw_text))
-    wiki_path = str(Path(workspace) / "wiki" / "skills" / f"{name}.md")
-    canonical = f"{name}\n{description}\n{raw_text}"
 
     return SkillNode(
         id=f"skill:{name}",
         type="skill",
         name=name,
         description=description.strip(),
-        source_path=str(skill_path),
-        wiki_path=wiki_path,
         content_hash=content_hash,
-        token_count=token_count,
-        canonical_skill_text_hash=hash_text(canonical),
         raw_text=raw_text,
         warnings=warnings,
     )

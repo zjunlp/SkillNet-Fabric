@@ -18,9 +18,9 @@ def scan_skill_root(skill_root: str | Path) -> list[Path]:
     return sorted(path for path in root.rglob("SKILL.md") if path.is_file())
 
 
-def scan_and_parse(skill_root: str | Path, *, workspace: str | Path = ".skillfabric"):
+def scan_and_parse(skill_root: str | Path):
     """Scan and parse a skill root."""
 
     from skillfabric.registry.parser import parse_skill_file
 
-    return [parse_skill_file(path, workspace=workspace) for path in scan_skill_root(skill_root)]
+    return [parse_skill_file(path) for path in scan_skill_root(skill_root)]

@@ -20,11 +20,7 @@ def _skill(skill_id: str, name: str, description: str, body: str) -> SkillNode:
         type="skill",
         name=name,
         description=description,
-        source_path=f"/skills/{name}/SKILL.md",
-        wiki_path="",
         content_hash=f"hash-{skill_id}",
-        token_count=len(body.split()),
-        canonical_skill_text_hash=f"text-hash-{skill_id}",
         raw_text=body,
     )
 

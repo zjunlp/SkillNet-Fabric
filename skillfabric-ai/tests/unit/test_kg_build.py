@@ -52,11 +52,7 @@ def _health_skill(skill_id: str, name: str, description: str) -> SkillNode:
         type="skill",
         name=name,
         description=description,
-        source_path=f"/skills/{name}/SKILL.md",
-        wiki_path=f"skills/{name}.md",
         content_hash=f"hash-{name}",
-        token_count=len(description.split()),
-        canonical_skill_text_hash=f"canonical-{name}",
     )
 
 
@@ -72,7 +68,20 @@ class KGBuildTests(unittest.TestCase):
         self.assertFalse(hasattr(skill, removed_field))
         self.assertNotIn(removed_field, skill.to_dict(include_raw_text=True))
         self.assertTrue(skill.content_hash)
-        self.assertGreater(skill.token_count, 10)
+
+    def test_skill_node_serialization_excludes_audit_only_fields(self) -> None:
+        skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
+
+        payload = skill.to_dict(include_raw_text=True)
+
+        self.assertLessEqual(
+            set(payload),
+            {"id", "type", "name", "description", "content_hash", "warnings", "raw_text"},
+        )
+        self.assertNotIn("source_path", payload)
+        self.assertNotIn("wiki_path", payload)
+        self.assertNotIn("token_count", payload)
+        self.assertNotIn("canonical_skill_text_hash", payload)
 
     def test_parser_falls_back_without_frontmatter(self) -> None:
         skill = parse_skill_file(FIXTURE_SKILLS / "no-frontmatter" / "SKILL.md")
@@ -164,7 +173,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertEqual(result.graph.schema_version, "1.0")
             self.assertEqual(result.stats["skill_count"], 8)
             self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "skill_sources.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "skill_sources.jsonl").exists())
             self.assertTrue((workspace / "graph" / "bm25.sqlite").exists())
             self.assertTrue((workspace / "graph" / "embeddings.json").exists())
             self.assertTrue((workspace / "graph" / "embedding_meta.jsonl").exists())
@@ -213,6 +222,10 @@ class KGBuildTests(unittest.TestCase):
             self.assertTrue(all("raw_output" not in edge for edge in graph_data["edges"]))
             self.assertNotIn("inputs", node_keys)
             self.assertNotIn("outputs", node_keys)
+            self.assertNotIn("source_path", node_keys)
+            self.assertNotIn("wiki_path", node_keys)
+            self.assertNotIn("token_count", node_keys)
+            self.assertNotIn("canonical_skill_text_hash", node_keys)
             self.assertNotIn("artifact", node_types)
             self.assertNotIn("scenario", node_types)
             self.assertIn("depend_on", edge_types)
@@ -238,6 +251,15 @@ class KGBuildTests(unittest.TestCase):
             self.assertIn("embedding", build_metrics)
             self.assertEqual(build_metrics["embedding"]["model_id"], "test-fake-embedding")
             self.assertGreater(build_metrics["embedding"]["estimated_input_tokens"], 0)
+            embedding_meta_rows = [
+                json.loads(line)
+                for line in (workspace / "graph" / "embedding_meta.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(embedding_meta_rows)
+            self.assertTrue(all("canonical_skill_text_hash" not in row for row in embedding_meta_rows))
+            embedding_store = json.loads((workspace / "graph" / "embeddings.json").read_text(encoding="utf-8"))
+            self.assertTrue(all("canonical_skill_text_hash" not in row for row in embedding_store["embeddings"]))
             self.assertTrue(all(row["canonical_object"] for row in execution_index))
             self.assertNotIn("artifact_nodes", compiled_graph["execution_graph"])
             self.assertNotIn("scenario_nodes", compiled_graph["execution_graph"])

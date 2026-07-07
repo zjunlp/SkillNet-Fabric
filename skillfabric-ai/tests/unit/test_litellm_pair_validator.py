@@ -27,11 +27,7 @@ def _skill(
         type="skill",
         name=name,
         description=f"{name} description",
-        source_path=f"/tmp/{name}/SKILL.md",
-        wiki_path=f"/tmp/wiki/{name}.md",
         content_hash=f"hash-{name}",
-        token_count=len(raw_text.split()),
-        canonical_skill_text_hash=f"canonical-{name}",
         raw_text=raw_text,
     )
 

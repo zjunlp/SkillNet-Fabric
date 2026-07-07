@@ -196,7 +196,6 @@ class EmbeddingTests(unittest.TestCase):
                         {
                             "skill_id": "skill:alpha",
                             "content_hash": "h",
-                            "canonical_skill_text_hash": "ct",
                             "vector": [1.0, 0.0],
                         }
                     ],
@@ -224,11 +223,7 @@ def _skill(skill_id: str, name: str) -> SkillNode:
         type="skill",
         name=name,
         description=f"{name} description",
-        source_path=f"{name}/SKILL.md",
-        wiki_path=f"skills/{name}.md",
         content_hash="h",
-        token_count=10,
-        canonical_skill_text_hash="ct",
         raw_text=f"# {name}\n\n{name} raw text.",
     )
 

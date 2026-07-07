@@ -191,7 +191,6 @@ def build_embedding_store(
                 {
                     "skill_id": skill.id,
                     "content_hash": skill.content_hash,
-                    "canonical_skill_text_hash": skill.canonical_skill_text_hash,
                     "vector": [],
                 }
                 for skill in skills
@@ -227,7 +226,6 @@ def build_embedding_store(
             {
                 "skill_id": skill.id,
                 "content_hash": skill.content_hash,
-                "canonical_skill_text_hash": skill.canonical_skill_text_hash,
                 "vector": vector,
             }
         )

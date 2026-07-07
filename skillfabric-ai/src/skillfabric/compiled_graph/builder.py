@@ -184,7 +184,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
         )
         old_status = workspace.read_json(workspace.status_path, default={}) or {}
         old_hashes = old_status.get("skill_hashes", {}) if isinstance(old_status, dict) else {}
-        skills = scan_and_parse(config.skill_root, workspace=workspace.root)
+        skills = scan_and_parse(config.skill_root)
         skipped_unchanged = sum(1 for skill in skills if old_hashes.get(skill.id) == skill.content_hash)
         _write_registry(workspace, skills)
         stage_timer.mark("scan")
@@ -207,7 +207,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 {
                     "skill_id": skill.id,
                     "content_hash": skill.content_hash,
-                    "canonical_skill_text_hash": skill.canonical_skill_text_hash,
                     "model_id": embedding_provider.model_id,
                     "vector_index": index,
                 }
@@ -490,18 +489,6 @@ def _write_registry(workspace: Workspace, skills: list[SkillNode]) -> None:
     workspace.write_jsonl(
         workspace.graph_dir / "registry.jsonl",
         [skill.to_dict(include_raw_text=True) for skill in skills],
-    )
-    workspace.write_jsonl(
-        workspace.registry_dir / "skill_sources.jsonl",
-        [
-            {
-                "skill_id": skill.id,
-                "source_path": skill.source_path,
-                "content_hash": skill.content_hash,
-                "token_count": skill.token_count,
-            }
-            for skill in skills
-        ],
     )
 
 
