@@ -247,6 +247,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertIn("execution_validation", build_metrics)
             self.assertIn("policy_digest", build_metrics["relation_validation"])
             self.assertIn("policy_digest", build_metrics["execution_validation"])
+            self.assertNotIn("canonical_merge_audit_count", build_metrics)
             self.assertIn("llm_usage", build_metrics)
             self.assertIn("embedding", build_metrics)
             self.assertEqual(build_metrics["embedding"]["model_id"], "test-fake-embedding")
@@ -268,6 +269,7 @@ class KGBuildTests(unittest.TestCase):
             status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["canonical_object_count"], result.stats["canonical_object_count"])
             self.assertEqual(status["execution_compatibility_count"], result.stats["execution_compatibility_count"])
+            self.assertNotIn("canonical_merge_audit_count", status)
             self.assertNotIn("community_count", status)
             self.assertNotIn("community_refinement_model_id", status)
             self.assertNotIn("community_clustering_algorithm", status)
@@ -294,6 +296,8 @@ class KGBuildTests(unittest.TestCase):
             self.assertEqual(result.stats["compose_depend_candidate_count"], 0)
             self.assertEqual(result.stats["compose_depend_edge_count"], 0)
             self.assertEqual(result.stats["relation_validation"]["validator_calls"], 0)
+            canonical_health = (workspace / "graph" / "canonicalization_health_report.md").read_text(encoding="utf-8")
+            self.assertNotIn("merge audit", canonical_health)
 
             neighbors = result.neighbors("skill:financial-kpi-extractor")
             neighbor_ids = {item["skill_id"] for item in neighbors}

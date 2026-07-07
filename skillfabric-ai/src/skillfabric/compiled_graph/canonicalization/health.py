@@ -19,7 +19,6 @@ class CanonicalizationHealthReport:
     ambiguous_component_count: int = 0
     lexical_candidate_count: int = 0
     semantic_candidate_count: int = 0
-    merge_audit_count: int = 0
     warning_count: int = 0
 
 
@@ -49,7 +48,6 @@ def analyze_canonicalization_health(build: CanonicalizationBuild) -> Canonicaliz
         semantic_candidate_count=sum(
             1 for item in build.candidate_edges if getattr(item, "method", "") == "semantic"
         ),
-        merge_audit_count=len(build.merge_audit),
         warning_count=len(build.warnings),
     )
 
@@ -71,7 +69,6 @@ def render_canonicalization_health_report(report: CanonicalizationHealthReport) 
             f"- ambiguous components: {report.ambiguous_component_count}",
             f"- lexical candidates: {report.lexical_candidate_count}",
             f"- semantic candidates: {report.semantic_candidate_count}",
-            f"- merge audit rows: {report.merge_audit_count}",
             f"- warnings: {report.warning_count}",
             "",
         ]

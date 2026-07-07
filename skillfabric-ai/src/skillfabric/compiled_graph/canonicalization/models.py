@@ -160,7 +160,6 @@ class CanonicalizationBuild:
     raw_terms: list[RawContractObject] = field(default_factory=list)
     candidate_edges: list[Any] = field(default_factory=list)
     candidate_components: list[Any] = field(default_factory=list)
-    merge_audit: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     model_id: str = "deterministic-canonicalization"
 

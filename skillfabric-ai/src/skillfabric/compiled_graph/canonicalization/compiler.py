@@ -15,7 +15,6 @@ from skillfabric.compiled_graph.canonicalization.candidates import (
     CanonicalSemanticEmbedder,
     build_candidate_graph,
     contract_object_type,
-    generate_lexical_candidates,
     normalized_candidate_text,
 )
 from skillfabric.compiled_graph.canonicalization.models import (
@@ -170,7 +169,7 @@ def canonicalize_contract_objects(
         raw["_provenance"] = "deterministic_fallback"
         results[cluster.cluster_id] = raw
     _write_cache(cache_path, cache)
-    build = _build_from_results(
+    return _build_from_results(
         raw_terms,
         clusters,
         results,
@@ -179,8 +178,6 @@ def canonicalize_contract_objects(
         candidate_components=candidate_result.components,
         warnings=candidate_result.warnings,
     )
-    build.merge_audit = _second_pass_merge_audit(build.objects)
-    return build
 
 
 def _collect_raw_terms(interfaces: dict[str, SkillInterface]) -> list[RawContractObject]:
@@ -402,46 +399,6 @@ def _build_from_results(
         warnings=list(warnings),
         model_id=model_id,
     )
-
-
-def _second_pass_merge_audit(objects: list[CanonicalObject]) -> list[dict[str, Any]]:
-    eligible = [canonical for canonical in objects if canonical.confidence >= 0.78 and canonical.promoted]
-    pseudo_terms = [
-        RawContractObject(
-            skill_id=f"canonical:{index}",
-            role="produces",
-            name=canonical.name,
-            kind=canonical.type,
-            description=canonical.description,
-            confidence=canonical.confidence,
-        )
-        for index, canonical in enumerate(eligible)
-    ]
-    if len(pseudo_terms) < 2:
-        return []
-    terms_by_key = {term.key: term for term in pseudo_terms}
-    object_by_term_key = {term.key: eligible[index] for index, term in enumerate(pseudo_terms)}
-    rows: list[dict[str, Any]] = []
-    for edge in generate_lexical_candidates(pseudo_terms, threshold=0.86):
-        left_term = terms_by_key.get(edge.left_object_id)
-        right_term = terms_by_key.get(edge.right_object_id)
-        left_object = object_by_term_key.get(edge.left_object_id)
-        right_object = object_by_term_key.get(edge.right_object_id)
-        if left_term is None or right_term is None or left_object is None or right_object is None:
-            continue
-        if left_object.canonical_id == right_object.canonical_id:
-            continue
-        rows.append(
-            {
-                "left_canonical_id": left_object.canonical_id,
-                "right_canonical_id": right_object.canonical_id,
-                "object_type": edge.object_type,
-                "score": round(edge.score, 6),
-                "method": edge.method,
-                "recommendation": "review_merge",
-            }
-        )
-    return sorted(rows, key=lambda item: (-float(item["score"]), item["left_canonical_id"], item["right_canonical_id"]))
 
 
 def _validate_provider_payload(raw: dict[str, Any]) -> None:

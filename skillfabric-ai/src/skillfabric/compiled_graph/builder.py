@@ -340,7 +340,6 @@ def build_graph(config: BuildConfig) -> BuildResult:
             "canonical_ambiguous_component_count": sum(
                 1 for item in canonicalization.candidate_components if getattr(item, "ambiguous", False)
             ),
-            "canonical_merge_audit_count": len(canonicalization.merge_audit),
             "raw_artifact_count": len(execution_graph.raw_artifact_nodes),
             "raw_scenario_count": len(execution_graph.raw_scenario_nodes),
             "canonical_artifact_count": len(
