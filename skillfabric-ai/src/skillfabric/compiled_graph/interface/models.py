@@ -34,14 +34,11 @@ class InterfaceField:
     description: str = ""
     kind: str = "text"
     confidence: float = 0.0
-    inferred: bool = False
     evidence: list[InterfaceEvidence] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.kind = normalize_interface_kind(self.kind, name=self.name)
         self.confidence = max(0.0, min(float(self.confidence), 1.0))
-        if not self.evidence:
-            self.inferred = True
 
     @property
     def key(self) -> tuple[str, str]:
@@ -53,7 +50,6 @@ class InterfaceField:
             "description": self.description,
             "kind": self.kind,
             "confidence": self.confidence,
-            "inferred": self.inferred,
             "evidence": [item.to_dict() for item in self.evidence],
         }
 
@@ -64,7 +60,6 @@ class InterfaceField:
             description=str(payload.get("description", "")),
             kind=str(payload.get("kind", "text")),
             confidence=float(payload.get("confidence", 0.0) or 0.0),
-            inferred=bool(payload.get("inferred", False)),
             evidence=[
                 InterfaceEvidence.from_dict(item)
                 for item in payload.get("evidence", [])

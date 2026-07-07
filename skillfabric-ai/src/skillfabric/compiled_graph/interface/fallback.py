@@ -125,7 +125,6 @@ def _tool_fields_from_text(skill: SkillNode) -> list[InterfaceField]:
                 name=value,
                 kind="tool",
                 confidence=0.55,
-                inferred=True,
                 evidence=_tool_line_evidence(skill, value),
             )
         )

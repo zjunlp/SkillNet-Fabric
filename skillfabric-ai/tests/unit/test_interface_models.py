@@ -49,7 +49,6 @@ class InterfaceModelTests(unittest.TestCase):
                     description="Structured CSV tables.",
                     kind="artifact",
                     confidence=0.91,
-                    inferred=False,
                     evidence=[InterfaceEvidence("skill:pdf-table-parser", 8, "Write CSV tables.")],
                 )
             ],
@@ -62,6 +61,7 @@ class InterfaceModelTests(unittest.TestCase):
 
         self.assertEqual(restored.to_dict(), payload)
         self.assertEqual(restored.produces[0].evidence[0].line, 8)
+        self.assertNotIn("inferred", payload["produces"][0])
         self.assertNotIn("granularity", payload)
         self.assertNotIn("execution_role", payload)
         self.assertNotIn("failure_modes", payload)

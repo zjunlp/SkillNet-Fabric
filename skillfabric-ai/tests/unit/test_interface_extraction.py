@@ -63,7 +63,6 @@ class InterfaceExtractionTests(unittest.TestCase):
                             "description": "Structured table CSV output.",
                             "kind": "artifact",
                             "confidence": 0.9,
-                            "inferred": False,
                             "evidence": [{"skill": "skill:pdf", "line": 2, "text": "Write CSV tables."}],
                         }
                     ],
@@ -80,7 +79,33 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertEqual(records[0].interface.capability_summary, "Extract PDF tables into CSV.")
         self.assertEqual(records[0].interface.when_to_use, "Use when PDF tables need structured CSV output.")
         self.assertEqual(records[0].interface.produces[0].name, "csv tables")
+        self.assertNotIn("inferred", records[0].interface.produces[0].to_dict())
         self.assertEqual(records[0].interface.provenance, "llm_extracted")
+
+    def test_legacy_inferred_field_is_ignored(self) -> None:
+        self._install_fake_litellm(
+            json.dumps(
+                {
+                    "capability_summary": "Extract PDF tables into CSV.",
+                    "produces": [
+                        {
+                            "name": "csv tables",
+                            "kind": "artifact",
+                            "confidence": 0.9,
+                            "inferred": True,
+                            "evidence": [],
+                        }
+                    ],
+                }
+            )
+        )
+        skill = make_skill("skill:pdf", "pdf", "Write CSV tables.")
+        extractor = LiteLLMInterfaceExtractor(LLMConfig(api_base="https://example.test/api", api_key="sk-test"))
+
+        records = extract_skill_interfaces([skill], extractor=extractor)
+
+        self.assertTrue(records[0].accepted)
+        self.assertNotIn("inferred", records[0].interface.produces[0].to_dict())
 
     def test_deterministic_fallback_omits_routing_classification_fields(self) -> None:
         skills = [

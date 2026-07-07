@@ -165,7 +165,6 @@ def _fields_from_raw(skill: SkillNode, payload: Any, *, default_kind: str) -> li
                 description=str(item.get("description", "")),
                 kind=_normalize_kind(str(item.get("kind", default_kind) or default_kind), name=name),
                 confidence=float(item.get("confidence", 0.0) or 0.0),
-                inferred=bool(item.get("inferred", False)),
                 evidence=evidence,
             )
         )
