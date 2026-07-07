@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 import unittest
 
+from skillfabric.compiled_graph.canonicalization.models import (
+    CanonicalAssignment,
+    CanonicalizationBuild,
+    CanonicalObject,
+)
 from skillfabric.compiled_graph.execution.models import (
     ExecutionEdge,
     ExecutionEvidence,
@@ -19,40 +24,95 @@ from skillfabric.compiled_graph.relations.prompts import build_pair_validation_m
 from tests.unit.relation_helpers import make_skill
 
 
+def _canonicalization(
+    canonical_id: str,
+    *,
+    producer_id: str,
+    producer_field: InterfaceField,
+    consumer_id: str,
+    consumer_field: InterfaceField,
+    promoted: bool = True,
+) -> CanonicalizationBuild:
+    object_type, _, name = canonical_id.partition(":")
+    return CanonicalizationBuild(
+        objects=[
+            CanonicalObject(
+                canonical_id=canonical_id,
+                name=name,
+                type=object_type,
+                produced_by=[producer_id],
+                required_by=[consumer_id],
+                promoted=promoted,
+                confidence=0.9,
+            )
+        ],
+        assignments=[
+            CanonicalAssignment(
+                raw_key="|".join([producer_id, "produces", producer_field.name.lower(), producer_field.kind.lower()]),
+                skill_id=producer_id,
+                role="produces",
+                raw_name=producer_field.name,
+                raw_kind=producer_field.kind,
+                canonical_id=canonical_id,
+                confidence=0.9,
+            ),
+            CanonicalAssignment(
+                raw_key="|".join([consumer_id, "requires", consumer_field.name.lower(), consumer_field.kind.lower()]),
+                skill_id=consumer_id,
+                role="requires",
+                raw_name=consumer_field.name,
+                raw_kind=consumer_field.kind,
+                canonical_id=canonical_id,
+                confidence=0.9,
+            ),
+        ],
+    )
+
+
 class RelationInterfaceCandidateTests(unittest.TestCase):
     def test_output_input_overlap_generates_directed_interface_candidate(self) -> None:
         producer = make_skill("skill:producer", "producer", "Produce CSV.")
         consumer = make_skill("skill:consumer", "consumer", "Consume CSV.")
+        produced = InterfaceField(
+            name="csv",
+            kind="artifact",
+            confidence=0.9,
+            evidence=[InterfaceEvidence(producer.id, 1, "Produce CSV.")],
+        )
+        consumed = InterfaceField(
+            name="csv",
+            kind="artifact",
+            confidence=0.9,
+            evidence=[InterfaceEvidence(consumer.id, 1, "Consume CSV.")],
+        )
         interfaces = {
             producer.id: SkillInterface(
                 skill_id=producer.id,
                 content_hash=producer.content_hash,
                 capability_summary="Produce CSV.",
-                produces=[
-                    InterfaceField(
-                        name="csv",
-                        kind="artifact",
-                        confidence=0.9,
-                        evidence=[InterfaceEvidence(producer.id, 1, "Produce CSV.")],
-                    )
-                ],
+                produces=[produced],
             ),
             consumer.id: SkillInterface(
                 skill_id=consumer.id,
                 content_hash=consumer.content_hash,
                 capability_summary="Consume CSV.",
-                requires=[
-                    InterfaceField(
-                        name="csv",
-                        kind="artifact",
-                        confidence=0.9,
-                        evidence=[InterfaceEvidence(consumer.id, 1, "Consume CSV.")],
-                    )
-                ],
+                requires=[consumed],
             ),
         }
 
-        pairs = generate_relation_candidates([producer, consumer], [], per_skill_limit=10, interfaces=interfaces)
+        pairs = generate_relation_candidates(
+            [producer, consumer],
+            [],
+            per_skill_limit=10,
+            interfaces=interfaces,
+            canonicalization=_canonicalization(
+                "artifact:csv",
+                producer_id=producer.id,
+                producer_field=produced,
+                consumer_id=consumer.id,
+                consumer_field=consumed,
+            ),
+        )
 
         self.assertEqual(len(pairs), 1)
         pair = pairs[0]
@@ -60,6 +120,43 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         self.assertEqual(pair.key, ("skill:consumer", "skill:producer"))
         self.assertEqual(pair.direction_hint, "A->B")
         self.assertTrue(any(item.source == "interface_compatibility" for item in pair.evidence))
+
+    def test_non_promoted_canonical_object_does_not_generate_interface_candidate(self) -> None:
+        producer = make_skill("skill:producer", "producer", "Produce source data.")
+        consumer = make_skill("skill:consumer", "consumer", "Consume source data.")
+        produced = InterfaceField(name="source_data", kind="data", confidence=0.9)
+        consumed = InterfaceField(name="source_data", kind="data", confidence=0.9)
+        interfaces = {
+            producer.id: SkillInterface(
+                skill_id=producer.id,
+                content_hash=producer.content_hash,
+                capability_summary="Produce source data.",
+                produces=[produced],
+            ),
+            consumer.id: SkillInterface(
+                skill_id=consumer.id,
+                content_hash=consumer.content_hash,
+                capability_summary="Consume source data.",
+                requires=[consumed],
+            ),
+        }
+
+        pairs = generate_relation_candidates(
+            [producer, consumer],
+            [],
+            per_skill_limit=10,
+            interfaces=interfaces,
+            canonicalization=_canonicalization(
+                "data:source_data",
+                producer_id=producer.id,
+                producer_field=produced,
+                consumer_id=consumer.id,
+                consumer_field=consumed,
+                promoted=False,
+            ),
+        )
+
+        self.assertEqual(pairs, [])
 
     def test_postcondition_precondition_overlap_generates_candidate(self) -> None:
         setup = make_skill("skill:setup", "setup", "Authenticate.")

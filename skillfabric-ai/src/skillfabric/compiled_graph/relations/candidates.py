@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 
+from skillfabric.compiled_graph.canonicalization.models import CanonicalizationBuild
 from skillfabric.compiled_graph.execution.models import ExecutionValidationRecord
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge
@@ -19,6 +20,7 @@ def generate_relation_candidates(
     per_skill_limit: int,
     interfaces: dict[str, SkillInterface] | None = None,
     execution_records: list[ExecutionValidationRecord] | None = None,
+    canonicalization: CanonicalizationBuild | None = None,
 ) -> list[CandidatePair]:
     """Generate bounded workflow-relation candidates from interface contracts.
 
@@ -31,7 +33,7 @@ def generate_relation_candidates(
 
     pairs: dict[tuple[str, str], CandidatePair] = {}
     execution_covered_keys = _execution_covered_pair_keys(execution_records or [])
-    for pair in _interface_candidate_pairs(interfaces or {}):
+    for pair in _interface_candidate_pairs(interfaces or {}, canonicalization=canonicalization):
         if pair.key in execution_covered_keys:
             continue
         _merge_pair(pairs, pair)
@@ -76,21 +78,33 @@ def _limit_per_skill(pairs: list[CandidatePair], limit: int) -> list[CandidatePa
     return kept
 
 
-def _interface_candidate_pairs(interfaces: dict[str, SkillInterface]) -> list[CandidatePair]:
+def _interface_candidate_pairs(
+    interfaces: dict[str, SkillInterface],
+    *,
+    canonicalization: CanonicalizationBuild | None,
+) -> list[CandidatePair]:
     pairs: dict[tuple[str, str], CandidatePair] = {}
-    produce_index = _field_index(interfaces.values(), "produces")
-    _add_interface_matches(pairs, produce_index, interfaces.values(), "requires")
+    produce_index = _field_index(interfaces.values(), "produces", canonicalization=canonicalization)
+    _add_interface_matches(
+        pairs,
+        produce_index,
+        interfaces.values(),
+        "requires",
+        canonicalization=canonicalization,
+    )
     return list(pairs.values())
 
 
 def _field_index(
     interfaces: Iterable[SkillInterface],
     field_group: str,
+    *,
+    canonicalization: CanonicalizationBuild | None,
 ) -> dict[str, list[tuple[SkillInterface, InterfaceField]]]:
     index: dict[str, list[tuple[SkillInterface, InterfaceField]]] = defaultdict(list)
     for interface in interfaces:
         for field in _interface_fields(interface, field_group):
-            normalized = _normalize_field_name(field.name)
+            normalized = _candidate_key(interface, field_group, field, canonicalization)
             if normalized:
                 index[normalized].append((interface, field))
     return index
@@ -101,10 +115,15 @@ def _add_interface_matches(
     producer_index: dict[str, list[tuple[SkillInterface, InterfaceField]]],
     consumers: Iterable[SkillInterface],
     consumer_field_group: str,
+    *,
+    canonicalization: CanonicalizationBuild | None,
 ) -> None:
     for consumer in consumers:
         for consumed in _interface_fields(consumer, consumer_field_group):
-            for producer, produced in producer_index.get(_normalize_field_name(consumed.name), []):
+            for producer, produced in producer_index.get(
+                _candidate_key(consumer, consumer_field_group, consumed, canonicalization),
+                [],
+            ):
                 if producer.skill_id == consumer.skill_id:
                     continue
                 pair = CandidatePair(
@@ -161,6 +180,17 @@ def _field_evidence(skill_id: str, field: InterfaceField, role: str) -> list[Rel
 
 def _normalize_field_name(value: str) -> str:
     return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+
+
+def _candidate_key(
+    interface: SkillInterface,
+    field_group: str,
+    field: InterfaceField,
+    canonicalization: CanonicalizationBuild | None,
+) -> str:
+    if canonicalization is None:
+        return _normalize_field_name(field.name)
+    return canonicalization.lookup(interface.skill_id, field_group, field.name, field.kind)
 
 
 def _execution_covered_pair_keys(records: Iterable[ExecutionValidationRecord]) -> set[tuple[str, str]]:

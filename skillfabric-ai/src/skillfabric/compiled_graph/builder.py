@@ -297,6 +297,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
             per_skill_limit=config.candidate_top_k,
             interfaces=interfaces,
             execution_records=execution_records,
+            canonicalization=canonicalization,
         )
         validation_records = validate_relation_candidates(
             relation_candidates,
