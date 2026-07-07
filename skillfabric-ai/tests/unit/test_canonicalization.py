@@ -371,6 +371,23 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.lookup("skill:consumer", "requires", "csv table", "artifact"), "artifact:csv_table")
         self.assertEqual(build.objects[0].provenance, "deterministic_exact")
 
+    def test_deterministic_state_canonicalization_does_not_apply_semantic_aliases(self) -> None:
+        producer = _interface("skill:login", produces=[_field("skill:login", "oauth session", "credential")])
+        consumer = _interface("skill:purchase", requires=[_field("skill:purchase", "oauth session", "credential")])
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=DeterministicCanonicalizationProvider(),
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=NoSimilarityEmbedder(),
+        )
+
+        self.assertEqual(
+            build.lookup("skill:login", "produces", "oauth session", "credential"),
+            "credential:oauth_session",
+        )
+        self.assertNotIn("credential:authenticated_session", {item.canonical_id for item in build.objects})
+
     def test_non_exact_candidate_component_still_uses_provider(self) -> None:
         provider = StaticCanonicalizationProvider()
         producer = _interface("skill:producer", produces=[_field("skill:producer", "spreadsheet export")])

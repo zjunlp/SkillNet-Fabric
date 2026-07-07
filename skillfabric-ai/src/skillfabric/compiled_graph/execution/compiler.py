@@ -562,18 +562,7 @@ def _canonical_state_name(value: str) -> str:
     normalized = _normalize_name(value)
     if not normalized:
         return ""
-    tokens = normalized.split()
-    token_set = set(tokens)
-    if "authenticated" in token_set or "authorization" in token_set or "oauth" in token_set:
-        return "authenticated_session"
-    if "validated" in token_set or "verified" in token_set:
-        return "validated_result_available"
-    if "created" in token_set or "generated" in token_set or "available" in token_set:
-        domain = [token for token in tokens if token not in {"created", "generated", "available", "ready", "exists"}]
-        if not domain:
-            return ""
-        return "_".join(domain[:4] + ["available"])
-    return "_".join(tokens)
+    return "_".join(normalized.split())
 
 
 def _looks_like_world_state(value: str) -> bool:

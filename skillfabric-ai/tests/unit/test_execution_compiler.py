@@ -237,6 +237,17 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(compiled.candidates[0].matched_name, "authenticated_session")
         self.assertEqual(compiled.execution_index, [])
 
+    def test_raw_state_aliases_do_not_apply_semantic_state_rewrites(self) -> None:
+        login = _interface(
+            "skill:login",
+            produces=[_field("skill:login", "oauth session", "credential")],
+        )
+
+        compiled = compile_execution_graph({login.skill_id: login}, bucket_limit=100)
+
+        self.assertIn("state:oauth_session", set(compiled.canonical_aliases.values()))
+        self.assertNotIn("state:authenticated_session", set(compiled.canonical_aliases.values()))
+
     def test_belief_state_does_not_generate_world_state_execution_candidate(self) -> None:
         planner = _interface(
             "skill:goal-interpreter",
