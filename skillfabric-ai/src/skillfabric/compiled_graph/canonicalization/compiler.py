@@ -201,7 +201,7 @@ def _terms_from_fields(skill_id: str, role: str, fields: list[InterfaceField]) -
     output: list[RawContractObject] = []
     for field in fields:
         name = field.name.strip()
-        if not name:
+        if not name or _is_generic(name):
             continue
         output.append(
             RawContractObject(

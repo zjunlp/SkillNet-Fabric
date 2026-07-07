@@ -117,6 +117,27 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(compiled.candidates[0].matched_name, "docx_document")
         self.assertEqual(compiled.execution_index, [])
 
+    def test_broad_context_object_does_not_generate_execution_candidates(self) -> None:
+        produced = _field("skill:producer", "source_data", "data")
+        consumed = _field("skill:consumer", "source_data", "data")
+        producer = _interface("skill:producer", produces=[produced])
+        consumer = _interface("skill:consumer", requires=[consumed])
+        canonicalization = _build_canonicalization(
+            "data:source_data",
+            [
+                ("skill:producer", "produces", produced),
+                ("skill:consumer", "requires", consumed),
+            ],
+        )
+
+        compiled = compile_execution_graph(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            bucket_limit=100,
+            canonicalization=canonicalization,
+        )
+
+        self.assertEqual(compiled.candidates, [])
+
     def test_duplicate_compatibility_candidates_are_merged_before_validation(self) -> None:
         producer = _interface(
             "skill:producer",

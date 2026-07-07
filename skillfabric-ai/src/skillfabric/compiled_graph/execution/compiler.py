@@ -223,6 +223,8 @@ def _compatibility_candidates(
     )
     candidates: dict[tuple[str, str, str, str], ExecutionFlowCandidate] = {}
     for canonical_id, producers in producer_index.items():
+        if _is_broad_handoff_object(canonical_id):
+            continue
         consumers = consumer_index.get(canonical_id, [])
         if not consumers:
             continue
@@ -315,6 +317,70 @@ def _canonical_id_compatible_with_field(canonical_id: str, field: InterfaceField
     if canonical_type == "state":
         return _is_execution_state_like(field)
     return _is_artifact_like(field)
+
+
+def _is_broad_handoff_object(canonical_id: str) -> bool:
+    _object_type, _, raw_name = canonical_id.partition(":")
+    tokens = set(_normalize_name(raw_name).split())
+    if not tokens:
+        return True
+    if _is_exact_underspecified_name(tokens):
+        return True
+    if _looks_like_context_or_input_placeholder(tokens):
+        return True
+    if _looks_like_path_placeholder(tokens):
+        return True
+    return False
+
+
+def _is_exact_underspecified_name(tokens: set[str]) -> bool:
+    return len(tokens) == 1 and next(iter(tokens)) in {
+        "artifact",
+        "content",
+        "data",
+        "file",
+        "input",
+        "object",
+        "output",
+        "result",
+        "state",
+        "text",
+    }
+
+
+def _looks_like_context_or_input_placeholder(tokens: set[str]) -> bool:
+    broad_context_tokens = {
+        "context",
+        "input",
+        "material",
+        "materials",
+        "reference",
+        "references",
+        "snippet",
+        "snippets",
+        "source",
+    }
+    if not (tokens & broad_context_tokens):
+        return False
+    informative_tokens = tokens - broad_context_tokens - {
+        "artifact",
+        "artifacts",
+        "data",
+        "document",
+        "documents",
+        "file",
+        "files",
+        "project",
+        "task",
+        "text",
+    }
+    return not informative_tokens
+
+
+def _looks_like_path_placeholder(tokens: set[str]) -> bool:
+    if not ({"path", "directory"} & tokens):
+        return False
+    return tokens <= {"directory", "file", "input", "output", "path", "project", "target"}
 
 
 def execution_index_from_validation_records(records: list[ExecutionValidationRecord]) -> list[ExecutionIndexRecord]:

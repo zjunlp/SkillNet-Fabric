@@ -289,7 +289,7 @@ class CanonicalizationTests(unittest.TestCase):
 
         self.assertEqual(calls[0]["max_tokens"], 32768)
 
-    def test_deterministic_canonicalizer_uses_candidate_graph_and_rejects_generic_terms(self) -> None:
+    def test_deterministic_canonicalizer_uses_candidate_graph_and_drops_exact_generic_terms(self) -> None:
         producer = _interface(
             "skill:producer",
             produces=[_field("skill:producer", "csv table"), _field("skill:producer", "output")],
@@ -313,7 +313,9 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertTrue(build.candidate_components)
         self.assertEqual(build.lookup("skill:producer", "produces", "csv table", "artifact"), "artifact:csv_table")
         self.assertEqual(build.lookup("skill:consumer", "requires", "csv tables", "artifact"), "artifact:csv_table")
-        self.assertTrue(any(item.raw_name == "output" for item in build.rejected_terms))
+        self.assertFalse(any(item.name == "output" for item in build.raw_terms))
+        self.assertFalse(any(item.raw_name == "output" for item in build.assignments))
+        self.assertFalse(any(item.raw_name == "output" for item in build.rejected_terms))
 
     def test_singleton_component_is_canonicalized_without_provider_call(self) -> None:
         provider = StaticCanonicalizationProvider()
