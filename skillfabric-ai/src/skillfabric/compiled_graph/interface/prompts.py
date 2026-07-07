@@ -21,7 +21,7 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
         "task": (
             "Extract a compact execution-aware SkillContract from the provided SKILL.md content. "
             "The contract will be used for skill routing, query-wiki exploration, and execution handoff. "
-            "Prefer operational requirements, outcomes, tools, and boundaries over document-outline headings."
+            "Prefer operational requirements, outcomes, and tools over document-outline headings."
         ),
         "prompt_id": INTERFACE_PROMPT_ID,
         "input": {
@@ -31,8 +31,8 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
                 "Line numbers are provided so evidence can cite exact spans."
             ),
             "goal": (
-                "Infer reusable capability facets: domain, trigger conditions, inputs, outputs, tools, verification signals, "
-                "scope boundaries, and non-goals."
+                "Infer reusable capability facets: domain, trigger conditions, concrete inputs, concrete outputs, tools, "
+                "credentials, and environment states."
             ),
         },
         "output": {
@@ -59,8 +59,7 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
                 "output artifacts or state changes",
                 "required operations",
                 "tooling and runtime dependencies",
-                "verification or failure signals",
-                "scope boundaries and non-goals",
+                "credentials and environment states",
             ],
             "compression_goal": (
                 "Capture the reusable execution capability, not a table of contents. Keep fields specific enough for routing "
@@ -116,7 +115,6 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
             "capability_summary and when_to_use must be strings, not lists or objects.",
             "capability_summary must describe what the skill operationally enables, not merely restate the skill name.",
             "when_to_use must state task conditions that should trigger selecting this skill for a downstream agent.",
-            "If the skill has clear scope boundaries or exclusions, reflect them in when_to_use or requires rather than inventing a separate field.",
             "requires, produces, and uses_tools must be arrays of objects. Empty arrays are allowed.",
             "Every evidence item must be an object with integer line and verbatim text copied from full_skill_md.",
             "Use line-level evidence from full_skill_md whenever possible; omit weak evidence instead of inventing it.",
@@ -135,7 +133,7 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
             "Do not duplicate the same concept across multiple kinds. Pick the kind that best supports routing and workflow planning.",
             "Prefer stable operational names such as object_in_inventory, target_receptacle_identifier, cleaned_object_state, parsed_task_components.",
             "Avoid overly generic names such as object, data, result, output, content, file, text unless the document truly has no more specific concept.",
-            "Do not use document section names as contract fields unless they name a real operational requirement, result, tool, or failure mode.",
+            "Do not use document section names as contract fields unless they name a real operational requirement, result, or tool.",
             "Do not include examples as separate fields unless the skill genuinely requires or produces them.",
             "Do not claim capability from examples alone unless the surrounding skill text presents the example as supported reusable behavior.",
             "Do not execute, validate, or improve the skill. Extract only what the text supports.",
