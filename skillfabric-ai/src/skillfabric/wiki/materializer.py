@@ -153,7 +153,6 @@ def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:
     return (
         workspace.wiki_dir / "artifacts",
         workspace.wiki_dir / "scenarios",
-        workspace.wiki_dir / "communities",
         workspace.wiki_dir / "references",
         workspace.wiki_skills_dir / "source",
         workspace.wiki_dir / "references" / "skill-sources",

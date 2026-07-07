@@ -128,7 +128,7 @@ def build_pair_validation_messages(
             "purpose": "The output becomes a graph edge only if it is high precision enough for downstream routing.",
         },
         "workflow": [
-            "Step 1: Identify each skill's primary capability, execution role, prerequisites, products, tools, and explicit boundaries.",
+            "Step 1: Identify each skill's primary capability, prerequisites, products, tools, and explicit boundaries.",
             "Step 2: Check for concrete producer-consumer evidence: artifact, data, state, credential, environment, or validation result.",
             "Step 3: If producer-consumer evidence exists, verify the dependency direction from consumer/dependent to producer/prerequisite.",
             "Step 4: If no strict dependency exists, check whether the skills cover distinct complementary stages of a reusable task.",

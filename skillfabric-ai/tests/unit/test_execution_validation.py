@@ -536,6 +536,37 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertIn("LLM confirms", audit[0]["reason"])
         self.assertIn("policy_digest", audit[0])
 
+    def test_generic_execution_handoff_still_uses_llm_validator(self) -> None:
+        calls = self._install_fake_litellm(
+            json.dumps(
+                {
+                    "accepted": False,
+                    "flow_type": "none",
+                    "projected_edge_type": "none",
+                    "confidence": 0.0,
+                    "evidence": [],
+                    "reason": "Generic output is not a reusable handoff.",
+                }
+            )
+        )
+        candidate = self._candidate()
+        candidate.matched_name = "output"
+
+        records = validate_execution_flow_candidates(
+            [candidate],
+            self._skills(),
+            interfaces=self._interfaces(),
+            validator=LiteLLMExecutionFlowValidator(
+                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
+            ),
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(records[0].accepted)
+        summary = summarize_execution_validation_records(records)
+        self.assertEqual(summary["deterministic_reject"], 0)
+        self.assertEqual(summary["llm_compact"], 1)
+
     def test_compact_execution_validation_escalation_records_both_prompt_tiers(self) -> None:
         calls = self._install_fake_litellm_sequence(
             [

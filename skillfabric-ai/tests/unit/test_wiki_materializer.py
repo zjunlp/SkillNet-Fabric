@@ -65,9 +65,7 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertNotIn("Source Source", root_index_text)
             self.assertNotIn(": Skill: pdf-table-parser Source:", root_index_text)
             self.assertIn("Extract tables from PDF files", root_index_text)
-            self.assertFalse((workspace / "wiki" / "communities").exists())
             self.assertFalse((workspace / "wiki" / "skills" / "index.md").exists())
-            self.assertFalse((workspace / "wiki" / "communities" / "index.md").exists())
             self.assertFalse((workspace / "wiki" / "workflows" / "index.md").exists())
             self.assertFalse((workspace / "wiki" / "references" / "index.md").exists())
             self.assertFalse((workspace / "wiki" / "skills" / "sources" / "index.md").exists())
@@ -77,6 +75,19 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertFalse((workspace / "wiki" / "artifacts").exists())
             self.assertFalse((workspace / "wiki" / "scenarios").exists())
             self.assertTrue((workspace / "wiki" / "workflows").exists())
+
+    def test_build_wiki_does_not_manage_removed_community_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            removed_dir = workspace / "wiki" / "communities"
+            removed_file = removed_dir / "legacy.md"
+            removed_dir.mkdir(parents=True, exist_ok=True)
+            removed_file.write_text("# Legacy Community\n", encoding="utf-8")
+
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+
+            self.assertTrue(removed_file.exists())
 
     def test_build_wiki_removes_stale_flat_skill_pages(self) -> None:
         with TemporaryDirectory() as tmp:
