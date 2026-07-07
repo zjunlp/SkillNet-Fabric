@@ -145,7 +145,7 @@ class RelationValidationTests(unittest.TestCase):
         self.assertNotIn("FULL_B_SHOULD_NOT_APPEAR", prompt_text)
         self.assertEqual(payload["prompt_id"], "relation_validation_compact_interface_first")
 
-    def test_similarity_only_relation_candidate_is_rejected_without_validator_call(self) -> None:
+    def test_relation_policy_does_not_special_case_removed_similarity_source(self) -> None:
         calls = 0
 
         class CountingValidator:
@@ -168,16 +168,16 @@ class RelationValidationTests(unittest.TestCase):
 
         records = validate_relation_candidates([pair], [skill_a, skill_b], validator=CountingValidator())
 
-        self.assertEqual(calls, 0)
+        self.assertEqual(calls, 1)
         self.assertFalse(records[0].accepted)
-        self.assertIn("deterministic low-confidence", records[0].rejection_reason)
+        self.assertIn("evidence does not connect both candidate skills", records[0].rejection_reason)
         summary = summarize_relation_validation_records(records)
-        self.assertEqual(summary["deterministic_reject"], 1)
+        self.assertEqual(summary["deterministic_reject"], 0)
         self.assertEqual(summary["validator_calls"], 0)
         audit = relation_validation_audit_rows(records)
-        self.assertEqual(audit[0]["source"], "deterministic_reject")
-        self.assertEqual(audit[0]["action"], "deterministic_reject")
-        self.assertIn("deterministic low-confidence", audit[0]["reason"])
+        self.assertEqual(audit[0]["source"], "validator")
+        self.assertEqual(audit[0]["action"], "validator")
+        self.assertIn("Weak relation", audit[0]["reason"])
         self.assertIn("policy_digest", audit[0])
 
     def test_compact_relation_validation_escalation_records_both_prompt_tiers(self) -> None:
