@@ -52,8 +52,14 @@ def build_neighbor_scores(
             )
             bm25_overlap = bm25_neighbors.get(source.id, {}).get(target.id)
             if bm25_overlap is None:
-                bm25_overlap = _jaccard(token_sets[source.id], token_sets[target.id])
-            lexical = _jaccard(title_sets[source.id], title_sets[target.id])
+                bm25_overlap = _token_cosine_overlap(
+                    token_sets[source.id],
+                    token_sets[target.id],
+                )
+            lexical = _token_cosine_overlap(
+                title_sets[source.id],
+                title_sets[target.id],
+            )
             score = 0.55 * embedding_score + 0.25 * bm25_overlap + 0.20 * lexical
             sources = []
             if embedding_score > 0:
@@ -80,9 +86,9 @@ def build_neighbor_scores(
 
 
 def lexical_overlap(left: SkillNode, right: SkillNode) -> float:
-    """Compute title and description lexical overlap."""
+    """Compute cosine overlap between title and description token sets."""
 
-    return _jaccard(
+    return _token_cosine_overlap(
         set(_tokens(f"{left.name} {left.description}")),
         set(_tokens(f"{right.name} {right.description}")),
     )
@@ -92,7 +98,9 @@ def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9][a-z0-9_.+-]*", text.lower())
 
 
-def _jaccard(left: set[str], right: set[str]) -> float:
+def _token_cosine_overlap(left: set[str], right: set[str]) -> float:
+    """Compute cosine similarity over binary token-presence vectors."""
+
     if not left or not right:
         return 0.0
     intersection = len(left & right)
