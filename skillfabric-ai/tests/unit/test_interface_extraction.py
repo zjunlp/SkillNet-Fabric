@@ -181,7 +181,9 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertFalse(records[0].accepted)
         self.assertIn("json_parse_error", records[0].rejection_reason)
         self.assertEqual(records[0].interface.provenance, "deterministic_fallback")
-        self.assertEqual(records[0].interface.produces[0].name, "csv")
+        self.assertEqual(records[0].interface.requires, [])
+        self.assertEqual(records[0].interface.produces, [])
+        self.assertEqual(records[0].interface.uses_tools, [])
 
     def test_schema_invalid_json_uses_fallback_and_records_rejection(self) -> None:
         self._install_fake_litellm(json.dumps({"edge_type": "none", "confidence": 0.0}))
@@ -219,7 +221,7 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertFalse(records[0].accepted)
         self.assertIn("schema_error", records[0].rejection_reason)
-        self.assertEqual(records[0].interface.uses_tools[0].name, "pytest")
+        self.assertEqual(records[0].interface.uses_tools, [])
 
     def test_recoverable_shape_drift_is_normalized_without_fallback(self) -> None:
         self._install_fake_litellm(
@@ -349,9 +351,9 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertFalse(records[0].accepted)
         self.assertIn("api_error", records[0].rejection_reason)
-        self.assertEqual(records[0].interface.produces[0].name, "csv")
+        self.assertEqual(records[0].interface.produces, [])
 
-    def test_deterministic_fallback_does_not_call_litellm(self) -> None:
+    def test_deterministic_fallback_is_empty_and_does_not_call_litellm(self) -> None:
         calls = self._install_fake_litellm(RuntimeError("should not be called"))
         skill = make_skill(
             "skill:pdf",
@@ -364,10 +366,12 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertTrue(records[0].accepted)
         self.assertEqual(records[0].interface.capability_summary, skill.description)
-        self.assertEqual(records[0].interface.uses_tools[0].name, "python")
-        self.assertEqual(records[0].interface.produces[0].evidence[0].line, 1)
+        self.assertEqual(records[0].interface.when_to_use, skill.description)
+        self.assertEqual(records[0].interface.requires, [])
+        self.assertEqual(records[0].interface.produces, [])
+        self.assertEqual(records[0].interface.uses_tools, [])
 
-    def test_deterministic_fallback_extracts_obvious_inputs_and_outputs(self) -> None:
+    def test_deterministic_fallback_does_not_infer_obvious_inputs_and_outputs(self) -> None:
         skill = make_skill(
             "skill:kpi",
             "kpi",
@@ -376,10 +380,10 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         records = extract_skill_interfaces([skill], extractor=DeterministicInterfaceExtractor())
 
-        self.assertEqual({field.name for field in records[0].interface.requires}, {"csv"})
-        self.assertEqual({field.name for field in records[0].interface.produces}, {"json"})
+        self.assertEqual(records[0].interface.requires, [])
+        self.assertEqual(records[0].interface.produces, [])
 
-    def test_deterministic_fallback_treats_generation_verbs_as_outputs(self) -> None:
+    def test_deterministic_fallback_does_not_treat_generation_verbs_as_outputs(self) -> None:
         skill = make_skill(
             "skill:clinical-report",
             "clinical-report",
@@ -388,8 +392,8 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         records = extract_skill_interfaces([skill], extractor=DeterministicInterfaceExtractor())
 
-        self.assertNotIn("pdf", {field.name for field in records[0].interface.requires})
-        self.assertEqual({field.name for field in records[0].interface.produces}, {"pdf"})
+        self.assertEqual(records[0].interface.requires, [])
+        self.assertEqual(records[0].interface.produces, [])
 
     def test_deterministic_fallback_does_not_extract_hyphenated_substring_artifacts(self) -> None:
         skill = make_skill(
@@ -430,11 +434,18 @@ class InterfaceExtractionTests(unittest.TestCase):
         prompt = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "skill_contract_core_interface_v2")
-        for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
+        self.assertEqual(payload["prompt_id"], "skill_contract_core_interface_v3")
+        for field in (
+            "role",
+            "objective",
+            "source_contract",
+            "contract_semantics",
+            "quality_standard",
+            "process",
+            "format_requirements",
+            "examples",
+        ):
             self.assertIn(field, payload)
-        self.assertIn("extraction_policy", payload)
-        self.assertIn("capability_facets", payload["extraction_policy"])
         self.assertEqual(
             set(payload["output_schema"]),
             {"capability_summary", "when_to_use", "requires", "produces", "uses_tools"},
@@ -452,14 +463,14 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertIn("requires", prompt)
         self.assertIn("produces", prompt)
         self.assertIn("SkillContract", prompt)
-        self.assertIn("concrete deliverable names", prompt)
-        self.assertIn("support skills", prompt)
-        self.assertIn("examples alone", prompt)
+        self.assertIn("reusable operational capability", prompt)
+        self.assertIn("stable snake_case", prompt)
+        self.assertIn("routing_value", prompt)
+        self.assertIn("environment_diagnosis", prompt)
         self.assertIn("world_state", prompt)
         self.assertIn("belief_state", prompt)
         self.assertIn("planning_state", prompt)
-        self.assertIn("object_permanence_state", prompt)
-        self.assertIn("Every evidence item must be an object", prompt)
+        self.assertIn("Each evidence item is an object", prompt)
         self.assertNotIn("preconditions", prompt)
         self.assertNotIn("postconditions", prompt)
 

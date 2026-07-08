@@ -10,9 +10,9 @@ from skillfabric.compiled_graph.canonicalization.compiler import (
     DeterministicCanonicalizationProvider,
 )
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
-from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
+from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
@@ -97,7 +97,7 @@ def _build_fixture_workspace_uncached(workspace: Path) -> None:
             similar_top_k=3,
             candidate_top_k=6,
             validator=validator,
-            interface_extractor=DeterministicInterfaceExtractor(),
+            interface_extractor=FixtureInterfaceExtractor(),
             execution_validator=DeterministicExecutionFlowValidator(),
             canonicalization_provider=DeterministicCanonicalizationProvider(),
             embedding_provider=FakeEmbeddingProvider(),

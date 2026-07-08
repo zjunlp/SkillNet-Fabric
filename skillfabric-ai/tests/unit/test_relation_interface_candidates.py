@@ -31,7 +31,6 @@ def _canonicalization(
     producer_field: InterfaceField,
     consumer_id: str,
     consumer_field: InterfaceField,
-    promoted: bool = True,
 ) -> CanonicalizationBuild:
     object_type, _, name = canonical_id.partition(":")
     return CanonicalizationBuild(
@@ -42,7 +41,6 @@ def _canonicalization(
                 type=object_type,
                 produced_by=[producer_id],
                 required_by=[consumer_id],
-                promoted=promoted,
                 confidence=0.9,
             )
         ],
@@ -54,7 +52,6 @@ def _canonicalization(
                 raw_name=producer_field.name,
                 raw_kind=producer_field.kind,
                 canonical_id=canonical_id,
-                confidence=0.9,
             ),
             CanonicalAssignment(
                 raw_key="|".join([consumer_id, "requires", consumer_field.name.lower(), consumer_field.kind.lower()]),
@@ -63,7 +60,6 @@ def _canonicalization(
                 raw_name=consumer_field.name,
                 raw_kind=consumer_field.kind,
                 canonical_id=canonical_id,
-                confidence=0.9,
             ),
         ],
     )
@@ -119,7 +115,7 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         self.assertEqual(pair.direction_hint, "A->B")
         self.assertTrue(any(item.source == "interface_compatibility" for item in pair.evidence))
 
-    def test_non_promoted_canonical_object_does_not_generate_interface_candidate(self) -> None:
+    def test_unassigned_canonical_object_does_not_generate_interface_candidate(self) -> None:
         producer = make_skill("skill:producer", "producer", "Produce source data.")
         consumer = make_skill("skill:consumer", "consumer", "Consume source data.")
         produced = InterfaceField(name="source_data", kind="data", confidence=0.9)
@@ -142,14 +138,7 @@ class RelationInterfaceCandidateTests(unittest.TestCase):
         pairs = generate_relation_candidates(
             per_skill_limit=10,
             interfaces=interfaces,
-            canonicalization=_canonicalization(
-                "data:source_data",
-                producer_id=producer.id,
-                producer_field=produced,
-                consumer_id=consumer.id,
-                consumer_field=consumed,
-                promoted=False,
-            ),
+            canonicalization=CanonicalizationBuild(),
         )
 
         self.assertEqual(pairs, [])

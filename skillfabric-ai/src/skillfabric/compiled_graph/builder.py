@@ -332,12 +332,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
             "canonicalization_model_id": canonicalization_provider.model_id,
             "raw_contract_object_count": len(canonicalization.raw_terms),
             "canonical_object_count": len(canonicalization.objects),
-            "promoted_object_count": sum(1 for item in canonicalization.objects if item.promoted),
-            "canonical_candidate_edge_count": len(canonicalization.candidate_edges),
-            "canonical_candidate_component_count": len(canonicalization.candidate_components),
-            "canonical_ambiguous_component_count": sum(
-                1 for item in canonicalization.candidate_components if getattr(item, "ambiguous", False)
-            ),
+            "canonical_assignment_count": len(canonicalization.assignments),
             "raw_artifact_count": len(execution_graph.raw_artifact_nodes),
             "raw_scenario_count": len(execution_graph.raw_scenario_nodes),
             "canonical_artifact_count": len(
@@ -410,7 +405,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "canonicalization_model_id": stats["canonicalization_model_id"],
                 "raw_contract_object_count": stats["raw_contract_object_count"],
                 "canonical_object_count": stats["canonical_object_count"],
-                "promoted_object_count": stats["promoted_object_count"],
+                "canonical_assignment_count": stats["canonical_assignment_count"],
                 "raw_artifact_count": stats["raw_artifact_count"],
                 "raw_scenario_count": stats["raw_scenario_count"],
                 "canonical_artifact_count": stats["canonical_artifact_count"],

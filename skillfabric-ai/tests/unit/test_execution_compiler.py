@@ -50,8 +50,6 @@ def _field(skill_id: str, name: str, kind: str) -> InterfaceField:
 def _build_canonicalization(
     canonical_id: str,
     assignments: list[tuple[str, str, InterfaceField]],
-    *,
-    promoted: bool = True,
 ) -> CanonicalizationBuild:
     object_type, _, name = canonical_id.partition(":")
     return CanonicalizationBuild(
@@ -60,7 +58,6 @@ def _build_canonicalization(
                 canonical_id=canonical_id,
                 name=name,
                 type=object_type,
-                promoted=promoted,
                 confidence=0.9,
             )
         ],
@@ -72,7 +69,6 @@ def _build_canonicalization(
                 raw_name=field.name,
                 raw_kind=field.kind,
                 canonical_id=canonical_id,
-                confidence=0.9,
             )
             for skill_id, role, field in assignments
         ],
@@ -121,19 +117,12 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(compiled.candidates[0].matched_name, "docx_document")
         self.assertEqual(compiled.execution_index, [])
 
-    def test_non_promoted_shared_object_does_not_generate_execution_candidates(self) -> None:
+    def test_unassigned_shared_object_does_not_generate_execution_candidates(self) -> None:
         produced = _field("skill:producer", "source_data", "data")
         consumed = _field("skill:consumer", "source_data", "data")
         producer = _interface("skill:producer", produces=[produced])
         consumer = _interface("skill:consumer", requires=[consumed])
-        canonicalization = _build_canonicalization(
-            "data:source_data",
-            [
-                ("skill:producer", "produces", produced),
-                ("skill:consumer", "requires", consumed),
-            ],
-            promoted=False,
-        )
+        canonicalization = CanonicalizationBuild()
 
         compiled = compile_execution_graph(
             {producer.skill_id: producer, consumer.skill_id: consumer},
@@ -694,7 +683,7 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(len(compiled.candidates), 1)
         self.assertEqual(compiled.candidates[0].matched_name, "markdown_document")
 
-    def test_non_promoted_canonical_terms_do_not_fall_back_to_format_ontology(self) -> None:
+    def test_distinct_canonical_terms_do_not_fall_back_to_format_ontology(self) -> None:
         producer = _interface(
             "skill:image-producer",
             produces=[_field("skill:image-producer", "generated_image_png", "artifact")],
@@ -710,7 +699,6 @@ class ExecutionCompilerTests(unittest.TestCase):
                     name="generated_image_file",
                     type="artifact",
                     produced_by=["skill:image-producer"],
-                    promoted=False,
                     confidence=0.98,
                 ),
                 CanonicalObject(
@@ -718,7 +706,6 @@ class ExecutionCompilerTests(unittest.TestCase):
                     name="rendered_image_file",
                     type="artifact",
                     required_by=["skill:image-consumer"],
-                    promoted=False,
                     confidence=0.98,
                 ),
             ],
@@ -766,7 +753,6 @@ class ExecutionCompilerTests(unittest.TestCase):
                     name="formatted_excel_report",
                     type="artifact",
                     produced_by=["skill:financial-analysis"],
-                    promoted=False,
                     confidence=0.98,
                 ),
                 CanonicalObject(
@@ -774,7 +760,6 @@ class ExecutionCompilerTests(unittest.TestCase):
                     name="workbook_or_tabular_data",
                     type="artifact",
                     required_by=["skill:xlsx"],
-                    promoted=False,
                     confidence=0.98,
                 ),
             ],

@@ -21,7 +21,6 @@ from skillfabric.compiled_graph.canonicalization.compiler import (
 )
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.health import analyze_health
-from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
 from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from skillfabric.indexing.canonical import canonical_skill_text
@@ -29,6 +28,7 @@ from skillfabric.registry.models import SkillNode
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
+from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
@@ -163,7 +163,7 @@ class KGBuildTests(unittest.TestCase):
                     candidate_top_k=6,
                     validator=validator,
                     canonicalization_provider=DeterministicCanonicalizationProvider(),
-                    interface_extractor=DeterministicInterfaceExtractor(),
+                    interface_extractor=FixtureInterfaceExtractor(),
                     execution_validator=DeterministicExecutionFlowValidator(),
                     embedding_provider=FakeEmbeddingProvider(),
                     build_id="test-build",
@@ -188,6 +188,10 @@ class KGBuildTests(unittest.TestCase):
             self.assertTrue((workspace / "graph" / "interface_health_report.md").exists())
             self.assertTrue((workspace / "graph" / "canonical_objects.jsonl").exists())
             self.assertTrue((workspace / "graph" / "canonical_aliases.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "canonicalization_pair_features.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "canonicalization_blocking_stats.json").exists())
+            self.assertFalse((workspace / "graph" / "canonicalization_review_queue.json").exists())
+            self.assertFalse((workspace / "graph" / "canonicalization_decision_stats.json").exists())
             self.assertFalse((workspace / "graph" / "canonicalization_evidence.jsonl").exists())
             self.assertTrue((workspace / "graph" / "canonicalization_health_report.md").exists())
             self.assertTrue((workspace / "cache" / "interface_cache.json").exists())
@@ -318,7 +322,7 @@ class KGBuildTests(unittest.TestCase):
                     candidate_top_k=6,
                     validator=validator,
                     canonicalization_provider=DeterministicCanonicalizationProvider(),
-                    interface_extractor=DeterministicInterfaceExtractor(),
+                    interface_extractor=FixtureInterfaceExtractor(),
                     execution_validator=DeterministicExecutionFlowValidator(),
                     embedding_provider=FakeEmbeddingProvider(),
                     build_id="test-build-2",
@@ -405,7 +409,7 @@ class KGBuildTests(unittest.TestCase):
             calls.append(kwargs)
             messages = kwargs.get("messages", [])
             user_content = messages[-1].get("content", "") if messages else ""
-            if "execution-aware SkillContract" in user_content:
+            if "SkillFabric interface analyst" in user_content:
                 return {
                     "choices": [
                         {
@@ -439,7 +443,7 @@ class KGBuildTests(unittest.TestCase):
                         }
                     ]
                 }
-            if "Canonicalize a precluster of SkillContract" in user_content:
+            if "interface_term_canonicalization_v2" in user_content:
                 return {
                     "choices": [
                         {
@@ -447,7 +451,7 @@ class KGBuildTests(unittest.TestCase):
                                 "content": json.dumps(
                                     {
                                         "canonical_objects": [],
-                                        "assignments": [],
+                                        "omitted_term_ids": [],
                                     }
                                 )
                             }
@@ -532,7 +536,7 @@ class KGBuildTests(unittest.TestCase):
         def fake_completion(**kwargs):
             messages = kwargs.get("messages", [])
             user_content = messages[-1].get("content", "") if messages else ""
-            if "execution-aware SkillContract" in user_content:
+            if "SkillFabric interface analyst" in user_content:
                 return {
                     "choices": [
                         {

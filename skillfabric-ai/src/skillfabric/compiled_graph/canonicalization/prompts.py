@@ -1,122 +1,58 @@
-"""Prompt construction for pool-level canonicalization."""
+"""Prompt construction for interface term canonicalization."""
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
+from skillfabric.compiled_graph.canonicalization.candidates import normalized_candidate_text
 from skillfabric.compiled_graph.canonicalization.models import CanonicalizationCluster
 
-CANONICALIZATION_PROMPT_ID = "canonicalization_operational_objects"
+CANONICALIZATION_PROMPT_ID = "interface_term_canonicalization_v2"
 
 
 def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[dict[str, str]]:
-    """Build LiteLLM messages for canonicalizing one raw-term cluster."""
+    """Build structured messages for resolving one candidate term group."""
 
-    payload = {
-        "todo": (
-            "Normalize one candidate component of raw SkillContract terms into reusable operational objects for routing "
-            "and workflow planning. Keep only objects that improve cross-skill matching or coverage explanation."
-        ),
-        "task": (
-            "Canonicalize a candidate-graph component of SkillContract requires/produces terms into operational objects "
-            "that are useful for routing and workflow planning. This is a pool-level normalization step, "
-            "not a per-skill summary. Candidate edges are lexical or semantic evidence, not final decisions."
-        ),
+    payload: dict[str, Any] = {
         "prompt_id": CANONICALIZATION_PROMPT_ID,
+        "task": "Canonicalize short SkillFabric interface terms that name the same reusable interface object.",
+        "context": {
+            "interface_term": "A requires or produces field extracted from a skill interface.",
+            "canonical_object": "A stable snake_case name shared by terms that refer to the same reusable object.",
+            "quality_bar": "Prefer small, precise groups. Put unresolved or weakly supported terms in omitted_term_ids.",
+        },
         "input": {
-            "cluster": "One connected candidate component containing raw requires/produces terms, candidate edges, ambiguity flags, and evidence.",
-            "raw_terms": "Candidate terms may be noisy, generic, local-only, example-only, or semantically different despite lexical similarity.",
-            "candidate_edges": "Lexical or semantic neighbor evidence. Use it as merge evidence, not as a final decision.",
+            "cluster_id": cluster.cluster_id,
+            "term_count": len(cluster.terms),
         },
-        "output": {
-            "format": "Return one strict JSON object, with no markdown, comments, or extra keys.",
-            "required_top_level_keys": ["canonical_objects", "assignments"],
-            "purpose": (
-                "Canonical objects support cross-skill routing and orchestration. Leave noisy terms unassigned instead of preserving them."
-            ),
-        },
-        "workflow": [
-            "Step 1: Group terms by the operational thing a downstream agent can require, produce, inspect, verify, or hand off.",
-            "Step 2: Separate final deliverables, intermediate artifacts, data objects, reports, text, environment prerequisites, credentials, world states, belief states, and planning states.",
-            "Step 3: Use candidate_edges as evidence, but split terms that are only topically or lexically similar.",
-            "Step 4: Merge aliases only when they are substitutable in routing or workflow planning.",
-            "Step 5: Leave generic, local-only, placeholder, section-heading, example-only, and unsupported terms unassigned.",
-            "Step 6: Decide promotion by cross-skill utility, not by whether a phrase appears in a skill.",
-            "Step 7: Assign only raw terms that map to a useful canonical object.",
-            "Step 8: Return a small, high-precision registry that favors useful workflow gates over exhaustive preservation.",
-        ],
-        "decision_workflow": [
-            "Group raw terms by the operational thing a downstream agent can require, produce, inspect, verify, or hand off.",
-            "Separate final deliverables, intermediate artifacts, data objects, environment prerequisites, credentials, world states, belief states, and planning states.",
-            "Merge aliases only when they are substitutable in routing or workflow planning.",
-            "Do not assign terms that are too generic, local-only, example-only, or unsupported by reusable operational semantics.",
-            "Promote only objects that can help connect skills or explain coverage; do not preserve every phrase from the source contracts.",
-        ],
         "output_schema": {
             "canonical_objects": [
                 {
-                    "canonical_name": "stable_snake_case_name",
-                    "type": "artifact|data|world_state|belief_state|planning_state|credential|environment|text|report",
-                    "description": "",
-                    "aliases": [],
-                    "promoted": True,
+                    "name": "stable_snake_case_name",
+                    "type": "artifact|data|text|report|state|belief_state|planning_state|credential|environment",
+                    "term_ids": ["term:id"],
                     "confidence": 0.0,
-                    "reason": "",
                 }
             ],
-            "assignments": [
-                {
-                    "raw_name": "",
-                    "canonical_name": "",
-                    "confidence": 0.0,
-                    "reason": "",
-                }
-            ],
+            "omitted_term_ids": ["term:id"],
         },
-        "rules": [
-            "Return JSON only.",
-            "Use stable snake_case canonical names. Do not include spaces, slashes, punctuation, or skill names.",
-            "Every assignment raw_name must exactly match one input term name.",
-            "Omit raw terms from assignments when they do not map to a useful canonical object.",
-            "Use candidate_edges as merge evidence, but reject weak candidate edges when the raw terms name different operational objects.",
-            "If the component is marked ambiguous, be conservative and split or reject instead of forcing one canonical object.",
-            "Merge aliases aggressively when the terms describe the same operational object, even if their raw kind differs across artifact, data, text, state, report, or environment.",
-            "Do not merge terms that merely belong to the same broad domain. A report, chart, slide deck, spreadsheet, validation log, and source dataset are different operational objects.",
-            "Choose the canonical type by operational semantics, not by the raw kind. For example, an inventory-held condition is state even if one raw term is text.",
-            "Never merge belief_state or planning_state into world_state. A remembered, observed, inferred, or planned fact is not the same as a physical environment state.",
-            "object_permanence_state is belief_state unless the skill actually performs and confirms a take/pickup action. Do not canonicalize object_permanence_state to object_in_inventory.",
-            "structured_task_parse, sequential_sub_objective_plan, parsed_goal, and routing decisions are planning_state or data; they are not workflow-enabling world_state objects.",
-            "Only world_state objects may represent physical gates such as object_in_inventory, receptacle_open, cleaned_object_state, heated_object_state, cooled_object_state, or agent_at_target_location.",
-            "Prefer reusable state/data names for workflow gates: object_in_inventory, agent_at_target_location, receptacle_open, target_object_located, appliance_ready, cleaned_object_state, heated_object_state, cooled_object_state, task_verified.",
-            "Do not keep separate canonical objects for spelling variants such as object in inventory vs object_in_inventory, target receptacle vs target_receptacle_identifier, current observation vs environment_observation.",
-            "Do not assign generic parameters that cannot connect producer to consumer by themselves: object, data, result, output, content, file, text, target, item, command.",
-            "Do not promote underspecified context/input/path placeholders such as source_data, content_input, project_context, reference_materials, input_path, output_directory, or project_path unless evidence names a specific reusable handoff object.",
-            "Do not assign terms that only name an example, placeholder, section heading, or local implementation detail unless they identify a reusable artifact or state.",
-            "Promote=true only when the object can support cross-skill routing or workflow planning. Strong cases: at least one producing skill and one requiring skill; or a state/credential/environment shared by multiple skills as a real workflow gate.",
-            "Promote=false for local-only outputs, one-off reports, isolated action strings, underspecified context/input/path placeholders, examples, and final task-completion descriptions that no other skill can consume.",
-            "Do not merge semantically different objects just because they share common words. A target object, target receptacle, target tool, and task target are different.",
-            "If all terms are local-only or generic, return empty canonical_objects and empty assignments.",
-            "Use confidence >= 0.9 only for evidence-backed exact or near-exact aliases; use lower confidence when an assignment is inferred from context.",
+        "terms": [
+            {
+                "term_id": term.term_id,
+                "name": term.name,
+                "normalized_name": normalized_candidate_text(term.name),
+                "role": term.role,
+                "kind": term.kind,
+                "description": term.description,
+            }
+            for term in cluster.terms
         ],
-        "constraints": [
-            "Do not create canonical objects merely to preserve every raw phrase.",
-            "Do not merge terms only because they share a broad domain, file family, or common word.",
-            "Do not merge belief_state or planning_state into world_state.",
-            "Do not promote object, data, result, output, content, file, text, target, item, or command unless the cluster provides a specific reusable concept.",
-            "Do not promote source_data, content_input, project_context, reference_materials, input_path, output_directory, or project_path unless the evidence narrows the term to a specific reusable artifact or state.",
-            "Do not include skill names in canonical object names.",
-            "If the component is ambiguous, prefer split or reject over a forced merge.",
-        ],
-        "cluster": cluster.to_dict(),
     }
     return [
         {
             "role": "system",
-            "content": (
-                "You are the SkillFabric pool-level canonicalizer. Your job is to reduce noisy "
-                "requires/produces terms into a small set of reusable operational objects. "
-                "Prioritize downstream routing and workflow planning quality over preserving every raw phrase."
-            ),
+            "content": "You canonicalize short interface terms into stable object names and return JSON only.",
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
     ]
