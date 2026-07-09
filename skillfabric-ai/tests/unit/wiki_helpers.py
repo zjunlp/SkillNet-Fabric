@@ -6,8 +6,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.compiled_graph.builder import BuildConfig, _BuildDependencies, build_graph
-from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
-from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from skillfabric.indexing.embeddings import DisabledEmbeddingProvider
 from tests.unit.fake_canonicalization import FixtureCanonicalizationProvider
 from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
@@ -16,6 +14,21 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
 _FIXTURE_CACHE_DIR: TemporaryDirectory[str] | None = None
 _FIXTURE_CACHE_WORKSPACE: Path | None = None
+
+
+class FixtureExecutionValidator:
+    model_id = "fixture-execution"
+
+    def validate(self, candidate, source_skill, target_skill, *, interfaces):
+        del source_skill, target_skill, interfaces
+        accepted = bool(candidate.evidence)
+        return {
+            "accepted": accepted,
+            "flow_type": candidate.flow_type if accepted else "none",
+            "projected_edge_type": "depend_on" if accepted else "none",
+            "confidence": 0.92 if accepted else 0.0,
+            "evidence": [item.to_dict() for item in candidate.evidence],
+        }
 
 
 def build_fixture_workspace(workspace: Path) -> None:
@@ -45,58 +58,14 @@ def _cached_fixture_workspace() -> Path:
 
 
 def _build_fixture_workspace_uncached(workspace: Path) -> None:
-    validator = StaticPairValidator(
-        {
-            ("skill:financial-kpi-extractor", "skill:pdf-table-parser"): {
-                "edge_type": "depend_on",
-                "direction": "A->B",
-                "confidence": 0.92,
-                "evidence": [
-                    {
-                        "skill": "skill:financial-kpi-extractor",
-                        "line": 7,
-                        "text": "Use this after `pdf-table-parser` has produced `.csv` tables.",
-                    }
-                ],
-                "reason": "KPI extraction consumes CSV tables produced by PDF table parsing.",
-            },
-            ("skill:report-writer", "skill:financial-kpi-extractor"): {
-                "edge_type": "depend_on",
-                "direction": "A->B",
-                "confidence": 0.9,
-                "evidence": [
-                    {
-                        "skill": "skill:report-writer",
-                        "line": 5,
-                        "text": "Use KPI JSON and chart artifacts to compose a final `.md` report.",
-                    }
-                ],
-                "reason": "Report writing consumes KPI JSON.",
-            },
-            ("skill:testing-python", "skill:analyze-ci"): {
-                "edge_type": "compose_with",
-                "direction": "undirected",
-                "confidence": 0.82,
-                "evidence": [
-                    {
-                        "skill": "skill:testing-python",
-                        "line": 6,
-                        "text": "This skill composes with `analyze-ci` when a CI job fails.",
-                    }
-                ],
-                "reason": "CI analysis and focused pytest diagnosis are commonly chained.",
-            },
-        }
-    )
     build_graph(
         BuildConfig(
             skill_root=FIXTURE_SKILLS,
             workspace=workspace,
         ),
         dependencies=_BuildDependencies(
-            pair_validator=validator,
             interface_extractor=FixtureInterfaceExtractor(),
-            execution_validator=DeterministicExecutionFlowValidator(),
+            execution_validator=FixtureExecutionValidator(),
             canonicalization_provider=FixtureCanonicalizationProvider(),
             embedding_provider=DisabledEmbeddingProvider(),
             build_id="wiki-test-build",

@@ -14,6 +14,7 @@ from skillfabric.compiled_graph.canonicalization.candidates import (
     CanonicalSemanticEmbedder,
     EmbeddingProviderCanonicalEmbedder,
     candidate_groups_from_terms,
+    contract_object_type,
     generate_semantic_candidate_pairs,
     normalized_candidate_text,
 )
@@ -622,6 +623,18 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(DEFAULT_SEMANTIC_THRESHOLD, 0.76)
         self.assertEqual(DEFAULT_SEMANTIC_TOP_K, 8)
         self.assertEqual(DEFAULT_MAX_GROUP_SIZE, 16)
+
+    def test_contract_object_type_keeps_only_current_cognitive_state_kinds(self) -> None:
+        self.assertEqual(contract_object_type("belief_state"), "belief_state")
+        self.assertEqual(contract_object_type("planning_state"), "planning_state")
+        for legacy_kind in (
+            "memory_state",
+            "knowledge_state",
+            "observation_state",
+            "plan_state",
+            "routing_state",
+        ):
+            self.assertEqual(contract_object_type(legacy_kind), "artifact")
 
     def test_embedding_provider_adapter_uses_shared_embed_many_interface(self) -> None:
         provider = EmbedManyOnlyProvider()

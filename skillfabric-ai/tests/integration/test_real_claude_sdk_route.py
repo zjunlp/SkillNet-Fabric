@@ -7,14 +7,27 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.compiled_graph.builder import BuildConfig, _BuildDependencies, build_graph
-from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
-from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.wiki.explorer.prompting import EXPLORER_PROMPT_ID
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
+
+
+class SyntheticExecutionValidator:
+    model_id = "synthetic-execution"
+
+    def validate(self, candidate, source_skill, target_skill, *, interfaces):
+        del source_skill, target_skill, interfaces
+        accepted = bool(candidate.evidence)
+        return {
+            "accepted": accepted,
+            "flow_type": candidate.flow_type if accepted else "none",
+            "projected_edge_type": "depend_on" if accepted else "none",
+            "confidence": 0.94 if accepted else 0.0,
+            "evidence": [item.to_dict() for item in candidate.evidence],
+        }
 
 
 @unittest.skipUnless(
@@ -33,25 +46,8 @@ class RealClaudeSdkRouteTests(unittest.TestCase):
                     workspace=workspace,
                 ),
                 dependencies=_BuildDependencies(
-                    pair_validator=StaticPairValidator(
-                        {
-                            ("skill:synthetic-kpi-extractor", "skill:synthetic-pdf-table-parser"): {
-                                "edge_type": "depend_on",
-                                "direction": "A->B",
-                                "confidence": 0.94,
-                                "evidence": [
-                                    {
-                                        "skill": "skill:synthetic-kpi-extractor",
-                                        "line": 6,
-                                        "text": "Use this after synthetic-pdf-table-parser has produced CSV tables.",
-                                    }
-                                ],
-                                "reason": "KPI extraction consumes CSV tables produced by PDF parsing.",
-                            }
-                        }
-                    ),
                     interface_extractor=DeterministicInterfaceExtractor(),
-                    execution_validator=DeterministicExecutionFlowValidator(),
+                    execution_validator=SyntheticExecutionValidator(),
                     embedding_provider=FakeEmbeddingProvider(),
                     build_id="real-cc-sdk-synthetic",
                 ),

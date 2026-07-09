@@ -111,7 +111,6 @@ def _provenance_strength(provenance: str) -> int:
         "computed": 1,
         "execution_projected": 2,
         "llm_validated": 3,
-        "deterministic_accept": 4,
         "explicit_mention": 4,
     }
     return strengths.get(provenance, 2)

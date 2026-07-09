@@ -202,14 +202,14 @@ def _execution_object_scores(
         score = _term_score(
             query_terms,
             " ".join(
-                [
-                    record.relation_type,
-                    record.canonical_object,
-                    record.projected_edge_type,
-                    record.reason,
-                ]
-            ),
-        )
+                    [
+                        record.relation_type,
+                        record.canonical_object,
+                        record.projected_edge_type,
+                        " ".join(record.metadata.values()),
+                    ]
+                ),
+            )
         if score <= 0:
             continue
         for skill_id in (record.source_skill, record.target_skill):

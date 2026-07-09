@@ -113,7 +113,7 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(len(compiled.candidates), 1)
         self.assertEqual(compiled.candidates[0].source_skill, "skill:producer")
         self.assertEqual(compiled.candidates[0].target_skill, "skill:consumer")
-        self.assertEqual(compiled.candidates[0].flow_type, "artifact_flow")
+        self.assertEqual(compiled.candidates[0].flow_type, "artifact_handoff")
         self.assertEqual(compiled.candidates[0].matched_name, "docx_document")
         self.assertEqual(compiled.execution_index, [])
 
@@ -222,7 +222,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertFalse(hasattr(compiled, "scenario_nodes"))
         self.assertFalse(hasattr(compiled, "skill_scenario_edges"))
-        self.assertEqual(compiled.candidates[0].flow_type, "scenario_transition")
+        self.assertEqual(compiled.candidates[0].flow_type, "state_handoff")
         self.assertEqual(compiled.candidates[0].matched_name, "authenticated_session")
         self.assertEqual(compiled.execution_index, [])
 
@@ -255,6 +255,83 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(compiled.candidates, [])
         self.assertTrue(any(node.kind == "belief_state" for node in compiled.raw_scenario_nodes))
 
+    def test_cognitive_state_canonical_assignments_do_not_generate_execution_candidates(self) -> None:
+        plan = _field("skill:planner", "route_plan", "planning_state")
+        plan_requirement = _field("skill:executor", "route_plan", "planning_state")
+        belief = _field("skill:observer", "remembered_fact", "belief_state")
+        belief_requirement = _field("skill:reasoner", "remembered_fact", "belief_state")
+        planner = _interface("skill:planner", produces=[plan])
+        executor = _interface("skill:executor", requires=[plan_requirement])
+        observer = _interface("skill:observer", produces=[belief])
+        reasoner = _interface("skill:reasoner", requires=[belief_requirement])
+        canonicalization = CanonicalizationBuild(
+            objects=[
+                CanonicalObject(
+                    canonical_id="planning_state:route_plan",
+                    name="route_plan",
+                    type="planning_state",
+                    produced_by=["skill:planner"],
+                    required_by=["skill:executor"],
+                    confidence=0.95,
+                ),
+                CanonicalObject(
+                    canonical_id="belief_state:remembered_fact",
+                    name="remembered_fact",
+                    type="belief_state",
+                    produced_by=["skill:observer"],
+                    required_by=["skill:reasoner"],
+                    confidence=0.95,
+                ),
+            ],
+            assignments=[
+                CanonicalAssignment(
+                    raw_key="skill:planner|produces|route_plan|planning_state",
+                    skill_id="skill:planner",
+                    role="produces",
+                    raw_name="route_plan",
+                    raw_kind="planning_state",
+                    canonical_id="planning_state:route_plan",
+                ),
+                CanonicalAssignment(
+                    raw_key="skill:executor|requires|route_plan|planning_state",
+                    skill_id="skill:executor",
+                    role="requires",
+                    raw_name="route_plan",
+                    raw_kind="planning_state",
+                    canonical_id="planning_state:route_plan",
+                ),
+                CanonicalAssignment(
+                    raw_key="skill:observer|produces|remembered_fact|belief_state",
+                    skill_id="skill:observer",
+                    role="produces",
+                    raw_name="remembered_fact",
+                    raw_kind="belief_state",
+                    canonical_id="belief_state:remembered_fact",
+                ),
+                CanonicalAssignment(
+                    raw_key="skill:reasoner|requires|remembered_fact|belief_state",
+                    skill_id="skill:reasoner",
+                    role="requires",
+                    raw_name="remembered_fact",
+                    raw_kind="belief_state",
+                    canonical_id="belief_state:remembered_fact",
+                ),
+            ],
+        )
+
+        compiled = compile_execution_graph(
+            {
+                planner.skill_id: planner,
+                executor.skill_id: executor,
+                observer.skill_id: observer,
+                reasoner.skill_id: reasoner,
+            },
+            bucket_limit=100,
+            canonicalization=canonicalization,
+        )
+
+        self.assertEqual(compiled.candidates, [])
+
     def test_execution_index_uses_only_accepted_validation_records(self) -> None:
         producer = _interface("skill:producer", produces=[_field("skill:producer", "DOCX document", "artifact")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "docx_file", "artifact")])
@@ -276,20 +353,18 @@ class ExecutionCompilerTests(unittest.TestCase):
             raw_output={"accepted": True},
             normalized={
                 "accepted": True,
-                "flow_type": "artifact_flow",
+                "flow_type": "artifact_handoff",
                 "projected_edge_type": "depend_on",
                 "confidence": 0.91,
-                "reason": "Producer emits a DOCX document consumed downstream.",
             },
             accepted=True,
             rejection_reason="",
             flow_edge=ExecutionEdge(
                 source=candidate.source_skill,
                 target=candidate.target_skill,
-                type="artifact_flow",
+                type="artifact_handoff",
                 confidence=0.91,
                 evidence=candidate.evidence,
-                reason="Producer emits a DOCX document consumed downstream.",
                 metadata=candidate.metadata,
             ),
         )
@@ -329,20 +404,18 @@ class ExecutionCompilerTests(unittest.TestCase):
             raw_output={"accepted": True},
             normalized={
                 "accepted": True,
-                "flow_type": "artifact_flow",
+                "flow_type": "artifact_handoff",
                 "projected_edge_type": "depend_on",
                 "confidence": 0.91,
-                "reason": "Producer emits a DOCX document.",
             },
             accepted=True,
             rejection_reason="",
             flow_edge=ExecutionEdge(
                 source=candidate.source_skill,
                 target=candidate.target_skill,
-                type="artifact_flow",
+                type="artifact_handoff",
                 confidence=0.91,
                 evidence=candidate.evidence,
-                reason="Producer emits a DOCX document.",
                 metadata=candidate.metadata,
             ),
         )
@@ -351,23 +424,21 @@ class ExecutionCompilerTests(unittest.TestCase):
             raw_output={"accepted": True},
             normalized={
                 "accepted": True,
-                "flow_type": "artifact_flow",
+                "flow_type": "artifact_handoff",
                 "projected_edge_type": "depend_on",
                 "confidence": 0.96,
-                "reason": "Consumer needs that DOCX document downstream.",
             },
             accepted=True,
             rejection_reason="",
             flow_edge=ExecutionEdge(
                 source=candidate.source_skill,
                 target=candidate.target_skill,
-                type="artifact_flow",
+                type="artifact_handoff",
                 confidence=0.96,
                 evidence=[
                     *candidate.evidence,
                     ExecutionEvidence(skill="skill:consumer", line=8, text="Consumes the produced DOCX."),
                 ],
-                reason="Consumer needs that DOCX document downstream.",
                 metadata=candidate.metadata,
             ),
         )
@@ -376,8 +447,6 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].confidence, 0.96)
-        self.assertIn("Producer emits a DOCX document.", records[0].reason)
-        self.assertIn("Consumer needs that DOCX document downstream.", records[0].reason)
         self.assertEqual(len(records[0].evidence), len({item.key for item in records[0].evidence}))
 
     def test_local_conditions_do_not_generate_global_scenario_records(self) -> None:
@@ -418,7 +487,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_output_destination_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_output_destination_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:markdown-producer",
             produces=[_field("skill:markdown-producer", "analysis_md", "artifact")],
@@ -435,7 +504,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_markdown_output_target_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_markdown_output_target_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:markdown-producer",
             produces=[_field("skill:markdown-producer", "analysis_md", "artifact")],
@@ -465,7 +534,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_showcase_pdf_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_showcase_pdf_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:pdf-producer",
             produces=[_field("skill:pdf-producer", "new_pdf", "artifact")],
@@ -498,7 +567,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_optional_edit_mode_image_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_optional_edit_mode_image_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:image-producer",
             produces=[_field("skill:image-producer", "generated_image_png", "artifact")],
@@ -528,7 +597,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_user_uploaded_image_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_user_uploaded_image_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:image-producer",
             produces=[_field("skill:image-producer", "generated_image_png", "artifact")],
@@ -558,7 +627,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_required_image_handoff_still_creates_artifact_flow(self) -> None:
+    def test_required_image_handoff_still_creates_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:image-producer",
             produces=[_field("skill:image-producer", "generated_image_png", "artifact")],
@@ -597,7 +666,7 @@ class ExecutionCompilerTests(unittest.TestCase):
         self.assertEqual(len(compiled.candidates), 1)
         self.assertEqual(compiled.candidates[0].matched_name, "image_asset")
 
-    def test_local_reference_markdown_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_local_reference_markdown_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:outline-producer",
             produces=[_field("skill:outline-producer", "selected_outline_md", "artifact")],
@@ -627,7 +696,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_local_template_html_requirement_does_not_create_artifact_flow(self) -> None:
+    def test_local_template_html_requirement_does_not_create_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:html-producer",
             produces=[_field("skill:html-producer", "bundle_html", "artifact")],
@@ -657,7 +726,7 @@ class ExecutionCompilerTests(unittest.TestCase):
 
         self.assertEqual(compiled.candidates, [])
 
-    def test_input_markdown_requirement_still_creates_artifact_flow(self) -> None:
+    def test_input_markdown_requirement_still_creates_artifact_handoff(self) -> None:
         producer = _interface(
             "skill:markdown-producer",
             produces=[_field("skill:markdown-producer", "analysis_md", "artifact")],

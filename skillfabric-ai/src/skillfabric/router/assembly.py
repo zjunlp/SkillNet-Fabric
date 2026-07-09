@@ -82,11 +82,22 @@ def _workflow_hints(
                 canonical_object=record.canonical_object,
                 confidence=record.confidence,
                 projected_edge_type=record.projected_edge_type,
-                reason=record.reason,
+                reason=_workflow_hint_reason(record),
             )
         )
     hints.sort(key=lambda item: (-item.confidence, item.source_skill, item.target_skill, item.canonical_object))
     return hints[:limit]
+
+
+def _workflow_hint_reason(record: ExecutionIndexRecord) -> str:
+    flow_type = record.metadata.get("flow_type", "")
+    parts = [
+        record.projected_edge_type,
+        record.relation_type,
+        record.canonical_object,
+        flow_type,
+    ]
+    return " ".join(part for part in parts if part)
 
 
 def _wiki_pages(

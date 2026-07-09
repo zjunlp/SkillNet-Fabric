@@ -48,7 +48,6 @@ from skillfabric.compiled_graph.execution.prompts import (
     EXECUTION_PROMPT_ID,
 )
 from skillfabric.compiled_graph.execution.validation import (
-    DeterministicExecutionFlowValidator,
     ExecutionFlowValidator,
     LiteLLMExecutionFlowValidator,
     summarize_execution_validation_records,
@@ -56,7 +55,6 @@ from skillfabric.compiled_graph.execution.validation import (
 )
 from skillfabric.compiled_graph.health import render_health_report
 from skillfabric.compiled_graph.interface.extraction import (
-    DeterministicInterfaceExtractor,
     LiteLLMInterfaceExtractor,
     SkillInterfaceExtractor,
     extract_skill_interfaces,
@@ -68,24 +66,8 @@ from skillfabric.compiled_graph.interface.health import (
 from skillfabric.compiled_graph.interface.models import InterfaceExtractionRecord, SkillInterface
 from skillfabric.compiled_graph.interface.prompts import INTERFACE_PROMPT_ID
 from skillfabric.compiled_graph.models import Edge, GraphDocument
-from skillfabric.compiled_graph.relations.candidates import generate_relation_candidates
 from skillfabric.compiled_graph.relations.edge_safety import enforce_depend_on_acyclicity
-from skillfabric.compiled_graph.relations.policy import (
-    RELATION_POLICY_DIGEST,
-    RELATION_POLICY_VERSION,
-)
-from skillfabric.compiled_graph.relations.prompts import (
-    COMPACT_RELATION_PROMPT_ID,
-    RELATION_PROMPT_ID,
-)
 from skillfabric.compiled_graph.relations.similarity import build_similar_edges
-from skillfabric.compiled_graph.relations.validation import (
-    LiteLLMPairValidator,
-    NoopPairValidator,
-    PairValidator,
-    summarize_relation_validation_records,
-    validate_relation_candidates,
-)
 from skillfabric.indexing.bm25 import build_bm25_index, search_bm25
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.indexing.embeddings import (
@@ -102,7 +84,6 @@ from skillfabric.runtime.usage import load_usage_records, summarize_usage
 from skillfabric.storage import Workspace, atomic_write_text
 
 DEFAULT_SIMILAR_TOP_K = 5
-DEFAULT_CANDIDATE_TOP_K = 20
 DEFAULT_EXECUTION_BUCKET_LIMIT = 100
 
 
@@ -113,7 +94,6 @@ class BuildConfig:
     skill_root: str | Path
     workspace: str | Path = ".skillfabric"
     llm_env_path: str | Path = ".env"
-    skip_llm_validation: bool = False
     llm_options: LLMJobOptions | None = None
 
 
@@ -121,7 +101,6 @@ class BuildConfig:
 class _BuildDependencies:
     """Private dependency overrides for tests and internal adapters."""
 
-    pair_validator: PairValidator | None = None
     execution_validator: ExecutionFlowValidator | None = None
     interface_extractor: SkillInterfaceExtractor | None = None
     canonicalization_provider: CanonicalizationProvider | None = None
@@ -194,14 +173,12 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
     workspace.ensure()
 
     with workspace.lock(), llm_usage_context(log_path=usage_log_path, metadata={"build_id": build_id}):
-        validator = _resolve_pair_validator(config, deps)
         interface_extractor = _resolve_interface_extractor(config, deps)
         execution_validator = _resolve_execution_validator(config, deps)
         canonicalization_provider = _resolve_canonicalization_provider(config, deps)
         config_digest = _config_digest(
             config,
             embedding_provider=embedding_provider,
-            pair_validator=validator,
             interface_extractor=interface_extractor,
             canonicalization_provider=canonicalization_provider,
             execution_validator=execution_validator,
@@ -300,33 +277,8 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
         execution_validation_summary = summarize_execution_validation_records(execution_records)
         stage_timer.mark("execution")
 
-        workspace.write_json(
-            workspace.checkpoint_path,
-            {"stage": "compose_depend", "build_id": build_id, "config_digest": config_digest},
-        )
-        relation_candidates = generate_relation_candidates(
-            per_skill_limit=DEFAULT_CANDIDATE_TOP_K,
-            interfaces=interfaces,
-            execution_records=execution_records,
-            canonicalization=canonicalization,
-        )
-        validation_records = validate_relation_candidates(
-            relation_candidates,
-            skills,
-            validator=validator,
-            cache_path=workspace.cache_dir / "relation_validation_cache.json",
-            interfaces=interfaces,
-            execution_records=execution_records,
-            job_options=llm_job_options,
-        )
-        relation_validation_summary = summarize_relation_validation_records(validation_records)
-        compose_depend_edges = [record.edge for record in validation_records if record.edge is not None]
-        edge_evidence_rows = [record.to_record() for record in validation_records]
-        stage_timer.mark("compose_depend")
-
         all_edges: list[Edge] = []
         all_edges.extend(similar_edges)
-        all_edges.extend(compose_depend_edges)
         all_edges = project_execution_records(execution_records, all_edges)
         edge_safety = enforce_depend_on_acyclicity(all_edges)
         all_edges = edge_safety.edges
@@ -334,8 +286,6 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
             "skill_count": len(skills),
             "edge_count": len(all_edges),
             "similar_to_count": len(similar_edges),
-            "compose_depend_candidate_count": len(relation_candidates),
-            "compose_depend_edge_count": len(compose_depend_edges),
             "skipped_unchanged": skipped_unchanged,
             "embedding_model_id": embedding_provider.model_id,
             "embedding": embedding_metrics,
@@ -380,7 +330,6 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
             "execution_model_id": execution_validator.model_id,
             "depend_on_cycle_pruned_count": len(edge_safety.removed_depend_on_cycle_edges),
             "execution_validation": execution_validation_summary,
-            "relation_validation": relation_validation_summary,
             "stage_wall_time_seconds": stage_timer.timings,
             "build_wall_time_seconds": stage_timer.total(),
         }
@@ -393,7 +342,7 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
             config_digest=config_digest,
         )
 
-        _write_graph_artifacts(workspace, graph, edge_evidence_rows, validation_records)
+        _write_graph_artifacts(workspace, graph)
         _write_compiled_graph_artifact(
             workspace,
             graph,
@@ -407,7 +356,7 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
         health = render_health_report(
             graph,
             cache_hits=0,
-            llm_validations=int(relation_validation_summary.get("validator_calls", 0)),
+            llm_validations=int(execution_validation_summary.get("validator_calls", 0)),
             skipped_unchanged=skipped_unchanged,
         )
         atomic_write_text(workspace.graph_dir / "graph_health_report.md", health)
@@ -452,7 +401,6 @@ def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None 
                 "artifacts": {
                     "graph": str(workspace.graph_dir / "graph.json"),
                     "compiled_skill_graph": str(workspace.graph_dir / "compiled.json"),
-                    "edge_evidence": str(workspace.graph_dir / "edge_evidence.jsonl"),
                     "health_report": str(workspace.graph_dir / "graph_health_report.md"),
                     "skill_interfaces": str(workspace.graph_dir / "contracts.jsonl"),
                     "interface_evidence": str(workspace.graph_dir / "interface_evidence.jsonl"),
@@ -517,15 +465,9 @@ def _write_registry(workspace: Workspace, skills: list[SkillNode]) -> None:
 def _write_graph_artifacts(
     workspace: Workspace,
     graph: GraphDocument,
-    edge_evidence_rows: list[dict[str, Any]],
-    validation_records: list[Any],
 ) -> None:
+    _remove_obsolete_relation_artifacts(workspace)
     workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
-    workspace.write_jsonl(workspace.graph_dir / "edge_evidence.jsonl", edge_evidence_rows)
-    workspace.write_json(
-        workspace.graph_dir / "relation_validation_summary.json",
-        summarize_relation_validation_records(validation_records),
-    )
 
 
 def _write_interface_artifacts(
@@ -633,6 +575,22 @@ def _remove_obsolete_execution_artifacts(workspace: Workspace) -> None:
             pass
 
 
+def _remove_obsolete_relation_artifacts(workspace: Workspace) -> None:
+    for filename in (
+        "edge_evidence.jsonl",
+        "relation_validation_audit.jsonl",
+        "relation_validation_summary.json",
+    ):
+        try:
+            (workspace.graph_dir / filename).unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        (workspace.cache_dir / "relation_validation_cache.json").unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _remove_obsolete_embedding_artifacts(workspace: Workspace) -> None:
     try:
         (workspace.graph_dir / "embedding_meta.jsonl").unlink()
@@ -709,7 +667,6 @@ def _write_build_metrics(
                 "max_group_size": stats.get("max_group_size", DEFAULT_MAX_GROUP_SIZE),
             },
             "execution_validation": stats.get("execution_validation", {}),
-            "relation_validation": stats.get("relation_validation", {}),
             "cache": {
                 "skipped_unchanged": stats.get("skipped_unchanged", 0),
                 "execution_validation_cache_hits": stats.get("execution_validation", {}).get(
@@ -717,12 +674,6 @@ def _write_build_metrics(
                     0,
                 )
                 if isinstance(stats.get("execution_validation", {}), dict)
-                else 0,
-                "relation_validation_cache_hits": stats.get("relation_validation", {}).get(
-                    "cache_hits",
-                    0,
-                )
-                if isinstance(stats.get("relation_validation", {}), dict)
                 else 0,
             },
             "models": {
@@ -790,7 +741,6 @@ def _config_digest(
     config: BuildConfig,
     *,
     embedding_provider: EmbeddingProvider,
-    pair_validator: PairValidator,
     interface_extractor: SkillInterfaceExtractor,
     canonicalization_provider: CanonicalizationProvider,
     execution_validator: ExecutionFlowValidator,
@@ -800,12 +750,8 @@ def _config_digest(
         "schema_version": "2.0",
         "skill_root": str(config.skill_root),
         "llm_env_path": str(config.llm_env_path),
-        "runtime_flags": {
-            "skip_llm_validation": config.skip_llm_validation,
-        },
         "retrieval": {
             "similar_top_k": DEFAULT_SIMILAR_TOP_K,
-            "candidate_top_k": DEFAULT_CANDIDATE_TOP_K,
             "embedding": _provider_fingerprint(embedding_provider),
         },
         "interface_extraction": {
@@ -827,13 +773,6 @@ def _config_digest(
             "policy_digest": EXECUTION_POLICY_DIGEST,
             "prompt_id": EXECUTION_PROMPT_ID,
             "compact_prompt_id": COMPACT_EXECUTION_PROMPT_ID,
-        },
-        "relations": {
-            "validator": _provider_fingerprint(pair_validator),
-            "policy_version": RELATION_POLICY_VERSION,
-            "policy_digest": RELATION_POLICY_DIGEST,
-            "prompt_id": RELATION_PROMPT_ID,
-            "compact_prompt_id": COMPACT_RELATION_PROMPT_ID,
         },
         "llm_jobs": _llm_job_options_fingerprint(llm_job_options),
     }
@@ -889,29 +828,12 @@ def _canonicalization_alias_merge_ratio(build: CanonicalizationBuild) -> float:
     return round(1.0 - (canonical_count / len(build.assignments)), 6)
 
 
-def _canonicalization_evidence_rows(build: CanonicalizationBuild) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    rows.extend({"record_type": "canonical_object", **item.to_dict()} for item in build.objects)
-    rows.extend({"record_type": "assignment", **item.to_dict()} for item in build.assignments)
-    return rows
-
-
-def _resolve_pair_validator(config: BuildConfig, dependencies: _BuildDependencies) -> PairValidator:
-    if dependencies.pair_validator is not None:
-        return dependencies.pair_validator
-    if config.skip_llm_validation:
-        return NoopPairValidator()
-    return LiteLLMPairValidator.from_env(env_path=config.llm_env_path)
-
-
 def _resolve_interface_extractor(
     config: BuildConfig,
     dependencies: _BuildDependencies,
 ) -> SkillInterfaceExtractor:
     if dependencies.interface_extractor is not None:
         return dependencies.interface_extractor
-    if config.skip_llm_validation:
-        return DeterministicInterfaceExtractor()
     return LiteLLMInterfaceExtractor.from_env(env_path=config.llm_env_path)
 
 
@@ -930,8 +852,6 @@ def _resolve_execution_validator(
 ) -> ExecutionFlowValidator:
     if dependencies.execution_validator is not None:
         return dependencies.execution_validator
-    if config.skip_llm_validation:
-        return DeterministicExecutionFlowValidator()
     return LiteLLMExecutionFlowValidator.from_env(env_path=config.llm_env_path)
 
 

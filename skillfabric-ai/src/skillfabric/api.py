@@ -52,7 +52,6 @@ class SkillFabric:
         env_file = overrides.pop("env_file", self.env_file)
         defaults = default_build_options()
         skip_wiki = bool(overrides.pop("skip_wiki", False))
-        skip_llm_validation = bool(overrides.pop("skip_llm_validation", defaults.skip_llm_validation))
         embedding_model = overrides.pop("embedding_model", None)
         embedding_provider = overrides.pop("embedding_provider", None)
         if embedding_provider is None:
@@ -94,7 +93,6 @@ class SkillFabric:
             skill_root=skill_root,
             workspace=self.workspace.root,
             llm_env_path=env_file,
-            skip_llm_validation=skip_llm_validation,
             llm_options=llm_options,
         )
         result = build_graph(config, dependencies=_BuildDependencies(embedding_provider=embedding_provider))
@@ -107,7 +105,7 @@ class SkillFabric:
                     WikiBuildConfig(
                         workspace=self.workspace.root,
                         env_file=env_file,
-                        use_llm_summaries=wiki_summary_mode == "all" and not skip_llm_validation,
+                        use_llm_summaries=wiki_summary_mode == "all",
                         llm_concurrency=llm_concurrency,
                         llm_batch_size=llm_batch_size,
                     )

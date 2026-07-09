@@ -30,8 +30,10 @@ optional build flags.
 - Forward `--progress-json` and `--quiet` when provided.
 - Forward `--embedding-provider api|disabled` and `--embedding-model` when
   provided.
-- Use `--skip-llm-validation --embedding-provider disabled --wiki-summary-mode off`
-  only when the user explicitly asks for a local smoke check.
+- Use `--embedding-provider disabled --wiki-summary-mode off` only when the
+  user explicitly asks to skip dense embeddings and wiki LLM summaries. Build
+  still requires configured LLM settings for interface, canonicalization, and
+  execution validation.
 
 ## Safety Boundaries
 

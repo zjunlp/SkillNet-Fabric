@@ -42,7 +42,7 @@ class ExecutionModelTests(unittest.TestCase):
         candidate = ExecutionFlowCandidate(
             source_skill="skill:producer",
             target_skill="skill:consumer",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             matched_node_id="artifact:csv",
             matched_name="csv",
             evidence=evidence,

@@ -44,7 +44,6 @@ def _edge_from_record(record: ExecutionValidationRecord) -> Edge | None:
         weight=round(weight, 6),
         provenance="execution_projected",
         evidence=[_evidence_ref(item) for item in record.flow_edge.evidence],
-        reason=str(record.normalized.get("reason", "")),
     )
 
 
@@ -60,8 +59,6 @@ def _merge_edge(existing: Edge, incoming: Edge) -> None:
         if key not in seen:
             existing.evidence.append(item)
             seen.add(key)
-    if incoming.reason and incoming.reason not in existing.reason:
-        existing.reason = f"{existing.reason} {incoming.reason}".strip()
 
 
 def _projected_weight(edge_type: str, confidence: float) -> float:

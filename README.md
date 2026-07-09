@@ -32,15 +32,13 @@ skillfabric plan \
   --env-file .env
 ```
 
-The public defaults keep LLM-backed skill contracts, wiki summaries, and
-community metadata, while relation and execution validation use selective
-interface-first checks to avoid sending every candidate pair through full
-`SKILL.md` prompts. Plain route/plan uses the Claude Code explorer by default;
+The public defaults keep LLM-backed skill contracts, canonicalization,
+execution validation, and wiki summaries. Plain route/plan uses the Claude Code explorer by default;
 pass `--skip-llm-router --explorer-backend fallback` only for deterministic
 local smoke checks.
 
 ```bash
-skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
+skillfabric build --skill-root /path/to/skills --env-file .env --embedding-provider disabled --wiki-summary-mode off
 ```
 
 ## Python SDK

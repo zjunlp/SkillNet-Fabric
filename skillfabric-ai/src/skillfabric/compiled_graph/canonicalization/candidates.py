@@ -179,9 +179,9 @@ def contract_object_type(kind: str) -> str:
     normalized = kind.lower().strip()
     if normalized in {"world_state", "physical_state", "environment_state", "state", "condition"}:
         return "state"
-    if normalized in {"belief_state", "belief", "memory_state", "knowledge_state", "observation_state"}:
+    if normalized in {"belief_state", "belief"}:
         return "belief_state"
-    if normalized in {"planning_state", "planning", "plan_state", "routing_state"}:
+    if normalized in {"planning_state", "planning"}:
         return "planning_state"
     if normalized in {"credential", "environment", "text", "report", "data"}:
         return normalized

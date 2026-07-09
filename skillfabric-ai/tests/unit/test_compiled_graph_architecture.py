@@ -13,7 +13,9 @@ class CompiledGraphArchitectureTests(unittest.TestCase):
         self.assertTrue(hasattr(builder, "build_graph"))
         self.assertTrue(hasattr(builder, "BuildConfig"))
         self.assertTrue(hasattr(models, "GraphDocument"))
-        self.assertTrue(hasattr(relations, "generate_relation_candidates"))
+        self.assertTrue(hasattr(relations, "build_similar_edges"))
+        self.assertTrue(hasattr(relations, "enforce_depend_on_acyclicity"))
+        self.assertFalse(hasattr(relations, "generate_relation_candidates"))
 
     def test_removed_graph_modules_are_not_public_entrypoints(self) -> None:
         for module_name in [

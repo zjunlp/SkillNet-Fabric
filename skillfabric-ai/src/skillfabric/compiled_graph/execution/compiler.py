@@ -77,7 +77,7 @@ def compile_execution_graph(
             interfaces.values(),
             producer_group="produces",
             consumer_group="requires",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             relation_type="artifact_compatibility",
             bucket_limit=bucket_limit,
             kind_filter=_is_artifact_like,
@@ -87,7 +87,7 @@ def compile_execution_graph(
             interfaces.values(),
             producer_group="produces",
             consumer_group="requires",
-            flow_type="scenario_transition",
+            flow_type="state_handoff",
             relation_type="state_compatibility",
             bucket_limit=bucket_limit,
             kind_filter=_is_execution_state_like,
@@ -335,7 +335,6 @@ def execution_index_from_validation_records(records: list[ExecutionValidationRec
             confidence=float(record.normalized.get("confidence", record.flow_edge.confidence) or 0.0),
             evidence=record.flow_edge.evidence,
             projected_edge_type=str(record.normalized.get("projected_edge_type", "depend_on")),
-            reason=str(record.normalized.get("reason", record.flow_edge.reason)),
             metadata={**candidate.metadata, "flow_type": candidate.flow_type},
         )
         key = _execution_index_key(item)
@@ -363,17 +362,7 @@ def _execution_index_key(item: ExecutionIndexRecord) -> tuple[str, str, str, str
 def _merge_execution_index_record(existing: ExecutionIndexRecord, incoming: ExecutionIndexRecord) -> None:
     existing.confidence = max(existing.confidence, incoming.confidence)
     existing.evidence = _unique_evidence([*existing.evidence, *incoming.evidence])
-    existing.reason = _merge_reasons(existing.reason, incoming.reason)
     existing.metadata = {**existing.metadata, **incoming.metadata}
-
-
-def _merge_reasons(first: str, second: str) -> str:
-    reasons: list[str] = []
-    for reason in (first, second):
-        cleaned = reason.strip()
-        if cleaned and cleaned not in reasons:
-            reasons.append(cleaned)
-    return " | ".join(reasons)
 
 
 def _canonical_aliases(
@@ -404,12 +393,7 @@ def _is_state_like(field: InterfaceField) -> bool:
         "physical_state",
         "environment_state",
         "belief_state",
-        "memory_state",
-        "knowledge_state",
-        "observation_state",
         "planning_state",
-        "plan_state",
-        "routing_state",
         "credential",
         "environment",
     }
@@ -514,15 +498,7 @@ def _looks_like_local_reference_evidence(value: str) -> bool:
 
 def _is_execution_state_like(field: InterfaceField) -> bool:
     kind = _field_kind(field)
-    if kind in {
-        "belief_state",
-        "memory_state",
-        "knowledge_state",
-        "observation_state",
-        "planning_state",
-        "plan_state",
-        "routing_state",
-    }:
+    if kind in {"belief_state", "planning_state"}:
         return False
     if kind in {"state", "condition", "world_state", "physical_state", "environment_state", "credential", "environment"}:
         return True

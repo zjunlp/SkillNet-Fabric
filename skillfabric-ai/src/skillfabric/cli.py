@@ -152,7 +152,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--env-file", default=".env")
     _add_runtime_options(build_parser)
     build_parser.add_argument("--skip-wiki", action="store_true")
-    build_parser.add_argument("--skip-llm-validation", action="store_true", help=argparse.SUPPRESS)
     build_parser.add_argument("--wiki-summary-mode", choices=["off", "all"])
     build_parser.add_argument("--llm-concurrency", type=int)
     build_parser.add_argument("--llm-rate-limit-per-minute", type=float)
@@ -165,7 +164,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
         choices=["api", "disabled"],
         help=(
             "Embedding provider for dense retrieval. Use api for OpenAI-compatible "
-            "embeddings, or disabled for deterministic smoke checks."
+            "embeddings, or disabled when dense retrieval is not needed."
         ),
     )
     build_parser.add_argument(
@@ -513,7 +512,6 @@ def _build(args: argparse.Namespace) -> None:
                     skill_root=args.skill_root,
                     workspace=args.workspace,
                     llm_env_path=args.env_file,
-                    skip_llm_validation=options.skip_llm_validation,
                     llm_options=_llm_job_options_from_args(args, options=options),
                 ),
                 dependencies=_BuildDependencies(
@@ -569,13 +567,8 @@ def _safe_error_summary(exc: Exception, *, limit: int = 500) -> str:
 
 def _preflight_build_api_config(args: argparse.Namespace, *, options: BuildOptions) -> None:
     effective_embedding = options.embedding_provider
-    effective_skip_llm = options.skip_llm_validation
-    if effective_skip_llm and effective_embedding == "disabled":
-        return
     payload = _init_check_payload(args.env_file)
-    required = ["API_KEY", "BASE_URL"]
-    if not effective_skip_llm:
-        required.append("MODEL")
+    required = ["API_KEY", "BASE_URL", "MODEL"]
     if effective_embedding == "api":
         required.append("EMBEDDING_MODEL")
     missing = [str(item) for item in payload["missing"] if item in required]
@@ -1026,7 +1019,6 @@ def _build_options_from_args(args: argparse.Namespace) -> BuildOptions:
         or defaults.embedding_provider
     )
     return BuildOptions(
-        skip_llm_validation=bool(args.skip_llm_validation or defaults.skip_llm_validation),
         embedding_provider=embedding_provider,
         wiki_summary_mode=args.wiki_summary_mode or defaults.wiki_summary_mode,
         llm_concurrency=args.llm_concurrency if args.llm_concurrency is not None else defaults.llm_concurrency,
@@ -1036,7 +1028,7 @@ def _build_options_from_args(args: argparse.Namespace) -> BuildOptions:
 
 def _use_llm_wiki_summaries(args: argparse.Namespace, options: BuildOptions) -> bool:
     mode = args.wiki_summary_mode or options.wiki_summary_mode
-    return mode == "all" and not options.skip_llm_validation
+    return mode == "all"
 
 
 def _progress_reporter(args: argparse.Namespace) -> ProgressReporter:

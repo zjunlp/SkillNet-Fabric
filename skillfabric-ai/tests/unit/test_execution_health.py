@@ -20,7 +20,7 @@ class ExecutionHealthTests(unittest.TestCase):
         candidate = ExecutionFlowCandidate(
             source_skill="skill:a",
             target_skill="skill:b",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             matched_node_id="artifact:csv",
             matched_name="csv",
             evidence=[],
@@ -52,7 +52,7 @@ class ExecutionHealthTests(unittest.TestCase):
         candidate = ExecutionFlowCandidate(
             source_skill="skill:a",
             target_skill="skill:b",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             matched_node_id="canonical:artifact_compatibility:csv_table",
             matched_name="csv_table",
             metadata={
@@ -64,7 +64,7 @@ class ExecutionHealthTests(unittest.TestCase):
         edge = ExecutionEdge(
             source="skill:a",
             target="skill:b",
-            type="artifact_flow",
+            type="artifact_handoff",
             confidence=0.93,
             metadata=candidate.metadata,
         )
@@ -111,7 +111,7 @@ class ExecutionHealthTests(unittest.TestCase):
         candidate = ExecutionFlowCandidate(
             source_skill="skill:a",
             target_skill="skill:b",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             matched_node_id="canonical:artifact_compatibility:csv_table",
             matched_name="csv_table",
             evidence=[],

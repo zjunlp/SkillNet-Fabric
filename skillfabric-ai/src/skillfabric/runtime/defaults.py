@@ -9,7 +9,6 @@ from dataclasses import dataclass
 class BuildOptions:
     """Default build behavior for the public package."""
 
-    skip_llm_validation: bool = False
     embedding_provider: str = "api"
     wiki_summary_mode: str = "all"
     llm_concurrency: int = 2

@@ -21,7 +21,6 @@ class RuntimeControlsTests(unittest.TestCase):
         build = default_build_options()
         router = default_router_options()
 
-        self.assertFalse(build.skip_llm_validation)
         self.assertEqual(build.embedding_provider, "api")
         self.assertEqual(build.wiki_summary_mode, "all")
         self.assertTrue(router.use_llm_router)
@@ -37,8 +36,9 @@ class RuntimeControlsTests(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertNotIn("--estimate-only", help_text)
         self.assertNotIn("--budget-usd", help_text)
+        self.assertNotIn("--skip-llm-validation", help_text)
 
-    def test_api_embedding_smoke_does_not_require_chat_model_when_llm_validation_is_skipped(self) -> None:
+    def test_build_rejects_removed_skip_llm_validation_flag(self) -> None:
         with TemporaryDirectory() as tmp:
             env_file = Path(tmp) / ".env"
             env_file.write_text(
@@ -49,25 +49,26 @@ class RuntimeControlsTests(unittest.TestCase):
             )
             workspace = Path(tmp) / ".skillfabric"
 
-            with patch("skillfabric.cli.build_graph", side_effect=RuntimeError("build_graph_called")) as build_graph_mock:
-                with self.assertRaisesRegex(RuntimeError, "build_graph_called"):
-                    cli_main(
-                        [
-                            "build",
-                            "--skill-root",
-                            str(FIXTURE_SKILLS),
-                            "--workspace",
-                            str(workspace),
-                            "--env-file",
-                            str(env_file),
-                            "--skip-llm-validation",
-                            "--embedding-provider",
-                            "api",
-                            "--skip-wiki",
-                        ]
-                    )
+            with patch("skillfabric.cli.build_graph") as build_graph_mock:
+                with self.assertRaises(SystemExit):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        cli_main(
+                            [
+                                "build",
+                                "--skill-root",
+                                str(FIXTURE_SKILLS),
+                                "--workspace",
+                                str(workspace),
+                                "--env-file",
+                                str(env_file),
+                                "--skip-llm-validation",
+                                "--embedding-provider",
+                                "api",
+                                "--skip-wiki",
+                            ]
+                        )
 
-            self.assertTrue(build_graph_mock.called)
+            self.assertFalse(build_graph_mock.called)
 
     def test_build_rejects_unknown_embedding_provider_from_shell(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -119,7 +120,6 @@ class RuntimeControlsTests(unittest.TestCase):
                             str(workspace),
                             "--embedding-provider",
                             "disabled",
-                            "--skip-llm-validation",
                             "--skip-wiki",
                         ]
                     )
@@ -139,19 +139,18 @@ class RuntimeControlsTests(unittest.TestCase):
             stderr = io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 cli_main(
-                    [
-                        "build",
-                        "--skill-root",
-                        str(FIXTURE_SKILLS),
-                        "--workspace",
-                        str(workspace),
-                        "--embedding-provider",
-                        "disabled",
-                        "--skip-llm-validation",
-                        "--wiki-summary-mode",
-                        "off",
-                        "--progress-json",
-                    ]
+                        [
+                            "build",
+                            "--skill-root",
+                            str(FIXTURE_SKILLS),
+                            "--workspace",
+                            str(workspace),
+                            "--embedding-provider",
+                            "disabled",
+                            "--wiki-summary-mode",
+                            "off",
+                            "--progress-json",
+                        ]
                 )
 
             json.loads(stdout.getvalue())

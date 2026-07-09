@@ -30,7 +30,6 @@ class PublicPackageTests(unittest.TestCase):
                 "skill_root",
                 "workspace",
                 "llm_env_path",
-                "skip_llm_validation",
                 "llm_options",
             },
         )
@@ -487,29 +486,15 @@ class PublicPackageTests(unittest.TestCase):
             self.assertFalse((prepared.root / "workflow_plan.json").exists())
             self.assertFalse((prepared.root / "agent_run_spec.json").exists())
 
-    def test_python_facade_build_accepts_explicit_disabled_embeddings_without_api(self) -> None:
+    def test_python_facade_build_rejects_removed_skip_llm_validation_option(self) -> None:
         from skillfabric import SkillFabric
 
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             client = SkillFabric(workspace=workspace)
 
-            result = client.build(
-                FIXTURE_SKILLS,
-                embedding_provider="disabled",
-                embedding_model="openai/text-embedding-3-small",
-                skip_llm_validation=True,
-                wiki_summary_mode="off",
-            )
-
-            self.assertEqual(result.stats["embedding_model_id"], "disabled")
-            self.assertTrue((workspace / "wiki" / "index.md").exists())
-            metrics = json.loads((workspace / "reports" / "build_summary.json").read_text(encoding="utf-8"))
-            self.assertIn("wiki_summary", metrics)
-            self.assertEqual(
-                metrics["wiki_summary"]["fallback_count"],
-                result.stats["skill_count"],
-            )
+            with self.assertRaisesRegex(TypeError, "unsupported build option"):
+                client.build(FIXTURE_SKILLS, skip_llm_validation=True)
 
     def test_python_facade_rejects_unknown_embedding_provider(self) -> None:
         from skillfabric import SkillFabric

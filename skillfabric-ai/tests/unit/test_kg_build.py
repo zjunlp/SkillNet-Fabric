@@ -17,10 +17,8 @@ from skillfabric.compiled_graph.builder import (
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.health import analyze_health
 from skillfabric.compiled_graph.models import Edge, GraphDocument
-from skillfabric.compiled_graph.relations.validation import StaticPairValidator
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.models import SkillNode
 from skillfabric.registry.parser import parse_skill_file
@@ -37,10 +35,9 @@ def _build_test_graph(
     *,
     skill_root: Path = FIXTURE_SKILLS,
     workspace: Path,
-    validator: StaticPairValidator | None = None,
     canonicalization_provider: FixtureCanonicalizationProvider | None = None,
     interface_extractor: FixtureInterfaceExtractor | None = None,
-    execution_validator: DeterministicExecutionFlowValidator | None = None,
+    execution_validator: object | None = None,
     embedding_provider: FakeEmbeddingProvider | None = None,
     build_id: str | None = None,
     llm_env_path: Path | str = ".env",
@@ -52,7 +49,6 @@ def _build_test_graph(
             llm_env_path=llm_env_path,
         ),
         dependencies=_BuildDependencies(
-            pair_validator=validator,
             canonicalization_provider=canonicalization_provider,
             interface_extractor=interface_extractor,
             execution_validator=execution_validator,
@@ -60,6 +56,20 @@ def _build_test_graph(
             build_id=build_id,
         ),
     )
+
+
+class AcceptingExecutionValidator:
+    model_id = "accepting-execution"
+
+    def validate(self, candidate, source_skill, target_skill, *, interfaces):
+        del source_skill, target_skill, interfaces
+        return {
+            "accepted": bool(candidate.evidence),
+            "flow_type": candidate.flow_type if candidate.evidence else "none",
+            "projected_edge_type": "depend_on" if candidate.evidence else "none",
+            "confidence": 0.91 if candidate.evidence else 0.0,
+            "evidence": [item.to_dict() for item in candidate.evidence],
+        }
 
 
 def fake_litellm_embedding(**kwargs):
@@ -124,71 +134,13 @@ class KGBuildTests(unittest.TestCase):
         self.assertEqual(skills, sorted(skills))
 
     def test_build_graph_outputs_expected_artifacts_and_edges(self) -> None:
-        validator = StaticPairValidator(
-            {
-                ("skill:financial-kpi-extractor", "skill:pdf-table-parser"): {
-                    "edge_type": "depend_on",
-                    "direction": "A->B",
-                    "confidence": 0.92,
-                    "evidence": [
-                        {
-                            "skill": "skill:financial-kpi-extractor",
-                            "line": 7,
-                            "text": "Use this after `pdf-table-parser` has produced `.csv` tables.",
-                        }
-                    ],
-                    "reason": "KPI extraction consumes CSV tables produced by PDF table parsing.",
-                },
-                ("skill:report-writer", "skill:financial-kpi-extractor"): {
-                    "edge_type": "depend_on",
-                    "direction": "A->B",
-                    "confidence": 0.9,
-                    "evidence": [
-                        {
-                            "skill": "skill:report-writer",
-                            "line": 5,
-                            "text": "Use KPI JSON and chart artifacts to compose a final `.md` report.",
-                        }
-                    ],
-                    "reason": "Report writing consumes KPI JSON.",
-                },
-                ("skill:webshop-product-evaluator", "skill:webshop-product-search"): {
-                    "edge_type": "depend_on",
-                    "direction": "A->B",
-                    "confidence": 0.91,
-                    "evidence": [
-                        {
-                            "skill": "skill:webshop-product-evaluator",
-                            "line": 5,
-                            "text": "Use after `webshop-product-search` returns candidates.",
-                        }
-                    ],
-                    "reason": "Evaluation consumes search candidates.",
-                },
-                ("skill:testing-python", "skill:analyze-ci"): {
-                    "edge_type": "compose_with",
-                    "direction": "undirected",
-                    "confidence": 0.91,
-                    "evidence": [
-                        {
-                            "skill": "skill:testing-python",
-                            "line": 6,
-                            "text": "This skill composes with `analyze-ci` when a CI job fails.",
-                        }
-                    ],
-                    "reason": "CI analysis and focused pytest diagnosis are commonly chained.",
-                },
-            }
-        )
-
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             result = _build_test_graph(
                 workspace=workspace,
-                validator=validator,
                 canonicalization_provider=FixtureCanonicalizationProvider(),
                 interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=DeterministicExecutionFlowValidator(),
+                execution_validator=AcceptingExecutionValidator(),
                 embedding_provider=FakeEmbeddingProvider(),
                 build_id="test-build",
             )
@@ -202,9 +154,9 @@ class KGBuildTests(unittest.TestCase):
             self.assertFalse((workspace / "graph" / "embedding_meta.jsonl").exists())
             self.assertTrue((workspace / "graph" / "graph.json").exists())
             self.assertFalse((workspace / "graph" / "communities.json").exists())
-            self.assertTrue((workspace / "graph" / "edge_evidence.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "edge_evidence.jsonl").exists())
             self.assertFalse((workspace / "graph" / "relation_validation_audit.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "relation_validation_summary.json").exists())
+            self.assertFalse((workspace / "graph" / "relation_validation_summary.json").exists())
             self.assertTrue((workspace / "graph" / "graph_health_report.md").exists())
             self.assertTrue((workspace / "graph" / "contracts.jsonl").exists())
             self.assertTrue((workspace / "graph" / "interface_evidence.jsonl").exists())
@@ -234,7 +186,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertEqual(len(result.interfaces), 8)
             self.assertGreater(result.stats["execution_candidate_count"], 0)
             self.assertGreater(result.stats["execution_accepted_flow_count"], 0)
-            self.assertIn("relation_validation", result.stats)
+            self.assertNotIn("relation_validation", result.stats)
             self.assertIn("execution_validation", result.stats)
             self.assertIn("stage_wall_time_seconds", result.stats)
 
@@ -270,9 +222,8 @@ class KGBuildTests(unittest.TestCase):
             self.assertTrue(all(row["projected_edge_type"] in {"depend_on", "compose_with"} for row in execution_index))
             build_metrics = json.loads((workspace / "reports" / "build_summary.json").read_text())
             self.assertEqual(build_metrics["skill_count"], 8)
-            self.assertIn("relation_validation", build_metrics)
+            self.assertNotIn("relation_validation", build_metrics)
             self.assertIn("execution_validation", build_metrics)
-            self.assertIn("policy_digest", build_metrics["relation_validation"])
             self.assertIn("policy_digest", build_metrics["execution_validation"])
             self.assertNotIn("canonical_merge_audit_count", build_metrics)
             self.assertIn("llm_usage", build_metrics)
@@ -325,15 +276,8 @@ class KGBuildTests(unittest.TestCase):
             self.assertNotIn("scenario_nodes", status["artifacts"])
             self.assertNotIn("skill_artifact_edges", status["artifacts"])
             self.assertNotIn("skill_scenario_edges", status["artifacts"])
-            edge_evidence = [
-                json.loads(line)
-                for line in (workspace / "graph" / "edge_evidence.jsonl").read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            self.assertEqual(edge_evidence, [])
-            self.assertEqual(result.stats["compose_depend_candidate_count"], 0)
-            self.assertEqual(result.stats["compose_depend_edge_count"], 0)
-            self.assertEqual(result.stats["relation_validation"]["validator_calls"], 0)
+            self.assertNotIn("compose_depend_candidate_count", result.stats)
+            self.assertNotIn("compose_depend_edge_count", result.stats)
             canonical_health = (workspace / "graph" / "canonicalization_health_report.md").read_text(encoding="utf-8")
             self.assertNotIn("merge audit", canonical_health)
 
@@ -350,10 +294,9 @@ class KGBuildTests(unittest.TestCase):
 
             second = _build_test_graph(
                 workspace=workspace,
-                validator=validator,
                 canonicalization_provider=FixtureCanonicalizationProvider(),
                 interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=DeterministicExecutionFlowValidator(),
+                execution_validator=AcceptingExecutionValidator(),
                 embedding_provider=FakeEmbeddingProvider(),
                 build_id="test-build-2",
             )
@@ -369,10 +312,9 @@ class KGBuildTests(unittest.TestCase):
             workspace = Path(tmp) / model_id.replace("/", "-")
             result = _build_test_graph(
                 workspace=workspace,
-                validator=StaticPairValidator({}),
                 canonicalization_provider=FixtureCanonicalizationProvider(),
                 interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=DeterministicExecutionFlowValidator(),
+                execution_validator=AcceptingExecutionValidator(),
                 embedding_provider=provider,
                 build_id=f"build-{model_id}",
             )
@@ -435,33 +377,6 @@ class KGBuildTests(unittest.TestCase):
                 {"source": "skill:a", "target": "skill:b", "type": "member_of", "confidence": 0.5}
             )
 
-    def test_public_cli_build_writes_core_artifacts(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            stdout = io.StringIO()
-
-            with contextlib.redirect_stdout(stdout):
-                cli_main(
-                    [
-                        "build",
-                        "--skill-root",
-                        str(FIXTURE_SKILLS),
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-validation",
-                        "--embedding-provider",
-                        "disabled",
-                    ]
-                )
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(payload["skill_count"], 8)
-            self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "compiled.json").exists())
-            self.assertTrue((workspace / "status.json").exists())
-            self.assertTrue((workspace / "wiki" / "index.md").exists())
-            self.assertIn("wiki", payload["artifacts"])
-
     def test_build_uses_litellm_validator_by_default_and_reuses_cache(self) -> None:
         calls: list[dict[str, object]] = []
         fake_litellm = types.SimpleNamespace()
@@ -497,7 +412,21 @@ class KGBuildTests(unittest.TestCase):
                                         "projected_edge_type": "none",
                                         "confidence": 0.0,
                                         "evidence": [],
-                                        "reason": "No execution flow.",
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            if "interface_term_canonicalization_v2" in user_content:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "canonical_objects": [],
+                                        "omitted_term_ids": [],
                                     }
                                 )
                             }
@@ -525,11 +454,11 @@ class KGBuildTests(unittest.TestCase):
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "edge_type": "none",
-                                    "direction": "none",
+                                    "accepted": False,
+                                    "flow_type": "none",
+                                    "projected_edge_type": "none",
                                     "confidence": 0.0,
                                     "evidence": [],
-                                    "reason": "No relation.",
                                 }
                             )
                         }
@@ -614,7 +543,21 @@ class KGBuildTests(unittest.TestCase):
                                         "projected_edge_type": "none",
                                         "confidence": 0.0,
                                         "evidence": [],
-                                        "reason": "No execution flow.",
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            if "interface_term_canonicalization_v2" in user_content:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "canonical_objects": [],
+                                        "omitted_term_ids": [],
                                     }
                                 )
                             }
@@ -627,11 +570,11 @@ class KGBuildTests(unittest.TestCase):
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "edge_type": "none",
-                                    "direction": "none",
+                                    "accepted": False,
+                                    "flow_type": "none",
+                                    "projected_edge_type": "none",
                                     "confidence": 0.0,
                                     "evidence": [],
-                                    "reason": "No relation.",
                                 }
                             )
                         }

@@ -11,10 +11,10 @@ ExecutionEdgeType = Literal[
     "consumes_artifact",
     "enables_scenario",
     "requires_scenario",
-    "artifact_flow",
-    "scenario_transition",
+    "artifact_handoff",
+    "state_handoff",
 ]
-ExecutionFlowType = Literal["artifact_flow", "scenario_transition"]
+ExecutionFlowType = Literal["artifact_handoff", "state_handoff"]
 ExecutionRelationType = Literal["artifact_compatibility", "state_compatibility", "tool_handoff"]
 
 
@@ -118,7 +118,6 @@ class ExecutionEdge:
     confidence: float = 1.0
     weight: float = 0.0
     evidence: list[ExecutionEvidence] = field(default_factory=list)
-    reason: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -137,7 +136,6 @@ class ExecutionEdge:
             "confidence": self.confidence,
             "weight": self.weight,
             "evidence": [item.to_dict() for item in self.evidence],
-            "reason": self.reason,
             "metadata": dict(self.metadata),
         }
 
@@ -146,11 +144,10 @@ class ExecutionEdge:
         return cls(
             source=str(payload.get("source", "")),
             target=str(payload.get("target", "")),
-            type=payload.get("type", "artifact_flow"),
+            type=payload.get("type", "artifact_handoff"),
             confidence=float(payload.get("confidence", 1.0) or 1.0),
             weight=float(payload.get("weight", 0.0) or 0.0),
             evidence=_evidence_from_payload(payload.get("evidence", [])),
-            reason=str(payload.get("reason", "")),
             metadata={str(key): str(value) for key, value in dict(payload.get("metadata", {})).items()},
         )
 
@@ -189,7 +186,7 @@ class ExecutionFlowCandidate:
         return cls(
             source_skill=str(payload.get("source_skill", "")),
             target_skill=str(payload.get("target_skill", "")),
-            flow_type=payload.get("flow_type", "artifact_flow"),
+            flow_type=payload.get("flow_type", "artifact_handoff"),
             matched_node_id=str(payload.get("matched_node_id", "")),
             matched_name=str(payload.get("matched_name", "")),
             evidence=_evidence_from_payload(payload.get("evidence", [])),
@@ -210,7 +207,6 @@ class ExecutionIndexRecord:
     confidence: float = 1.0
     evidence: list[ExecutionEvidence] = field(default_factory=list)
     projected_edge_type: str = "depend_on"
-    reason: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -223,7 +219,6 @@ class ExecutionIndexRecord:
             "confidence": self.confidence,
             "evidence": [item.to_dict() for item in self.evidence],
             "projected_edge_type": self.projected_edge_type,
-            "reason": self.reason,
             "metadata": dict(self.metadata),
         }
 
@@ -238,7 +233,6 @@ class ExecutionIndexRecord:
             confidence=float(payload.get("confidence", 1.0) or 1.0),
             evidence=_evidence_from_payload(payload.get("evidence", [])),
             projected_edge_type=str(payload.get("projected_edge_type", "depend_on")),
-            reason=str(payload.get("reason", "")),
             metadata={str(key): str(value) for key, value in dict(payload.get("metadata", {})).items()},
         )
 

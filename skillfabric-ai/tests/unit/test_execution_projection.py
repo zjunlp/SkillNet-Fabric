@@ -17,7 +17,7 @@ def _record(projected_edge_type: str = "depend_on") -> ExecutionValidationRecord
     candidate = ExecutionFlowCandidate(
         source_skill="skill:producer",
         target_skill="skill:consumer",
-        flow_type="artifact_flow",
+        flow_type="artifact_handoff",
         matched_node_id="artifact:csv",
         matched_name="csv",
         evidence=evidence,
@@ -27,28 +27,26 @@ def _record(projected_edge_type: str = "depend_on") -> ExecutionValidationRecord
         raw_output={},
         normalized={
             "accepted": True,
-            "flow_type": "artifact_flow",
+            "flow_type": "artifact_handoff",
             "projected_edge_type": projected_edge_type,
             "confidence": 0.91,
             "evidence": [item.to_dict() for item in evidence],
-            "reason": "Consumer needs producer output.",
         },
         accepted=True,
         rejection_reason="",
         flow_edge=ExecutionEdge(
             source="skill:producer",
             target="skill:consumer",
-            type="artifact_flow",
+            type="artifact_handoff",
             confidence=0.91,
             evidence=evidence,
-            reason="Consumer needs producer output.",
             metadata={"artifact_id": "artifact:csv"},
         ),
     )
 
 
 class ExecutionProjectionTests(unittest.TestCase):
-    def test_accepted_artifact_flow_projects_to_depend_on(self) -> None:
+    def test_accepted_artifact_handoff_projects_to_depend_on(self) -> None:
         edges = project_execution_records([_record()], [])
 
         self.assertEqual(len(edges), 1)
@@ -82,7 +80,7 @@ class ExecutionProjectionTests(unittest.TestCase):
         self.assertEqual(len(edges), 1)
         self.assertGreater(edges[0].confidence, 0.7)
         self.assertEqual(len(edges[0].evidence), 2)
-        self.assertIn("Consumer needs producer output.", edges[0].reason)
+        self.assertEqual(edges[0].reason, "Existing reason.")
 
 
 if __name__ == "__main__":

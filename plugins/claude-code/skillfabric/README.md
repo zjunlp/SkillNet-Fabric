@@ -95,11 +95,12 @@ layout. The public command surface is intentionally small: `doctor`, `build`,
 
 ## Local Smoke Test
 
-Use disabled embeddings and skip LLM validation when you want to verify local
-plugin and CLI wiring without API calls:
+Use disabled embeddings and wiki summaries when you want a smaller build while
+still exercising the LLM-backed interface, canonicalization, and execution
+validation path:
 
 ```text
-/skillfabric:build .claude/skills --workspace .skillfabric-smoke --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
+/skillfabric:build .claude/skills --workspace .skillfabric-smoke --embedding-provider disabled --wiki-summary-mode off
 ```
 
 The expected result is a JSON summary with:
@@ -116,7 +117,6 @@ Outside Claude Code, the same smoke check can be run directly:
 skillfabric build \
   --skill-root .claude/skills \
   --workspace .skillfabric-smoke \
-  --skip-llm-validation \
   --embedding-provider disabled \
   --wiki-summary-mode off
 ```
@@ -157,9 +157,10 @@ Common failures:
 - `skillfabric: command not found`: install `skillfabric-ai[claude]` in the
   environment used by Claude Code.
 - Missing API fields: run `skillfabric init --env-file .env`.
-- Build fails with provider or model errors: rerun the local smoke test with
-  `--embedding-provider disabled --skip-llm-validation --wiki-summary-mode off`
-  to separate plugin wiring from provider configuration.
+- Build fails with provider or model errors: first run
+  `skillfabric init --check --json --env-file .env`, then rerun the build with
+  `--embedding-provider disabled --wiki-summary-mode off` to isolate embedding
+  and wiki-summary cost from core LLM validation.
 - Route finalization fails: inspect the trace directory returned by
   `route --agent-mode prepare`; the CLI writes validation diagnostics there.
 - Plan finalization fails: inspect the execution package root returned by

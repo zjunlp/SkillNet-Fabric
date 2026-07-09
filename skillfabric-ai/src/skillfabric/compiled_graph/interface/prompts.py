@@ -66,6 +66,11 @@ def build_interface_extraction_messages(skill: SkillNode) -> list[dict[str, str]
                 "Use world_state for real environment or agent state, belief_state for remembered or inferred knowledge, "
                 "and planning_state for goals, plans, routing decisions, or intended future actions."
             ),
+            "handoff_modeling": (
+                "If a plan, outline, analysis, note, or decision is a concrete document or payload for another skill to "
+                "consume, classify it as artifact, text, data, or report. Use planning_state only for internal goals, "
+                "routing decisions, strategies, or intended future actions that are not reusable execution handoffs."
+            ),
         },
         "process": [
             "Read the registry metadata and full_skill_md as source evidence.",

@@ -13,7 +13,6 @@ from skillfabric.compiled_graph.execution.prompts import (
     build_execution_validation_messages,
 )
 from skillfabric.compiled_graph.execution.validation import (
-    DeterministicExecutionFlowValidator,
     LiteLLMExecutionFlowValidator,
     execution_validation_audit_rows,
     summarize_execution_validation_records,
@@ -78,7 +77,7 @@ class ExecutionValidationTests(unittest.TestCase):
         return ExecutionFlowCandidate(
             source_skill="skill:producer",
             target_skill="skill:consumer",
-            flow_type="artifact_flow",
+            flow_type="artifact_handoff",
             matched_node_id="artifact:csv",
             matched_name="csv",
             evidence=[
@@ -108,29 +107,16 @@ class ExecutionValidationTests(unittest.TestCase):
             ),
         }
 
-    def test_deterministic_validator_accepts_evidence_backed_candidate(self) -> None:
-        records = validate_execution_flow_candidates(
-            [self._candidate()],
-            self._skills(),
-            interfaces=self._interfaces(),
-            validator=DeterministicExecutionFlowValidator(),
-        )
-
-        self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].flow_edge.type, "artifact_flow")
-        self.assertEqual(records[0].normalized["projected_edge_type"], "depend_on")
-
     def test_litellm_accepts_fenced_json_response(self) -> None:
         self._install_fake_litellm(
             "```json\n"
             + json.dumps(
                 {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": 0.91,
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                    "reason": "Consumer needs producer output.",
                 }
             )
             + "\n```"
@@ -157,7 +143,7 @@ class ExecutionValidationTests(unittest.TestCase):
         prompt_text = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "execution_validation_handoff_precision")
+        self.assertEqual(payload["prompt_id"], "execution_validation_handoff_precision_v2")
         for field in ("role", "goal", "input", "output", "workflow", "rules", "constraints"):
             self.assertIn(field, payload)
         self.assertIn("decision_workflow", payload)
@@ -165,8 +151,8 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertIn("For projected_edge_type=depend_on, the target skill depends on the source skill", prompt_text)
         self.assertIn("source_skill produces or enables a post-state", prompt_text)
         self.assertIn("target_skill consumes or requires a pre-state", prompt_text)
-        self.assertIn("belief_state or planning_state", prompt_text)
-        self.assertIn("not a world-state producer", prompt_text)
+        self.assertIn("belief_state and planning_state are non-execution cognitive context", prompt_text)
+        self.assertIn("should not appear as execution handoff candidates", prompt_text)
         self.assertIn("same overall task", prompt_text)
         self.assertIn("generic data, text, output, result", prompt_text)
         self.assertIn("post-state", prompt_text)
@@ -186,7 +172,7 @@ class ExecutionValidationTests(unittest.TestCase):
         prompt_text = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "execution_validation_compact_interface_first")
+        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v2")
         self.assertIn("post-state", prompt_text)
         self.assertIn("pre-state", prompt_text)
         self.assertIn("strict consumable handoff", prompt_text)
@@ -195,7 +181,7 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertIn("topical_only", prompt_text)
         self.assertEqual(
             set(payload["output_schema"]),
-            {"accepted", "flow_type", "projected_edge_type", "confidence", "evidence", "reason"},
+            {"accepted", "flow_type", "projected_edge_type", "confidence", "evidence", "needs_full_context"},
         )
 
     def test_invalid_json_and_api_exception_are_rejected(self) -> None:
@@ -228,11 +214,10 @@ class ExecutionValidationTests(unittest.TestCase):
             json.dumps(
                 {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": "high",
                     "evidence": [{"skill": "skill:producer", "line": "bad", "text": "Produce csv."}],
-                    "reason": "Bad schema.",
                 }
             )
         )
@@ -254,11 +239,10 @@ class ExecutionValidationTests(unittest.TestCase):
             json.dumps(
                 {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": [],
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                    "reason": "Bad schema.",
                 }
             )
         )
@@ -285,7 +269,7 @@ class ExecutionValidationTests(unittest.TestCase):
                                 "text": json.dumps(
                                     {
                                         "accepted": True,
-                                        "flow_type": "artifact_flow",
+                                        "flow_type": "artifact_handoff",
                                         "projected_edge_type": "depend_on",
                                         "confidence": 0.91,
                                         "evidence": [
@@ -295,7 +279,6 @@ class ExecutionValidationTests(unittest.TestCase):
                                                 "text": "Produce csv.",
                                             }
                                         ],
-                                        "reason": "Consumer needs producer output.",
                                     }
                                 )
                             }
@@ -315,7 +298,7 @@ class ExecutionValidationTests(unittest.TestCase):
         )
 
         self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].flow_edge.type, "artifact_flow")
+        self.assertEqual(records[0].flow_edge.type, "artifact_handoff")
 
     def test_validation_cache_prevents_repeated_litellm_calls(self) -> None:
         calls = self._install_fake_litellm(
@@ -326,7 +309,6 @@ class ExecutionValidationTests(unittest.TestCase):
                     "projected_edge_type": "none",
                     "confidence": 0.0,
                     "evidence": [],
-                    "reason": "No flow.",
                 }
             )
         )
@@ -378,16 +360,14 @@ class ExecutionValidationTests(unittest.TestCase):
                         "projected_edge_type": "none",
                         "confidence": 0.0,
                         "evidence": [],
-                        "reason": "timeout",
                         "error_type": "api_error",
                     }
                 return {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": 0.91,
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                    "reason": "Consumer needs producer output.",
                 }
 
         records = validate_execution_flow_candidates(
@@ -412,11 +392,10 @@ class ExecutionValidationTests(unittest.TestCase):
                 attempts += 1
                 return {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": 0.91,
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                    "reason": "Consumer needs producer output.",
                 }
 
         with TemporaryDirectory() as tmp:
@@ -442,7 +421,6 @@ class ExecutionValidationTests(unittest.TestCase):
                             "projected_edge_type": "none",
                             "confidence": 0.0,
                             "evidence": [],
-                            "reason": "service unavailable",
                             "error_type": "api_error",
                         }
                     }
@@ -496,18 +474,17 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertNotIn("full_skill_md", prompt)
         self.assertNotIn("FULL_SOURCE_SHOULD_NOT_APPEAR", prompt)
         self.assertNotIn("FULL_TARGET_SHOULD_NOT_APPEAR", prompt)
-        self.assertEqual(payload["prompt_id"], "execution_validation_compact_interface_first")
+        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v2")
 
     def test_high_confidence_execution_candidate_still_uses_llm_validator(self) -> None:
         calls = self._install_fake_litellm(
             json.dumps(
                 {
                     "accepted": True,
-                    "flow_type": "artifact_flow",
+                    "flow_type": "artifact_handoff",
                     "projected_edge_type": "depend_on",
                     "confidence": 0.91,
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                    "reason": "LLM confirms the consumer needs producer output.",
                 }
             )
         )
@@ -525,15 +502,12 @@ class ExecutionValidationTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].normalized["reason"], "LLM confirms the consumer needs producer output.")
         summary = summarize_execution_validation_records(records)
-        self.assertEqual(summary["deterministic_accept"], 0)
         self.assertEqual(summary["llm_compact"], 1)
         self.assertEqual(summary["validator_calls"], 1)
         audit = execution_validation_audit_rows(records)
         self.assertEqual(audit[0]["source"], "llm")
         self.assertEqual(audit[0]["action"], "llm_compact")
-        self.assertIn("LLM confirms", audit[0]["reason"])
         self.assertIn("policy_digest", audit[0])
 
     def test_generic_execution_handoff_still_uses_llm_validator(self) -> None:
@@ -545,7 +519,6 @@ class ExecutionValidationTests(unittest.TestCase):
                     "projected_edge_type": "none",
                     "confidence": 0.0,
                     "evidence": [],
-                    "reason": "Generic output is not a reusable handoff.",
                 }
             )
         )
@@ -564,7 +537,6 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertFalse(records[0].accepted)
         summary = summarize_execution_validation_records(records)
-        self.assertEqual(summary["deterministic_reject"], 0)
         self.assertEqual(summary["llm_compact"], 1)
 
     def test_compact_execution_validation_escalation_records_both_prompt_tiers(self) -> None:
@@ -577,18 +549,16 @@ class ExecutionValidationTests(unittest.TestCase):
                         "projected_edge_type": "none",
                         "confidence": 0.0,
                         "evidence": [],
-                        "reason": "Insufficient context; need full skill markdown.",
                         "needs_full_context": True,
                     }
                 ),
                 json.dumps(
                     {
                         "accepted": True,
-                        "flow_type": "artifact_flow",
+                        "flow_type": "artifact_handoff",
                         "projected_edge_type": "depend_on",
                         "confidence": 0.91,
                         "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
-                        "reason": "Full context confirms the consumer needs producer output.",
                     }
                 ),
             ]
@@ -611,7 +581,6 @@ class ExecutionValidationTests(unittest.TestCase):
         audit = execution_validation_audit_rows(records)
         self.assertEqual(audit[0]["action"], "llm_full")
         self.assertTrue(audit[0]["escalated_from_compact"])
-        self.assertIn("Full context", audit[0]["reason"])
 
 
 if __name__ == "__main__":

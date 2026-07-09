@@ -69,12 +69,12 @@ class EdgeSafetyTests(unittest.TestCase):
         self.assertIn(similar, result.edges)
         self.assertFalse(analyze_health(graph).depend_on_cycles)
 
-    def test_deterministic_accept_has_strong_cycle_rank(self) -> None:
-        deterministic = _edge(
+    def test_explicit_mention_has_strong_cycle_rank(self) -> None:
+        explicit = _edge(
             "skill:a",
             "skill:b",
             0.92,
-            provenance="deterministic_accept",
+            provenance="explicit_mention",
         )
         projected = _edge(
             "skill:b",
@@ -83,9 +83,9 @@ class EdgeSafetyTests(unittest.TestCase):
             provenance="execution_projected",
         )
 
-        result = enforce_depend_on_acyclicity([deterministic, projected])
+        result = enforce_depend_on_acyclicity([explicit, projected])
 
-        self.assertIn(deterministic, result.edges)
+        self.assertIn(explicit, result.edges)
         self.assertNotIn(projected, result.edges)
 
 

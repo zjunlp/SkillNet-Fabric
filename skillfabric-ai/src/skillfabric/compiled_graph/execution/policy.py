@@ -17,7 +17,6 @@ class ExecutionValidationDecision:
     """Deterministic action for an execution candidate before LLM validation."""
 
     action: ExecutionDecision
-    reason: str
     accepted: bool = False
     flow_type: str = "none"
     projected_edge_type: str = "none"
@@ -28,4 +27,4 @@ def classify_execution_candidate(candidate: ExecutionFlowCandidate) -> Execution
     """Classify an execution candidate into deterministic accept/reject or LLM validation."""
 
     del candidate
-    return ExecutionValidationDecision(action="llm", reason="candidate requires LLM validation")
+    return ExecutionValidationDecision(action="llm")

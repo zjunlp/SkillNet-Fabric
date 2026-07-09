@@ -18,7 +18,6 @@ from skillfabric.compiled_graph.execution.models import (
 from skillfabric.compiled_graph.execution.policy import (
     EXECUTION_POLICY_DIGEST,
     EXECUTION_POLICY_VERSION,
-    classify_execution_candidate,
 )
 from skillfabric.compiled_graph.execution.prompts import (
     COMPACT_EXECUTION_PROMPT_ID,
@@ -46,31 +45,6 @@ class ExecutionFlowValidator(Protocol):
         interfaces: dict[str, SkillInterface],
     ) -> dict[str, Any]:
         """Return an execution validation payload."""
-
-
-@dataclass(slots=True)
-class DeterministicExecutionFlowValidator:
-    """Deterministic validator used when LLM validation is disabled."""
-
-    model_id: str = "deterministic-execution"
-
-    def validate(
-        self,
-        candidate: ExecutionFlowCandidate,
-        source_skill: SkillNode,
-        target_skill: SkillNode,
-        *,
-        interfaces: dict[str, SkillInterface],
-    ) -> dict[str, Any]:
-        accepted = bool(candidate.evidence)
-        return {
-            "accepted": accepted,
-            "flow_type": candidate.flow_type if accepted else "none",
-            "projected_edge_type": "depend_on" if accepted else "none",
-            "confidence": 0.9 if accepted else 0.0,
-            "evidence": [item.to_dict() for item in candidate.evidence],
-            "reason": "Deterministic exact interface match." if accepted else "Missing candidate evidence.",
-        }
 
 
 @dataclass(slots=True)
@@ -183,7 +157,8 @@ def validate_execution_flow_candidates(
 ) -> list[ExecutionValidationRecord]:
     """Validate execution flow candidates with cache and audit records."""
 
-    validator = validator or DeterministicExecutionFlowValidator()
+    if validator is None:
+        raise ValueError("execution validator is required")
     by_id = {skill.id: skill for skill in skills}
     cache = _load_cache(cache_path)
     records: list[ExecutionValidationRecord | None] = [None] * len(candidates)
@@ -191,19 +166,6 @@ def validate_execution_flow_candidates(
     for index, candidate in enumerate(candidates):
         source_skill = by_id[candidate.source_skill]
         target_skill = by_id[candidate.target_skill]
-        decision = classify_execution_candidate(candidate)
-        if decision.action != "llm":
-            records[index] = _normalize_record(
-                candidate,
-                _with_validation_meta(
-                    _raw_from_decision(candidate, decision),
-                    source=f"deterministic_{decision.action}",
-                    prompt_tier="none",
-                    model_id=validator.model_id,
-                    cache_hit=False,
-                ),
-            )
-            continue
         key = _cache_key(candidate, source_skill, target_skill, validator.model_id)
         raw = cache.get(key)
         if raw is None:
@@ -280,26 +242,6 @@ def validate_execution_flow_candidates(
     return [record for record in records if record is not None]
 
 
-def _raw_from_decision(candidate: ExecutionFlowCandidate, decision) -> dict[str, Any]:
-    if decision.action == "accept":
-        return {
-            "accepted": decision.accepted,
-            "flow_type": decision.flow_type,
-            "projected_edge_type": decision.projected_edge_type,
-            "confidence": decision.confidence,
-            "evidence": [item.to_dict() for item in candidate.evidence[:4]],
-            "reason": decision.reason,
-        }
-    return {
-        "accepted": False,
-        "flow_type": "none",
-        "projected_edge_type": "none",
-        "confidence": 0.0,
-        "evidence": [],
-        "reason": decision.reason,
-    }
-
-
 def summarize_execution_validation_records(records: list[ExecutionValidationRecord]) -> dict[str, Any]:
     """Summarize execution validation policy decisions for build metrics."""
 
@@ -311,8 +253,6 @@ def summarize_execution_validation_records(records: list[ExecutionValidationReco
         "total": len(records),
         "accepted": sum(1 for record in records if record.accepted),
         "rejected": sum(1 for record in records if not record.accepted),
-        "deterministic_accept": 0,
-        "deterministic_reject": 0,
         "llm_compact": 0,
         "llm_full": 0,
         "cache_hits": 0,
@@ -320,22 +260,17 @@ def summarize_execution_validation_records(records: list[ExecutionValidationReco
     }
     for record in records:
         meta = _validation_meta(record.raw_output)
-        source = str(meta.get("source", ""))
         prompt_tier = str(meta.get("prompt_tier", ""))
         compact_attempted = bool(meta.get("compact_attempted", prompt_tier == "compact"))
         full_attempted = bool(meta.get("full_attempted", prompt_tier == "full"))
         cache_hit = bool(meta.get("cache_hit", False))
         if bool(meta.get("cache_hit", False)):
             summary["cache_hits"] += 1
-        if source == "deterministic_accept":
-            summary["deterministic_accept"] += 1
-        elif source == "deterministic_reject":
-            summary["deterministic_reject"] += 1
-        elif compact_attempted or prompt_tier == "compact":
+        if compact_attempted or prompt_tier == "compact":
             summary["llm_compact"] += 1
         if full_attempted or prompt_tier == "full":
             summary["llm_full"] += 1
-        if source not in {"deterministic_accept", "deterministic_reject"} and not cache_hit:
+        if not cache_hit:
             summary["validator_calls"] += int(compact_attempted) + int(full_attempted)
     return summary
 
@@ -369,7 +304,6 @@ def execution_validation_audit_rows(records: list[ExecutionValidationRecord]) ->
                 "model_id": str(meta.get("model_id", "")),
                 "accepted": record.accepted,
                 "rejection_reason": record.rejection_reason,
-                "reason": str(record.normalized.get("reason", record.raw_output.get("reason", ""))),
                 "projected_edge_type": str(record.normalized.get("projected_edge_type", "none")),
                 "confidence": round(float(record.normalized.get("confidence", 0.0) or 0.0), 6),
             }
@@ -379,11 +313,12 @@ def execution_validation_audit_rows(records: list[ExecutionValidationRecord]) ->
 
 def _normalize_record(candidate: ExecutionFlowCandidate, raw: dict[str, Any]) -> ExecutionValidationRecord:
     if raw.get("error_type"):
-        normalized = _none_normalized(str(raw.get("reason", "")))
-        return ExecutionValidationRecord(candidate, raw, normalized, False, f"{raw.get('error_type')}: {raw.get('reason', '')}")
+        message = str(raw.get("message", ""))
+        normalized = _none_normalized()
+        return ExecutionValidationRecord(candidate, raw, normalized, False, f"{raw.get('error_type')}: {message}")
     schema_error = _schema_error(raw)
     if schema_error:
-        normalized = _none_normalized(schema_error)
+        normalized = _none_normalized()
         return ExecutionValidationRecord(candidate, raw, normalized, False, f"schema_error: {schema_error}")
 
     accepted = bool(raw.get("accepted", False))
@@ -397,7 +332,7 @@ def _normalize_record(candidate: ExecutionFlowCandidate, raw: dict[str, Any]) ->
         "projected_edge_type": projected_edge_type,
         "confidence": round(confidence, 6),
         "evidence": [item.to_dict() for item in evidence],
-        "reason": str(raw.get("reason", "")),
+        "needs_full_context": bool(raw.get("needs_full_context", False)),
     }
     rejection = _rejection_reason(accepted, flow_type, projected_edge_type, confidence, evidence)
     if rejection:
@@ -409,7 +344,6 @@ def _normalize_record(candidate: ExecutionFlowCandidate, raw: dict[str, Any]) ->
         confidence=round(confidence, 6),
         weight=round(confidence, 6),
         evidence=evidence,
-        reason=str(raw.get("reason", "")),
         metadata=_flow_metadata(candidate),
     )
     return ExecutionValidationRecord(candidate, raw, normalized, True, "", flow_edge)
@@ -418,7 +352,7 @@ def _normalize_record(candidate: ExecutionFlowCandidate, raw: dict[str, Any]) ->
 def _schema_error(raw: dict[str, Any]) -> str:
     if not isinstance(raw.get("accepted", False), bool):
         return "accepted must be a boolean"
-    if str(raw.get("flow_type", "none")) not in {"artifact_flow", "scenario_transition", "none"}:
+    if str(raw.get("flow_type", "none")) not in {"artifact_handoff", "state_handoff", "none"}:
         return "unsupported flow_type"
     if str(raw.get("projected_edge_type", "none")) not in {"depend_on", "compose_with", "none"}:
         return "unsupported projected_edge_type"
@@ -440,7 +374,7 @@ def _rejection_reason(
 ) -> str:
     if not accepted:
         return "accepted is false"
-    if flow_type not in {"artifact_flow", "scenario_transition"}:
+    if flow_type not in {"artifact_handoff", "state_handoff"}:
         return "flow_type is none or unsupported"
     if projected_edge_type not in {"depend_on", "compose_with"}:
         return "projected_edge_type is none or unsupported"
@@ -452,7 +386,7 @@ def _rejection_reason(
 
 
 def _flow_metadata(candidate: ExecutionFlowCandidate) -> dict[str, str]:
-    key = "artifact_id" if candidate.flow_type == "artifact_flow" else "scenario_id"
+    key = "artifact_id" if candidate.flow_type == "artifact_handoff" else "state_id"
     return {
         key: candidate.matched_node_id,
         "matched_name": candidate.matched_name,
@@ -487,14 +421,14 @@ def _valid_evidence_payload(payload: Any) -> bool:
     return True
 
 
-def _none_normalized(reason: str) -> dict[str, Any]:
+def _none_normalized() -> dict[str, Any]:
     return {
         "accepted": False,
         "flow_type": "none",
         "projected_edge_type": "none",
         "confidence": 0.0,
         "evidence": [],
-        "reason": reason,
+        "needs_full_context": False,
     }
 
 
@@ -539,14 +473,14 @@ def _parse_validation_json(text: str) -> dict[str, Any]:
     return payload
 
 
-def _error_payload(error_type: str, reason: str, *, raw_response: str = "") -> dict[str, Any]:
+def _error_payload(error_type: str, message: str, *, raw_response: str = "") -> dict[str, Any]:
     return {
         "accepted": False,
         "flow_type": "none",
         "projected_edge_type": "none",
         "confidence": 0.0,
         "evidence": [],
-        "reason": reason,
+        "message": message,
         "error_type": error_type,
         "raw_response": raw_response,
     }
@@ -557,10 +491,9 @@ def _is_retryable_error_payload(raw: dict[str, Any]) -> bool:
 
 
 def _should_escalate_to_full_prompt(raw: dict[str, Any]) -> bool:
-    reason = str(raw.get("reason", "")).lower()
     if str(raw.get("needs_full_context", "")).lower() == "true":
         return True
-    return any(marker in reason for marker in ("need full", "insufficient context", "uncertain"))
+    return False
 
 
 def _with_validation_meta(
@@ -586,7 +519,6 @@ def _with_validation_meta(
             "policy_digest": EXECUTION_POLICY_DIGEST,
             "prompt_id": EXECUTION_PROMPT_ID,
             "compact_prompt_id": COMPACT_EXECUTION_PROMPT_ID,
-            "reason": str(payload.get("reason", existing.get("reason", ""))),
         }
     )
     if resolved_prompt_tier == "compact":
@@ -626,8 +558,6 @@ def _meta_value(raw: dict[str, Any], key: str, *, default: str) -> str:
 
 def _validation_action(meta: dict[str, Any]) -> str:
     source = str(meta.get("source", ""))
-    if source in {"deterministic_accept", "deterministic_reject"}:
-        return source
     prompt_tier = str(meta.get("prompt_tier", ""))
     if prompt_tier == "full" or bool(meta.get("full_attempted", False)):
         return "llm_full"
