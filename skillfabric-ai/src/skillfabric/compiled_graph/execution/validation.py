@@ -15,10 +15,6 @@ from skillfabric.compiled_graph.execution.models import (
     ExecutionFlowCandidate,
     ExecutionValidationRecord,
 )
-from skillfabric.compiled_graph.execution.policy import (
-    EXECUTION_POLICY_DIGEST,
-    EXECUTION_POLICY_VERSION,
-)
 from skillfabric.compiled_graph.execution.prompts import (
     COMPACT_EXECUTION_PROMPT_ID,
     EXECUTION_PROMPT_ID,
@@ -29,6 +25,9 @@ from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
+
+EXECUTION_POLICY_VERSION = "execution_validation_policy_v3"
+EXECUTION_POLICY_DIGEST = EXECUTION_POLICY_VERSION
 
 
 class ExecutionFlowValidator(Protocol):
@@ -362,6 +361,8 @@ def _schema_error(raw: dict[str, Any]) -> str:
         return "evidence must be a list"
     if not _valid_evidence_payload(raw.get("evidence", [])):
         return "evidence items must include numeric line values"
+    if not isinstance(raw.get("needs_full_context", False), bool):
+        return "needs_full_context must be a boolean"
     return ""
 
 

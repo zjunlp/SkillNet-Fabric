@@ -183,6 +183,17 @@ class ExecutionValidationTests(unittest.TestCase):
             set(payload["output_schema"]),
             {"accepted", "flow_type", "projected_edge_type", "confidence", "evidence", "needs_full_context"},
         )
+        self.assertNotIn("\n", messages[1]["content"])
+
+    def test_execution_prompt_payload_is_compact_json_to_reduce_tokens(self) -> None:
+        messages = build_execution_validation_messages(
+            self._candidate(),
+            self._skills()[0],
+            self._skills()[1],
+            interfaces=self._interfaces(),
+        )
+
+        self.assertNotIn("\n", messages[1]["content"])
 
     def test_invalid_json_and_api_exception_are_rejected(self) -> None:
         self._install_fake_litellm("not json")
@@ -243,6 +254,32 @@ class ExecutionValidationTests(unittest.TestCase):
                     "projected_edge_type": "depend_on",
                     "confidence": [],
                     "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
+                }
+            )
+        )
+
+        records = validate_execution_flow_candidates(
+            [self._candidate()],
+            self._skills(),
+            interfaces=self._interfaces(),
+            validator=LiteLLMExecutionFlowValidator(
+                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
+            ),
+        )
+
+        self.assertFalse(records[0].accepted)
+        self.assertIn("schema_error", records[0].rejection_reason)
+
+    def test_schema_requires_boolean_needs_full_context(self) -> None:
+        self._install_fake_litellm(
+            json.dumps(
+                {
+                    "accepted": True,
+                    "flow_type": "artifact_handoff",
+                    "projected_edge_type": "depend_on",
+                    "confidence": 0.91,
+                    "evidence": [{"skill": "skill:producer", "line": 2, "text": "Produce csv."}],
+                    "needs_full_context": "no",
                 }
             )
         )

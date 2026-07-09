@@ -199,17 +199,13 @@ def _execution_object_scores(
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
     for record in execution_index:
-        score = _term_score(
-            query_terms,
-            " ".join(
-                    [
-                        record.relation_type,
-                        record.canonical_object,
-                        record.projected_edge_type,
-                        " ".join(record.metadata.values()),
-                    ]
-                ),
-            )
+        terms = [
+            record.relation_type,
+            record.canonical_object,
+            record.projected_edge_type,
+            " ".join(record.metadata.values()),
+        ]
+        score = _term_score(query_terms, " ".join(terms))
         if score <= 0:
             continue
         for skill_id in (record.source_skill, record.target_skill):

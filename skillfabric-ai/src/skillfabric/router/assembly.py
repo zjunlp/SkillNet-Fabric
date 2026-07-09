@@ -91,13 +91,11 @@ def _workflow_hints(
 
 def _workflow_hint_reason(record: ExecutionIndexRecord) -> str:
     flow_type = record.metadata.get("flow_type", "")
-    parts = [
-        record.projected_edge_type,
-        record.relation_type,
-        record.canonical_object,
-        flow_type,
-    ]
-    return " ".join(part for part in parts if part)
+    suffix = f" via {flow_type}" if flow_type else ""
+    return (
+        f"{record.projected_edge_type} {record.relation_type} "
+        f"on {record.canonical_object}{suffix}"
+    )
 
 
 def _wiki_pages(

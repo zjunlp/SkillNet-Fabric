@@ -126,7 +126,7 @@ def build_compact_execution_validation_messages(
     }
     return [
         {"role": "system", "content": "You validate SkillFabric post-state to pre-state handoffs from compact evidence."},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+        {"role": "user", "content": _prompt_json(payload)},
     ]
 
 
@@ -197,8 +197,12 @@ def build_execution_validation_messages(
     }
     return [
         {"role": "system", "content": "You validate SkillFabric post-state to pre-state handoffs using strict textual evidence."},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+        {"role": "user", "content": _prompt_json(payload)},
     ]
+
+
+def _prompt_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _skill_payload(skill: SkillNode, interfaces: dict[str, SkillInterface]) -> dict[str, Any]:

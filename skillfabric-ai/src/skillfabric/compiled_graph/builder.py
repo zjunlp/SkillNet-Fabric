@@ -38,16 +38,14 @@ from skillfabric.compiled_graph.execution.health import (
     render_execution_health_report,
 )
 from skillfabric.compiled_graph.execution.models import ExecutionValidationRecord
-from skillfabric.compiled_graph.execution.policy import (
-    EXECUTION_POLICY_DIGEST,
-    EXECUTION_POLICY_VERSION,
-)
 from skillfabric.compiled_graph.execution.projection import project_execution_records
 from skillfabric.compiled_graph.execution.prompts import (
     COMPACT_EXECUTION_PROMPT_ID,
     EXECUTION_PROMPT_ID,
 )
 from skillfabric.compiled_graph.execution.validation import (
+    EXECUTION_POLICY_DIGEST,
+    EXECUTION_POLICY_VERSION,
     ExecutionFlowValidator,
     LiteLLMExecutionFlowValidator,
     summarize_execution_validation_records,
