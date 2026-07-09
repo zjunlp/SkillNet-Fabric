@@ -23,6 +23,8 @@ class RawContractObject:
 
     @property
     def key(self) -> str:
+        """Stable term instance key for one skill interface field."""
+
         return "|".join([self.skill_id, self.role, self.name.lower(), self.kind.lower()])
 
     @property
@@ -69,7 +71,7 @@ class CanonicalObject:
     required_by: list[str] = field(default_factory=list)
     produced_by: list[str] = field(default_factory=list)
     confidence: float = 0.0
-    provenance: str = "deterministic_exact"
+    provenance: str = "llm_canonicalized"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,7 +97,7 @@ class CanonicalObject:
             required_by=[str(item) for item in payload.get("required_by", [])],
             produced_by=[str(item) for item in payload.get("produced_by", [])],
             confidence=float(payload.get("confidence", 0.0) or 0.0),
-            provenance=str(payload.get("provenance", "deterministic_exact")),
+            provenance=str(payload.get("provenance", "llm_canonicalized")),
         )
 
 
@@ -140,7 +142,11 @@ class CanonicalizationBuild:
     assignments: list[CanonicalAssignment] = field(default_factory=list)
     raw_terms: list[RawContractObject] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    model_id: str = "deterministic-canonicalization"
+    model_id: str = ""
+    cluster_count: int = 0
+    llm_call_count: int = 0
+    cache_hit_count: int = 0
+    omitted_term_count: int = 0
 
     def lookup(self, skill_id: str, role: str, raw_name: str, raw_kind: str) -> str:
         key = "|".join([skill_id, role, raw_name.lower(), raw_kind.lower()])

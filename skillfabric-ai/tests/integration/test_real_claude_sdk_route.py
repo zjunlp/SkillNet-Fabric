@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from skillfabric.compiled_graph.builder import BuildConfig, build_graph
+from skillfabric.compiled_graph.builder import BuildConfig, _BuildDependencies, build_graph
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.interface.extraction import DeterministicInterfaceExtractor
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
@@ -31,9 +31,9 @@ class RealClaudeSdkRouteTests(unittest.TestCase):
                 BuildConfig(
                     skill_root=skill_root,
                     workspace=workspace,
-                    similar_top_k=2,
-                    candidate_top_k=4,
-                    validator=StaticPairValidator(
+                ),
+                dependencies=_BuildDependencies(
+                    pair_validator=StaticPairValidator(
                         {
                             ("skill:synthetic-kpi-extractor", "skill:synthetic-pdf-table-parser"): {
                                 "edge_type": "depend_on",
@@ -54,7 +54,7 @@ class RealClaudeSdkRouteTests(unittest.TestCase):
                     execution_validator=DeterministicExecutionFlowValidator(),
                     embedding_provider=FakeEmbeddingProvider(),
                     build_id="real-cc-sdk-synthetic",
-                )
+                ),
             )
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 

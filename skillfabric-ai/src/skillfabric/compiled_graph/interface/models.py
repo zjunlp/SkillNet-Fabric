@@ -97,7 +97,6 @@ class SkillInterface:
     produces: list[InterfaceField] = field(default_factory=list)
     uses_tools: list[InterfaceField] = field(default_factory=list)
     evidence: list[InterfaceEvidence] = field(default_factory=list)
-    provenance: str = "deterministic_fallback"
     model_id: str = "deterministic-interface"
 
     def to_dict(self) -> dict[str, Any]:
@@ -110,7 +109,6 @@ class SkillInterface:
             "produces": _fields_to_dict(self.produces),
             "uses_tools": _fields_to_dict(self.uses_tools),
             "evidence": [item.to_dict() for item in self.evidence],
-            "provenance": self.provenance,
             "model_id": self.model_id,
         }
 
@@ -129,7 +127,6 @@ class SkillInterface:
                 for item in payload.get("evidence", [])
                 if isinstance(item, dict)
             ],
-            provenance=str(payload.get("provenance", "deterministic_fallback")),
             model_id=str(payload.get("model_id", "deterministic-interface")),
         )
 

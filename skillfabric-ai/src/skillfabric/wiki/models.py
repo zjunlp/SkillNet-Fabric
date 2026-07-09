@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-WikiPageType = Literal["skill", "workflow", "debug", "index", "health"]
+WikiPageType = Literal["skill", "workflow", "index"]
 
 
 @dataclass(slots=True)
@@ -17,7 +17,6 @@ class WikiBuildConfig:
     env_file: str | Path = ".env"
     use_llm_summaries: bool = True
     max_neighbors_per_section: int = 10
-    include_debug_pages: bool = False
     llm_concurrency: int | None = None
     llm_rate_limit_per_minute: float | None = None
     llm_max_retries: int | None = None
@@ -85,7 +84,6 @@ class WikiHealthReport:
     orphan_skill_pages: list[str] = field(default_factory=list)
     skills_without_interface: list[str] = field(default_factory=list)
     skills_without_graph_links: list[str] = field(default_factory=list)
-    disconnected_artifact_scenarios: list[str] = field(default_factory=list)
     raw_llm_output_leaks: list[str] = field(default_factory=list)
     fallback_count: int = 0
 
@@ -97,7 +95,6 @@ class WikiHealthReport:
             "orphan_skill_page_count": len(self.orphan_skill_pages),
             "skill_without_interface_count": len(self.skills_without_interface),
             "skill_without_graph_links_count": len(self.skills_without_graph_links),
-            "disconnected_artifact_scenario_count": len(self.disconnected_artifact_scenarios),
             "raw_llm_output_leak_count": len(self.raw_llm_output_leaks),
             "summary_fallback_count": self.fallback_count,
         }

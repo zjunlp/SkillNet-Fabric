@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import tarfile
@@ -18,6 +19,22 @@ FIXTURE_SKILLS = Path(__file__).resolve().parents[1] / "fixtures" / "skills"
 
 
 class PublicPackageTests(unittest.TestCase):
+    def test_build_config_exposes_only_standard_public_fields(self) -> None:
+        from skillfabric.compiled_graph.builder import BuildConfig
+
+        public_fields = {field.name for field in dataclasses.fields(BuildConfig)}
+
+        self.assertEqual(
+            public_fields,
+            {
+                "skill_root",
+                "workspace",
+                "llm_env_path",
+                "skip_llm_validation",
+                "llm_options",
+            },
+        )
+
     def test_python_facade_exports_only_high_level_methods(self) -> None:
         from skillfabric import SkillFabric
 

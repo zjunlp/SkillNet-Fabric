@@ -12,8 +12,6 @@ class BuildOptions:
     skip_llm_validation: bool = False
     embedding_provider: str = "api"
     wiki_summary_mode: str = "all"
-    similar_top_k: int = 5
-    candidate_top_k: int = 20
     llm_concurrency: int = 2
     llm_batch_size: int = 8
 

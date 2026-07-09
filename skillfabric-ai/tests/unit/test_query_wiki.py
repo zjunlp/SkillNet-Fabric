@@ -274,7 +274,7 @@ class QueryWikiTests(unittest.TestCase):
             break
         graph_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-        execution_index = workspace.execution_dir / "execution_index.jsonl"
+        execution_index = workspace.graph_dir / "execution_index.jsonl"
         rows = []
         for line in execution_index.read_text(encoding="utf-8").splitlines():
             if not line.strip():

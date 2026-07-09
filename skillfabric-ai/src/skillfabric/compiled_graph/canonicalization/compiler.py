@@ -31,69 +31,6 @@ from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
 
 CANONICALIZATION_CACHE_ID = CANONICALIZATION_PROMPT_ID
-PURE_GENERIC_INTERFACE_NAMES = frozenset(
-    {
-        "artifact",
-        "artifacts",
-        "command",
-        "commands",
-        "content",
-        "contents",
-        "context",
-        "contexts",
-        "data",
-        "directory",
-        "directories",
-        "document",
-        "documents",
-        "file",
-        "files",
-        "folder",
-        "folders",
-        "input",
-        "inputs",
-        "item",
-        "items",
-        "material",
-        "materials",
-        "object",
-        "objects",
-        "output",
-        "outputs",
-        "path",
-        "paths",
-        "project",
-        "projects",
-        "reference",
-        "references",
-        "result",
-        "results",
-        "snippet",
-        "snippets",
-        "source",
-        "sources",
-        "state",
-        "states",
-        "target",
-        "targets",
-        "text",
-        "texts",
-        "workspace",
-        "workspaces",
-    }
-)
-
-
-class DeterministicCanonicalizationProvider:
-    """Offline provider that accepts only normalized-exact groups."""
-
-    model_id = "deterministic-canonicalization"
-
-    def canonicalize(self, cluster: CanonicalizationCluster) -> dict[str, Any]:
-        return _deterministic_exact_payload(cluster) or {
-            "canonical_objects": [],
-            "omitted_term_ids": [term.term_id for term in cluster.terms],
-        }
 
 
 class LiteLLMCanonicalizationProvider:
@@ -135,25 +72,23 @@ def canonicalize_contract_objects(
 ) -> CanonicalizationBuild:
     """Canonicalize all requires/produces terms in a skill pool."""
 
-    provider = provider or DeterministicCanonicalizationProvider()
+    if provider is None:
+        raise ValueError("canonicalization provider is required")
     raw_terms = _collect_raw_terms(interfaces)
     clusters = candidate_groups_from_terms(
         raw_terms,
         semantic_embedder=semantic_embedder,
         embedding_cache_path=_embedding_cache_path(cache_path),
-        include_semantic=_provider_can_resolve_semantic_groups(provider),
     )
     cache = _load_cache(cache_path)
     results: dict[str, dict[str, Any]] = {}
     pending: list[CanonicalizationCluster] = []
+    cache_hits = 0
 
     for cluster in clusters:
-        deterministic = _deterministic_exact_payload(cluster)
-        if deterministic is not None:
-            results[cluster.cluster_id] = deterministic
-            continue
         cached = cache.get(_cache_key(cluster, provider.model_id))
         if isinstance(cached, dict):
+            cache_hits += 1
             results[cluster.cluster_id] = cached
         else:
             pending.append(cluster)
@@ -193,7 +128,14 @@ def canonicalize_contract_objects(
             "omitted_term_ids": [term.term_id for term in cluster.terms],
         }
     _write_cache(cache_path, cache)
-    return _build_from_results(raw_terms, clusters, results, model_id=provider.model_id)
+    return _build_from_results(
+        raw_terms,
+        clusters,
+        results,
+        model_id=provider.model_id,
+        llm_call_count=len(pending),
+        cache_hit_count=cache_hits,
+    )
 
 
 def _collect_raw_terms(interfaces: dict[str, SkillInterface]) -> list[RawContractObject]:
@@ -208,7 +150,7 @@ def _terms_from_fields(skill_id: str, role: str, fields: list[InterfaceField]) -
     output: list[RawContractObject] = []
     for field in fields:
         name = field.name.strip()
-        if not name or _is_unusable_name(name):
+        if not name:
             continue
         output.append(
             RawContractObject(
@@ -224,42 +166,20 @@ def _terms_from_fields(skill_id: str, role: str, fields: list[InterfaceField]) -
     return output
 
 
-def _deterministic_exact_payload(cluster: CanonicalizationCluster) -> dict[str, Any] | None:
-    if not cluster.terms:
-        return {"canonical_objects": [], "omitted_term_ids": []}
-    normalized_names = {normalized_candidate_text(term.name) for term in cluster.terms}
-    normalized_names.discard("")
-    object_types = {contract_object_type(term.kind) for term in cluster.terms}
-    if len(normalized_names) != 1 or len(object_types) != 1:
-        return None
-    name = _canonical_output_name(next(iter(normalized_names)))
-    if not name:
-        return {"canonical_objects": [], "omitted_term_ids": [term.term_id for term in cluster.terms]}
-    return {
-        "_provenance": "deterministic_exact",
-        "canonical_objects": [
-            {
-                "name": name,
-                "type": next(iter(object_types)),
-                "term_ids": [term.term_id for term in cluster.terms],
-                "confidence": 0.98,
-            }
-        ],
-        "omitted_term_ids": [],
-    }
-
-
 def _build_from_results(
     raw_terms: list[RawContractObject],
     clusters: list[CanonicalizationCluster],
     results: dict[str, dict[str, Any]],
     *,
     model_id: str,
+    llm_call_count: int = 0,
+    cache_hit_count: int = 0,
 ) -> CanonicalizationBuild:
     terms_by_id = {term.term_id: term for term in raw_terms}
     cluster_terms = {cluster.cluster_id: {term.term_id for term in cluster.terms} for cluster in clusters}
     objects: dict[str, CanonicalObject] = {}
     assignments: dict[str, CanonicalAssignment] = {}
+    assigned_term_ids: set[str] = set()
 
     for cluster_id, raw in sorted(results.items()):
         allowed_term_ids = cluster_terms.get(cluster_id, set())
@@ -272,11 +192,12 @@ def _build_from_results(
             term_ids = [
                 str(term_id)
                 for term_id in item.get("term_ids", [])
-                if str(term_id) in allowed_term_ids and str(term_id) in terms_by_id
+                if str(term_id) in allowed_term_ids
+                and str(term_id) in terms_by_id
+                and str(term_id) not in assigned_term_ids
             ]
-            if not name or not term_ids or not _term_ids_have_producer_and_consumer(term_ids, terms_by_id):
-                continue
-            if not _object_type_matches_terms(object_type, term_ids, terms_by_id):
+            term_ids = list(dict.fromkeys(term_ids))
+            if not name or not term_ids:
                 continue
             canonical_id = f"{object_type}:{name}"
             canonical = objects.setdefault(
@@ -306,6 +227,7 @@ def _build_from_results(
                     raw_kind=term.kind,
                     canonical_id=canonical.canonical_id,
                 )
+                assigned_term_ids.add(term_id)
 
     for canonical in objects.values():
         canonical.aliases = sorted(set(canonical.aliases))
@@ -318,6 +240,10 @@ def _build_from_results(
         raw_terms=raw_terms,
         warnings=[],
         model_id=model_id,
+        cluster_count=len(clusters),
+        llm_call_count=llm_call_count,
+        cache_hit_count=cache_hit_count,
+        omitted_term_count=_omitted_term_count(raw_terms, assignments),
     )
 
 
@@ -337,44 +263,14 @@ def _validate_provider_payload(raw: dict[str, Any]) -> None:
             raise ValueError("canonical object term_ids must be a list")
 
 
-def _term_ids_have_producer_and_consumer(
-    term_ids: list[str],
-    terms_by_id: dict[str, RawContractObject],
-) -> bool:
-    roles = {terms_by_id[term_id].role for term_id in term_ids if term_id in terms_by_id}
-    return "produces" in roles and "requires" in roles
-
-
-def _object_type_matches_terms(
-    object_type: str,
-    term_ids: list[str],
-    terms_by_id: dict[str, RawContractObject],
-) -> bool:
-    return object_type in {
-        contract_object_type(terms_by_id[term_id].kind)
-        for term_id in term_ids
-        if term_id in terms_by_id
-    }
-
-
 def _canonical_output_name(value: str) -> str:
     text = normalized_candidate_text(value)
     return re.sub(r"_+", "_", "_".join(text.split())).strip("_")
 
 
-def _is_unusable_name(value: str) -> bool:
-    normalized = _canonical_output_name(value)
-    return normalized in PURE_GENERIC_INTERFACE_NAMES or normalized == ""
-
-
 def _provenance(model_id: str) -> str:
-    if model_id == DeterministicCanonicalizationProvider.model_id:
-        return "deterministic_exact"
+    del model_id
     return "llm_canonicalized"
-
-
-def _provider_can_resolve_semantic_groups(provider: CanonicalizationProvider) -> bool:
-    return provider.model_id != DeterministicCanonicalizationProvider.model_id
 
 
 def _cache_key(cluster: CanonicalizationCluster, model_id: str) -> str:
@@ -388,6 +284,14 @@ def _cache_key(cluster: CanonicalizationCluster, model_id: str) -> str:
         ensure_ascii=False,
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _omitted_term_count(
+    raw_terms: list[RawContractObject],
+    assignments: dict[str, CanonicalAssignment],
+) -> int:
+    assigned = {assignment.raw_key for assignment in assignments.values()}
+    return sum(1 for term in raw_terms if term.key not in assigned)
 
 
 def _embedding_cache_path(cache_path: str | Path | None) -> Path | None:

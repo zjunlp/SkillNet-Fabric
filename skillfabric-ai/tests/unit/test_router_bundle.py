@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge, GraphDocument
@@ -95,11 +96,11 @@ class RouterBundleTests(unittest.TestCase):
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
+                workspace.graph_dir / "skills.jsonl",
                 [skill.to_dict(include_raw_text=True) for skill in skills],
             )
             workspace.write_jsonl(
-                workspace.interfaces_dir / "skill_interfaces.jsonl",
+                workspace.graph_dir / "skill_interfaces.jsonl",
                 [
                     _interface(
                         "skill:data-visualization",
@@ -127,7 +128,7 @@ class RouterBundleTests(unittest.TestCase):
                 ],
             )
             workspace.write_jsonl(
-                workspace.execution_dir / "canonical_objects.jsonl",
+                workspace.graph_dir / "canonical_objects.jsonl",
                 [
                     {
                         "canonical_id": "canonical:png_figures",
@@ -174,7 +175,7 @@ class RouterBundleTests(unittest.TestCase):
                 ],
             )
             workspace.write_jsonl(
-                workspace.execution_dir / "execution_index.jsonl",
+                workspace.graph_dir / "execution_index.jsonl",
                 [
                     {
                         "source_skill": "skill:xlsx",
@@ -190,7 +191,7 @@ class RouterBundleTests(unittest.TestCase):
                     }
                 ],
             )
-            build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
+            build_bm25_index(skills, workspace.graph_dir / "bm25.sqlite")
             for skill in skills:
                 page = workspace.wiki_skill_cards_dir / f"{skill.name}.md"
                 page.parent.mkdir(parents=True, exist_ok=True)
@@ -259,11 +260,11 @@ class RouterBundleTests(unittest.TestCase):
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
+                workspace.graph_dir / "skills.jsonl",
                 [skill.to_dict(include_raw_text=True) for skill in skills],
             )
             workspace.write_jsonl(
-                workspace.interfaces_dir / "skill_interfaces.jsonl",
+                workspace.graph_dir / "skill_interfaces.jsonl",
                 [
                     _interface(
                         "skill:analyzing-financial-statements",
@@ -279,7 +280,7 @@ class RouterBundleTests(unittest.TestCase):
                     ),
                 ],
             )
-            build_bm25_index(skills, workspace.index_dir / "bm25.sqlite")
+            build_bm25_index(skills, workspace.graph_dir / "bm25.sqlite")
             for skill in skills:
                 page = workspace.wiki_skill_cards_dir / f"{skill.name}.md"
                 page.parent.mkdir(parents=True, exist_ok=True)
@@ -351,17 +352,17 @@ class RouterBundleTests(unittest.TestCase):
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
+                workspace.graph_dir / "skills.jsonl",
                 [skill.to_dict(include_raw_text=True) for skill in (parser, kpi, writer)],
             )
-            build_bm25_index([parser, kpi, writer], workspace.index_dir / "bm25.sqlite")
+            build_bm25_index([parser, kpi, writer], workspace.graph_dir / "bm25.sqlite")
             build_embedding_store(
                 [parser, kpi, writer],
-                workspace.index_dir / "embeddings.json",
+                workspace.graph_dir / "embeddings.json",
                 provider=FakeEmbeddingProvider(),
             )
             workspace.write_jsonl(
-                workspace.execution_dir / "execution_index.jsonl",
+                workspace.graph_dir / "execution_index.jsonl",
                 [
                     {
                         "source_skill": parser.id,
@@ -400,15 +401,19 @@ class RouterBundleTests(unittest.TestCase):
             debug_page.parent.mkdir(parents=True, exist_ok=True)
             debug_page.write_text("# debug\n", encoding="utf-8")
 
-            bundle = build_router_bundle(
-                RouterBundleConfig(
-                    workspace=workspace.root,
-                    query="parse pdf tables",
-                    seed_limit=1,
-                    expanded_limit=3,
-                    workflow_confidence_threshold=0.95,
+            with patch(
+                "skillfabric.router.retrieval.embedding_provider_for_model",
+                return_value=FakeEmbeddingProvider(),
+            ):
+                bundle = build_router_bundle(
+                    RouterBundleConfig(
+                        workspace=workspace.root,
+                        query="parse pdf tables",
+                        seed_limit=1,
+                        expanded_limit=3,
+                        workflow_confidence_threshold=0.95,
+                    )
                 )
-            )
             payload = bundle.to_dict()
 
             selected_ids = [item["skill_id"] for item in payload["selected_skills"]]
@@ -444,10 +449,10 @@ class RouterBundleTests(unittest.TestCase):
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
+                workspace.graph_dir / "skills.jsonl",
                 [skill.to_dict(include_raw_text=True) for skill in (goal, prereq, second)],
             )
-            build_bm25_index([goal, prereq, second], workspace.index_dir / "bm25.sqlite")
+            build_bm25_index([goal, prereq, second], workspace.graph_dir / "bm25.sqlite")
 
             bundle = build_router_bundle(
                 RouterBundleConfig(
@@ -487,10 +492,10 @@ class RouterBundleTests(unittest.TestCase):
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
             workspace.write_jsonl(
-                workspace.registry_dir / "skills.jsonl",
+                workspace.graph_dir / "skills.jsonl",
                 [skill.to_dict(include_raw_text=True) for skill in (goal, prereq, second)],
             )
-            build_bm25_index([goal, prereq, second], workspace.index_dir / "bm25.sqlite")
+            build_bm25_index([goal, prereq, second], workspace.graph_dir / "bm25.sqlite")
 
             bundle = build_router_bundle(
                 RouterBundleConfig(

@@ -80,7 +80,7 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertEqual(records[0].interface.when_to_use, "Use when PDF tables need structured CSV output.")
         self.assertEqual(records[0].interface.produces[0].name, "csv tables")
         self.assertNotIn("inferred", records[0].interface.produces[0].to_dict())
-        self.assertEqual(records[0].interface.provenance, "llm_extracted")
+        self.assertNotIn("provenance", records[0].interface.to_dict())
 
     def test_legacy_inferred_field_is_ignored(self) -> None:
         self._install_fake_litellm(
@@ -180,7 +180,7 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertFalse(records[0].accepted)
         self.assertIn("json_parse_error", records[0].rejection_reason)
-        self.assertEqual(records[0].interface.provenance, "deterministic_fallback")
+        self.assertNotIn("provenance", records[0].interface.to_dict())
         self.assertEqual(records[0].interface.requires, [])
         self.assertEqual(records[0].interface.produces, [])
         self.assertEqual(records[0].interface.uses_tools, [])
@@ -196,7 +196,7 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertFalse(records[0].accepted)
         self.assertIn("schema_error", records[0].rejection_reason)
-        self.assertEqual(records[0].interface.provenance, "deterministic_fallback")
+        self.assertNotIn("provenance", records[0].interface.to_dict())
 
     def test_evidence_only_json_is_not_a_valid_interface(self) -> None:
         self._install_fake_litellm(json.dumps({"edge_type": "none", "evidence": []}))
@@ -248,7 +248,7 @@ class InterfaceExtractionTests(unittest.TestCase):
         )
 
         self.assertTrue(records[0].accepted)
-        self.assertEqual(records[0].interface.provenance, "llm_extracted")
+        self.assertNotIn("provenance", records[0].interface.to_dict())
         self.assertEqual(records[0].interface.when_to_use, "Use when the task asks to clean or wash an object.")
         self.assertEqual(records[0].interface.produces[0].name, "clean_object_state")
         self.assertEqual(records[0].interface.produces[0].evidence, [])
@@ -277,7 +277,7 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         self.assertFalse(records[0].accepted)
         self.assertIn("schema_error", records[0].rejection_reason)
-        self.assertEqual(records[0].interface.provenance, "deterministic_fallback")
+        self.assertNotIn("provenance", records[0].interface.to_dict())
 
     def test_tool_kind_is_not_kept_in_requires_or_produces(self) -> None:
         self._install_fake_litellm(

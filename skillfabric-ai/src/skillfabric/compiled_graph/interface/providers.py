@@ -102,9 +102,3 @@ def _parse_json_response(text: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise InterfaceSchemaError("interface JSON root must be an object")
     return payload
-
-
-def _provenance(extractor: SkillInterfaceExtractor) -> str:
-    if isinstance(extractor, DeterministicInterfaceExtractor):
-        return "deterministic_fallback"
-    return "llm_extracted"

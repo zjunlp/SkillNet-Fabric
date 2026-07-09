@@ -6,7 +6,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from skillfabric.compiled_graph.builder import BuildConfig, BuildResult, build_graph
+from skillfabric.compiled_graph.builder import (
+    BuildConfig,
+    BuildResult,
+    _BuildDependencies,
+    build_graph,
+)
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
     DisabledEmbeddingProvider,
@@ -21,6 +26,7 @@ from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
 from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import llm_usage_context
 from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.storage import Workspace
@@ -61,22 +67,37 @@ class SkillFabric:
                 env_file=env_file,
                 model_id=embedding_model,
             )
+        else:
+            raise TypeError("embedding_provider must be 'api' or 'disabled'")
         wiki_summary_mode = str(overrides.pop("wiki_summary_mode", defaults.wiki_summary_mode))
-        llm_concurrency = int(overrides.get("llm_concurrency", defaults.llm_concurrency) or defaults.llm_concurrency)
-        llm_batch_size = int(overrides.get("llm_batch_size", defaults.llm_batch_size) or defaults.llm_batch_size)
-        overrides.setdefault("similar_top_k", defaults.similar_top_k)
-        overrides.setdefault("candidate_top_k", defaults.candidate_top_k)
-        overrides.setdefault("llm_concurrency", llm_concurrency)
-        overrides.setdefault("llm_batch_size", llm_batch_size)
+        llm_concurrency = int(overrides.pop("llm_concurrency", defaults.llm_concurrency) or defaults.llm_concurrency)
+        llm_rate_limit_per_minute = overrides.pop("llm_rate_limit_per_minute", None)
+        llm_max_retries = overrides.pop("llm_max_retries", None)
+        llm_retry_backoff_seconds = overrides.pop("llm_retry_backoff_seconds", None)
+        llm_progress_every = overrides.pop("llm_progress_every", None)
+        llm_batch_size = int(overrides.pop("llm_batch_size", defaults.llm_batch_size) or defaults.llm_batch_size)
+        if overrides:
+            unknown = ", ".join(sorted(overrides))
+            raise TypeError(f"unsupported build option(s): {unknown}")
+        llm_options = LLMJobOptions.from_env(
+            env_path=env_file,
+            concurrency=llm_concurrency,
+            rate_limit_per_minute=float(llm_rate_limit_per_minute) if llm_rate_limit_per_minute is not None else None,
+            max_retries=int(llm_max_retries) if llm_max_retries is not None else None,
+            retry_backoff_seconds=(
+                float(llm_retry_backoff_seconds) if llm_retry_backoff_seconds is not None else None
+            ),
+            progress_every=int(llm_progress_every) if llm_progress_every is not None else None,
+            batch_size=llm_batch_size,
+        )
         config = BuildConfig(
             skill_root=skill_root,
             workspace=self.workspace.root,
             llm_env_path=env_file,
             skip_llm_validation=skip_llm_validation,
-            embedding_provider=embedding_provider,
-            **overrides,
+            llm_options=llm_options,
         )
-        result = build_graph(config)
+        result = build_graph(config, dependencies=_BuildDependencies(embedding_provider=embedding_provider))
         if not skip_wiki:
             with llm_usage_context(
                 log_path=self.workspace.reports_dir / "llm_usage.jsonl",
@@ -194,6 +215,6 @@ def _reject_removed_profile(overrides: dict[str, object]) -> None:
         return
     raise TypeError(
         "SkillFabric public no longer exposes profile=. Use the single public default "
-        "settings, or pass explicit options such as embedding_provider='disabled', "
-        "wiki_summary_mode='all', or explorer_backend='claude-code'."
+        "settings, or pass explicit options such as wiki_summary_mode='all' "
+        "or explorer_backend='claude-code'."
     )

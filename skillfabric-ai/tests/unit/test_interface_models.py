@@ -49,15 +49,19 @@ class InterfaceModelTests(unittest.TestCase):
                     evidence=[InterfaceEvidence("skill:pdf-table-parser", 8, "Write CSV tables.")],
                 )
             ],
-            provenance="llm_extracted",
             model_id="openai/test-model",
         )
 
         payload = interface.to_dict()
+        legacy_payload = dict(payload)
+        legacy_payload["provenance"] = "llm_extracted"
         restored = SkillInterface.from_dict(payload)
+        restored_from_legacy = SkillInterface.from_dict(legacy_payload)
 
         self.assertEqual(restored.to_dict(), payload)
+        self.assertEqual(restored_from_legacy.to_dict(), payload)
         self.assertEqual(restored.produces[0].evidence[0].line, 8)
+        self.assertNotIn("provenance", payload)
         self.assertNotIn("inferred", payload["produces"][0])
         self.assertNotIn("granularity", payload)
         self.assertNotIn("execution_role", payload)

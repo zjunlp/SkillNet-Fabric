@@ -6,12 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from skillfabric.compiled_graph.execution.models import (
-    ArtifactNode,
-    ExecutionEdge,
-    ExecutionIndexRecord,
-    ScenarioNode,
-)
+from skillfabric.compiled_graph.execution.models import ExecutionIndexRecord
 from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
@@ -25,11 +20,7 @@ class WikiSource:
     build_id: str
     skills: dict[str, SkillNode]
     interfaces: dict[str, SkillInterface]
-    raw_artifacts: dict[str, ArtifactNode]
-    raw_scenarios: dict[str, ScenarioNode]
     core_edges: list[Edge]
-    raw_skill_artifact_edges: list[ExecutionEdge]
-    raw_skill_scenario_edges: list[ExecutionEdge]
     execution_index: list[ExecutionIndexRecord]
     evidence_lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
@@ -41,7 +32,7 @@ class WikiSource:
             if edge.source == skill_id or edge.target == skill_id
         ]
 
-    def skill_execution_links(self, skill_id: str) -> dict[str, list[ExecutionEdge]]:
+    def skill_execution_links(self, skill_id: str) -> dict[str, list[ExecutionIndexRecord]]:
         return {
             "workflow_hints": [
                 record
@@ -74,25 +65,6 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         )
     }
     execution = payload.get("execution_graph", {})
-    debug = execution.get("debug_extraction", {}) if isinstance(execution.get("debug_extraction", {}), dict) else {}
-    raw_artifacts = {
-        node.id: node
-        for node in (
-            ArtifactNode.from_dict(item)
-            for item in debug.get("raw_artifact_nodes", [])
-            if isinstance(item, dict)
-        )
-    }
-    raw_scenarios = {
-        node.id: node
-        for node in (
-            ScenarioNode.from_dict(item)
-            for item in debug.get("raw_scenario_nodes", [])
-            if isinstance(item, dict)
-        )
-    }
-    raw_skill_artifact_edges = _execution_edges(debug.get("raw_skill_artifact_edges", []))
-    raw_skill_scenario_edges = _execution_edges(debug.get("raw_skill_scenario_edges", []))
     execution_index = [
         ExecutionIndexRecord.from_dict(item)
         for item in execution.get("execution_index", [])
@@ -102,11 +74,7 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         build_id=core_graph.build_id,
         skills=skills,
         interfaces=interfaces,
-        raw_artifacts=raw_artifacts,
-        raw_scenarios=raw_scenarios,
         core_edges=core_graph.edges,
-        raw_skill_artifact_edges=raw_skill_artifact_edges,
-        raw_skill_scenario_edges=raw_skill_scenario_edges,
         execution_index=execution_index,
         evidence_lookup=_load_evidence_lookup(workspace),
         stats=dict(payload.get("stats", {})),
@@ -123,12 +91,6 @@ def _merge_raw_skills(workspace: Workspace, skills: dict[str, SkillNode]) -> Non
         skill = SkillNode.from_dict(json.loads(line))
         if skill.id in skills:
             skills[skill.id] = skill
-
-
-def _execution_edges(payload: Any) -> list[ExecutionEdge]:
-    if not isinstance(payload, list):
-        return []
-    return [ExecutionEdge.from_dict(item) for item in payload if isinstance(item, dict)]
 
 
 def _load_evidence_lookup(workspace: Workspace) -> dict[tuple[str, str, str], list[dict[str, Any]]]:

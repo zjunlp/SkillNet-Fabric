@@ -12,7 +12,12 @@ from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "skillfabric-matplotlib"))
 
-from skillfabric.compiled_graph.builder import BuildConfig, BuildResult, build_graph
+from skillfabric.compiled_graph.builder import (
+    BuildConfig,
+    BuildResult,
+    _BuildDependencies,
+    build_graph,
+)
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
     DisabledEmbeddingProvider,
@@ -28,6 +33,7 @@ from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouteRes
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.router.traces import _new_trace_id as _new_agent_trace_id
 from skillfabric.runtime.defaults import BuildOptions, default_build_options, default_router_options
+from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import (
     DEFAULT_API_BASE,
     DEFAULT_MODEL,
@@ -148,8 +154,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--skip-wiki", action="store_true")
     build_parser.add_argument("--skip-llm-validation", action="store_true", help=argparse.SUPPRESS)
     build_parser.add_argument("--wiki-summary-mode", choices=["off", "all"])
-    build_parser.add_argument("--similar-top-k", type=int)
-    build_parser.add_argument("--candidate-top-k", type=int)
     build_parser.add_argument("--llm-concurrency", type=int)
     build_parser.add_argument("--llm-rate-limit-per-minute", type=float)
     build_parser.add_argument("--llm-max-retries", type=int)
@@ -508,18 +512,13 @@ def _build(args: argparse.Namespace) -> None:
                 BuildConfig(
                     skill_root=args.skill_root,
                     workspace=args.workspace,
-                    similar_top_k=options.similar_top_k,
-                    candidate_top_k=options.candidate_top_k,
                     llm_env_path=args.env_file,
                     skip_llm_validation=options.skip_llm_validation,
-                    llm_concurrency=options.llm_concurrency,
-                    llm_rate_limit_per_minute=args.llm_rate_limit_per_minute,
-                    llm_max_retries=args.llm_max_retries,
-                    llm_retry_backoff_seconds=args.llm_retry_backoff_seconds,
-                    llm_progress_every=_llm_progress_every(args),
-                    llm_batch_size=options.llm_batch_size,
+                    llm_options=_llm_job_options_from_args(args, options=options),
+                ),
+                dependencies=_BuildDependencies(
                     embedding_provider=_embedding_provider_from_args(args, options=options),
-                )
+                ),
             )
             wiki_result: WikiBuildResult | None = None
             if not args.skip_wiki:
@@ -1030,8 +1029,6 @@ def _build_options_from_args(args: argparse.Namespace) -> BuildOptions:
         skip_llm_validation=bool(args.skip_llm_validation or defaults.skip_llm_validation),
         embedding_provider=embedding_provider,
         wiki_summary_mode=args.wiki_summary_mode or defaults.wiki_summary_mode,
-        similar_top_k=args.similar_top_k if args.similar_top_k is not None else defaults.similar_top_k,
-        candidate_top_k=args.candidate_top_k if args.candidate_top_k is not None else defaults.candidate_top_k,
         llm_concurrency=args.llm_concurrency if args.llm_concurrency is not None else defaults.llm_concurrency,
         llm_batch_size=args.llm_batch_size if args.llm_batch_size is not None else defaults.llm_batch_size,
     )
@@ -1056,6 +1053,18 @@ def _llm_progress_every(args: argparse.Namespace) -> int | None:
     if args.progress_json or args.quiet:
         return 0
     return None
+
+
+def _llm_job_options_from_args(args: argparse.Namespace, *, options: BuildOptions) -> LLMJobOptions:
+    return LLMJobOptions.from_env(
+        env_path=args.env_file,
+        concurrency=options.llm_concurrency,
+        rate_limit_per_minute=args.llm_rate_limit_per_minute,
+        max_retries=args.llm_max_retries,
+        retry_backoff_seconds=args.llm_retry_backoff_seconds,
+        progress_every=_llm_progress_every(args),
+        batch_size=options.llm_batch_size,
+    )
 
 
 if __name__ == "__main__":

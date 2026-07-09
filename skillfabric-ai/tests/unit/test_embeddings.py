@@ -163,10 +163,15 @@ class EmbeddingTests(unittest.TestCase):
             build_embedding_store([_skill("skill:alpha", "alpha"), _skill("skill:beta", "beta")], target, provider=provider)
 
             payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(set(payload), {"model_id", "dimension", "embeddings"})
             self.assertEqual(payload["model_id"], "test-batch-model")
             self.assertEqual(payload["dimension"], 2)
             self.assertEqual(len(provider.calls), 1)
             self.assertEqual(len(payload["embeddings"]), 2)
+            self.assertEqual(
+                set(payload["embeddings"][0]),
+                {"skill_id", "content_hash", "vector"},
+            )
 
     def test_build_embedding_store_can_disable_dense_embeddings(self) -> None:
         with TemporaryDirectory() as tmp, patch.dict(os.environ, {"DISABLE_DENSE_EMBEDDINGS": "1"}):
@@ -177,7 +182,7 @@ class EmbeddingTests(unittest.TestCase):
 
             payload = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(vectors, {"skill:alpha": []})
-            self.assertTrue(payload["disabled"])
+            self.assertEqual(set(payload), {"model_id", "dimension", "embeddings"})
             self.assertEqual(payload["dimension"], 0)
             self.assertEqual(payload["embeddings"][0]["vector"], [])
             self.assertEqual(provider.calls, [])
@@ -187,9 +192,8 @@ class EmbeddingTests(unittest.TestCase):
             workspace = Workspace(Path(tmp) / ".skillfabric")
             workspace.ensure()
             workspace.write_json(
-                workspace.index_dir / "embeddings.json",
+                workspace.graph_dir / "embeddings.json",
                 {
-                    "schema_version": "1.0",
                     "model_id": DEFAULT_EMBEDDING_MODEL_ID,
                     "dimension": 2,
                     "embeddings": [

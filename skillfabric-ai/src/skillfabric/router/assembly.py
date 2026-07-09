@@ -62,7 +62,7 @@ def _workflow_hints(
     confidence_threshold: float,
     limit: int,
 ) -> list[RouterWorkflowHint]:
-    path = workspace.execution_dir / "execution_index.jsonl"
+    path = workspace.graph_dir / "execution_index.jsonl"
     if not path.exists() or limit == 0:
         return []
     hints: list[RouterWorkflowHint] = []

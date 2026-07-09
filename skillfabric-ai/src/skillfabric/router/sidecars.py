@@ -33,7 +33,7 @@ def _load_interfaces_cached(path: str, _mtime_ns: int, _size: int) -> dict[str, 
 def load_execution_index(workspace: Workspace) -> list[ExecutionIndexRecord]:
     """Load execution-index sidecars if present."""
 
-    path = workspace.execution_dir / "execution_index.jsonl"
+    path = workspace.graph_dir / "execution_index.jsonl"
     if not path.exists():
         return []
     return _load_execution_index_cached(*_file_cache_key(path))

@@ -111,7 +111,6 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
         "Orphan Skill Pages": report.orphan_skill_pages,
         "Skills Without Interface": report.skills_without_interface,
         "Skills Without Graph Links": report.skills_without_graph_links,
-        "Disconnected Debug Execution Nodes": report.disconnected_artifact_scenarios,
         "Raw LLM Output Leaks": report.raw_llm_output_leaks,
     }
     for title, values in details.items():

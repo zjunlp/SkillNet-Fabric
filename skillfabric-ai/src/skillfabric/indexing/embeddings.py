@@ -37,7 +37,6 @@ class LoadedEmbeddingStore:
     vectors: dict[str, list[float]]
     model_id: str
     dimension: int
-    provider: str = ""
 
 
 @dataclass(slots=True)
@@ -182,11 +181,8 @@ def build_embedding_store(
     if _disable_dense_embeddings() or getattr(provider, "provider_name", "") == "disabled":
         vectors = {skill.id: [] for skill in skills}
         payload = {
-            "schema_version": "1.0",
-            "provider": getattr(provider, "provider_name", provider.__class__.__name__),
             "model_id": provider.model_id,
             "dimension": 0,
-            "disabled": True,
             "embeddings": [
                 {
                     "skill_id": skill.id,
@@ -230,8 +226,6 @@ def build_embedding_store(
             }
         )
     payload = {
-        "schema_version": "1.0",
-        "provider": getattr(provider, "provider_name", provider.__class__.__name__),
         "model_id": provider.model_id,
         "dimension": getattr(provider, "dimension", len(next(iter(vectors.values()), [])) or 0),
         "embeddings": rows,
@@ -260,7 +254,6 @@ def load_embedding_store_payload(path: str | Path) -> LoadedEmbeddingStore:
         vectors=vectors,
         model_id=str(payload.get("model_id", "")),
         dimension=dimension,
-        provider=str(payload.get("provider", "")),
     )
 
 

@@ -14,10 +14,8 @@ from unittest.mock import patch
 from skillfabric.cli import main as cli_main
 from skillfabric.compiled_graph.builder import (
     BuildConfig,
+    _BuildDependencies,
     build_graph,
-)
-from skillfabric.compiled_graph.canonicalization.compiler import (
-    DeterministicCanonicalizationProvider,
 )
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.health import analyze_health
@@ -27,11 +25,41 @@ from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.models import SkillNode
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root
+from tests.unit.fake_canonicalization import FixtureCanonicalizationProvider
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
+
+
+def _build_test_graph(
+    *,
+    skill_root: Path = FIXTURE_SKILLS,
+    workspace: Path,
+    validator: StaticPairValidator | None = None,
+    canonicalization_provider: FixtureCanonicalizationProvider | None = None,
+    interface_extractor: FixtureInterfaceExtractor | None = None,
+    execution_validator: DeterministicExecutionFlowValidator | None = None,
+    embedding_provider: FakeEmbeddingProvider | None = None,
+    build_id: str | None = None,
+    llm_env_path: Path | str = ".env",
+):
+    return build_graph(
+        BuildConfig(
+            skill_root=skill_root,
+            workspace=workspace,
+            llm_env_path=llm_env_path,
+        ),
+        dependencies=_BuildDependencies(
+            pair_validator=validator,
+            canonicalization_provider=canonicalization_provider,
+            interface_extractor=interface_extractor,
+            execution_validator=execution_validator,
+            embedding_provider=embedding_provider,
+            build_id=build_id,
+        ),
+    )
 
 
 def fake_litellm_embedding(**kwargs):
@@ -155,19 +183,14 @@ class KGBuildTests(unittest.TestCase):
 
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
-            result = build_graph(
-                BuildConfig(
-                    skill_root=FIXTURE_SKILLS,
-                    workspace=workspace,
-                    similar_top_k=3,
-                    candidate_top_k=6,
-                    validator=validator,
-                    canonicalization_provider=DeterministicCanonicalizationProvider(),
-                    interface_extractor=FixtureInterfaceExtractor(),
-                    execution_validator=DeterministicExecutionFlowValidator(),
-                    embedding_provider=FakeEmbeddingProvider(),
-                    build_id="test-build",
-                )
+            result = _build_test_graph(
+                workspace=workspace,
+                validator=validator,
+                canonicalization_provider=FixtureCanonicalizationProvider(),
+                interface_extractor=FixtureInterfaceExtractor(),
+                execution_validator=DeterministicExecutionFlowValidator(),
+                embedding_provider=FakeEmbeddingProvider(),
+                build_id="test-build",
             )
 
             self.assertEqual(result.graph.schema_version, "1.0")
@@ -176,7 +199,7 @@ class KGBuildTests(unittest.TestCase):
             self.assertFalse((workspace / "graph" / "skill_sources.jsonl").exists())
             self.assertTrue((workspace / "graph" / "bm25.sqlite").exists())
             self.assertTrue((workspace / "graph" / "embeddings.json").exists())
-            self.assertTrue((workspace / "graph" / "embedding_meta.jsonl").exists())
+            self.assertFalse((workspace / "graph" / "embedding_meta.jsonl").exists())
             self.assertTrue((workspace / "graph" / "graph.json").exists())
             self.assertFalse((workspace / "graph" / "communities.json").exists())
             self.assertTrue((workspace / "graph" / "edge_evidence.jsonl").exists())
@@ -254,22 +277,33 @@ class KGBuildTests(unittest.TestCase):
             self.assertNotIn("canonical_merge_audit_count", build_metrics)
             self.assertIn("llm_usage", build_metrics)
             self.assertIn("embedding", build_metrics)
+            self.assertEqual(
+                set(build_metrics["canonicalization"]),
+                {
+                    "cluster_count",
+                    "llm_call_count",
+                    "assignment_count",
+                    "omitted_term_count",
+                    "cache_hit_count",
+                    "semantic_threshold",
+                    "semantic_top_k",
+                    "max_group_size",
+                },
+            )
+            self.assertEqual(build_metrics["canonicalization"]["semantic_threshold"], 0.76)
+            self.assertEqual(build_metrics["canonicalization"]["semantic_top_k"], 8)
+            self.assertEqual(build_metrics["canonicalization"]["max_group_size"], 16)
             self.assertEqual(build_metrics["embedding"]["model_id"], "test-fake-embedding")
             self.assertGreater(build_metrics["embedding"]["estimated_input_tokens"], 0)
-            embedding_meta_rows = [
-                json.loads(line)
-                for line in (workspace / "graph" / "embedding_meta.jsonl").read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            self.assertTrue(embedding_meta_rows)
-            self.assertTrue(all("canonical_skill_text_hash" not in row for row in embedding_meta_rows))
             embedding_store = json.loads((workspace / "graph" / "embeddings.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(embedding_store), {"model_id", "dimension", "embeddings"})
             self.assertTrue(all("canonical_skill_text_hash" not in row for row in embedding_store["embeddings"]))
             self.assertTrue(all(row["canonical_object"] for row in execution_index))
             self.assertNotIn("artifact_nodes", compiled_graph["execution_graph"])
             self.assertNotIn("scenario_nodes", compiled_graph["execution_graph"])
             self.assertNotIn("skill_artifact_edges", compiled_graph["execution_graph"])
             self.assertNotIn("skill_scenario_edges", compiled_graph["execution_graph"])
+            self.assertNotIn("debug_extraction", compiled_graph["execution_graph"])
             status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["canonical_object_count"], result.stats["canonical_object_count"])
             self.assertEqual(status["execution_compatibility_count"], result.stats["execution_compatibility_count"])
@@ -314,24 +348,51 @@ class KGBuildTests(unittest.TestCase):
             stale_workflow_compatibility = workspace / "graph" / "workflow_compatibility.jsonl"
             stale_workflow_compatibility.write_text("{}\n", encoding="utf-8")
 
-            second = build_graph(
-                BuildConfig(
-                    skill_root=FIXTURE_SKILLS,
-                    workspace=workspace,
-                    similar_top_k=3,
-                    candidate_top_k=6,
-                    validator=validator,
-                    canonicalization_provider=DeterministicCanonicalizationProvider(),
-                    interface_extractor=FixtureInterfaceExtractor(),
-                    execution_validator=DeterministicExecutionFlowValidator(),
-                    embedding_provider=FakeEmbeddingProvider(),
-                    build_id="test-build-2",
-                )
+            second = _build_test_graph(
+                workspace=workspace,
+                validator=validator,
+                canonicalization_provider=FixtureCanonicalizationProvider(),
+                interface_extractor=FixtureInterfaceExtractor(),
+                execution_validator=DeterministicExecutionFlowValidator(),
+                embedding_provider=FakeEmbeddingProvider(),
+                build_id="test-build-2",
             )
             self.assertEqual(second.stats["skipped_unchanged"], 8)
             self.assertFalse(stale_obsolete_artifact.exists())
             self.assertFalse(stale_predicate_inventory.exists())
             self.assertFalse(stale_workflow_compatibility.exists())
+
+    def test_config_digest_tracks_effective_embedding_model(self) -> None:
+        def build_with_embedding_model(tmp: str, model_id: str) -> tuple[str, dict[str, object], dict[str, object]]:
+            provider = FakeEmbeddingProvider()
+            provider.model_id = model_id
+            workspace = Path(tmp) / model_id.replace("/", "-")
+            result = _build_test_graph(
+                workspace=workspace,
+                validator=StaticPairValidator({}),
+                canonicalization_provider=FixtureCanonicalizationProvider(),
+                interface_extractor=FixtureInterfaceExtractor(),
+                execution_validator=DeterministicExecutionFlowValidator(),
+                embedding_provider=provider,
+                build_id=f"build-{model_id}",
+            )
+            status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
+            summary = json.loads((workspace / "reports" / "build_summary.json").read_text(encoding="utf-8"))
+            compiled = json.loads((workspace / "graph" / "compiled.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["config_digest"], result.graph.config_digest)
+            self.assertEqual(summary["config_digest"], result.graph.config_digest)
+            self.assertEqual(compiled["config_digest"], result.graph.config_digest)
+            return result.graph.config_digest, summary, status
+
+        with TemporaryDirectory() as tmp:
+            digest_a, summary_a, status_a = build_with_embedding_model(tmp, "fake-embedding-a")
+            digest_b, summary_b, status_b = build_with_embedding_model(tmp, "fake-embedding-b")
+
+        self.assertNotEqual(digest_a, digest_b)
+        self.assertEqual(summary_a["models"]["embedding"], "fake-embedding-a")
+        self.assertEqual(summary_b["models"]["embedding"], "fake-embedding-b")
+        self.assertEqual(status_a["embedding_model_id"], "fake-embedding-a")
+        self.assertEqual(status_b["embedding_model_id"], "fake-embedding-b")
 
     def test_health_report_detects_cycles_and_missing_evidence(self) -> None:
         graph = GraphDocument(
@@ -498,30 +559,20 @@ class KGBuildTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                build_graph(
-                    BuildConfig(
-                        skill_root=FIXTURE_SKILLS,
-                        workspace=workspace,
-                        similar_top_k=1,
-                        candidate_top_k=2,
-                        embedding_provider=FakeEmbeddingProvider(),
-                        llm_env_path=env_path,
-                        build_id="llm-build-1",
-                    )
+                _build_test_graph(
+                    workspace=workspace,
+                    embedding_provider=FakeEmbeddingProvider(),
+                    llm_env_path=env_path,
+                    build_id="llm-build-1",
                 )
                 first_call_count = len(calls)
                 self.assertGreater(first_call_count, 0)
 
-                build_graph(
-                    BuildConfig(
-                        skill_root=FIXTURE_SKILLS,
-                        workspace=workspace,
-                        similar_top_k=1,
-                        candidate_top_k=2,
-                        embedding_provider=FakeEmbeddingProvider(),
-                        llm_env_path=env_path,
-                        build_id="llm-build-2",
-                    )
+                _build_test_graph(
+                    workspace=workspace,
+                    embedding_provider=FakeEmbeddingProvider(),
+                    llm_env_path=env_path,
+                    build_id="llm-build-2",
                 )
                 self.assertEqual(len(calls), first_call_count)
         finally:
@@ -613,10 +664,6 @@ class KGBuildTests(unittest.TestCase):
                             str(FIXTURE_SKILLS),
                             "--workspace",
                             str(workspace),
-                            "--similar-top-k",
-                            "1",
-                            "--candidate-top-k",
-                            "1",
                             "--env-file",
                             str(env_path),
                             "--skip-wiki",

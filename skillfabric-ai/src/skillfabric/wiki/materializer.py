@@ -11,7 +11,6 @@ from skillfabric.wiki.indexer import append_log, render_index
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage, WikiSummaryRecord
 from skillfabric.wiki.renderers import (
-    _debug_pages,
     _first_paragraph,
     _skill_page,
     _skill_source_page,
@@ -26,7 +25,7 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
 
     workspace = Workspace(config.workspace)
     workspace.ensure()
-    _prepare_wiki_dirs(workspace, include_debug_pages=config.include_debug_pages)
+    _prepare_wiki_dirs(workspace)
     source = load_wiki_source(workspace)
     summarizer = WikiSummarizer(config)
     pages = _entity_pages(source, config, summarizer, workspace)
@@ -63,8 +62,6 @@ def _entity_pages(
         pages.append(_skill_source_page(skill, workspace))
     for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
         pages.append(_workflow_page(source, record, workspace))
-    if config.include_debug_pages:
-        pages.extend(_debug_pages(source, workspace))
     return pages
 
 
@@ -102,7 +99,7 @@ def _directory_pages(
     ]
 
 
-def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> None:
+def _prepare_wiki_dirs(workspace: Workspace) -> None:
     """Remove stale generated pages that no longer belong to the main wiki view."""
 
     for path in _stale_main_wiki_dirs(workspace):
@@ -129,8 +126,9 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
     ):
         if stale_file.exists():
             stale_file.unlink()
-    if not include_debug_pages and workspace.wiki_debug_dir.exists():
-        shutil.rmtree(workspace.wiki_debug_dir)
+    stale_reports_debug = workspace.reports_dir / "wiki-debug"
+    if stale_reports_debug.exists():
+        shutil.rmtree(stale_reports_debug)
     stale_wiki_debug = workspace.wiki_dir / "debug"
     if stale_wiki_debug.exists():
         shutil.rmtree(stale_wiki_debug)
@@ -144,9 +142,6 @@ def _prepare_wiki_dirs(workspace: Workspace, *, include_debug_pages: bool) -> No
                 page.unlink()
         path.mkdir(parents=True, exist_ok=True)
     workspace.wiki_workflows_dir.mkdir(parents=True, exist_ok=True)
-    if include_debug_pages:
-        workspace.wiki_debug_raw_artifacts_dir.mkdir(parents=True, exist_ok=True)
-        workspace.wiki_debug_raw_scenarios_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:

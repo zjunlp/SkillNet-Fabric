@@ -15,7 +15,7 @@ from skillfabric.compiled_graph.interface.providers import InterfaceSchemaError
 from skillfabric.registry.models import SkillNode
 
 
-def _interface_from_raw(skill: SkillNode, raw: dict[str, Any], *, model_id: str, provenance: str) -> SkillInterface:
+def _interface_from_raw(skill: SkillNode, raw: dict[str, Any], *, model_id: str) -> SkillInterface:
     return SkillInterface(
         skill_id=skill.id,
         content_hash=skill.content_hash,
@@ -25,7 +25,6 @@ def _interface_from_raw(skill: SkillNode, raw: dict[str, Any], *, model_id: str,
         produces=_fields_from_raw(skill, raw.get("produces", []), default_kind="data", allow_tool=False),
         uses_tools=_fields_from_raw(skill, raw.get("uses_tools", []), default_kind="tool", only_tool=True),
         evidence=_evidence_from_raw(skill, raw.get("evidence", [])),
-        provenance=provenance,
         model_id=model_id,
     )
 

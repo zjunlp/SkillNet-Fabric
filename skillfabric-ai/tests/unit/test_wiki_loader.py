@@ -19,7 +19,10 @@ class WikiLoaderTests(unittest.TestCase):
 
             self.assertIn("skill:pdf-table-parser", source.skills)
             self.assertIn("skill:pdf-table-parser", source.interfaces)
-            self.assertTrue(source.raw_artifacts)
+            self.assertFalse(hasattr(source, "raw_artifacts"))
+            self.assertFalse(hasattr(source, "raw_scenarios"))
+            self.assertFalse(hasattr(source, "raw_skill_artifact_edges"))
+            self.assertFalse(hasattr(source, "raw_skill_scenario_edges"))
             self.assertFalse(hasattr(source, "artifacts"))
             self.assertFalse(hasattr(source, "scenarios"))
             self.assertFalse(hasattr(source, "skill_artifact_edges"))

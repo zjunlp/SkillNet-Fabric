@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.canonicalization.candidates import (
+    DEFAULT_MAX_GROUP_SIZE,
+    DEFAULT_SEMANTIC_THRESHOLD,
+    DEFAULT_SEMANTIC_TOP_K,
     EmbeddingProviderCanonicalEmbedder,
 )
 from skillfabric.compiled_graph.canonicalization.compiler import (
-    DeterministicCanonicalizationProvider,
     LiteLLMCanonicalizationProvider,
     canonicalize_contract_objects,
 )
@@ -25,6 +27,7 @@ from skillfabric.compiled_graph.canonicalization.models import (
     CanonicalizationBuild,
     CanonicalizationProvider,
 )
+from skillfabric.compiled_graph.canonicalization.prompts import CANONICALIZATION_PROMPT_ID
 from skillfabric.compiled_graph.execution.compiler import (
     ExecutionGraphBuild,
     compile_execution_graph,
@@ -35,7 +38,15 @@ from skillfabric.compiled_graph.execution.health import (
     render_execution_health_report,
 )
 from skillfabric.compiled_graph.execution.models import ExecutionValidationRecord
+from skillfabric.compiled_graph.execution.policy import (
+    EXECUTION_POLICY_DIGEST,
+    EXECUTION_POLICY_VERSION,
+)
 from skillfabric.compiled_graph.execution.projection import project_execution_records
+from skillfabric.compiled_graph.execution.prompts import (
+    COMPACT_EXECUTION_PROMPT_ID,
+    EXECUTION_PROMPT_ID,
+)
 from skillfabric.compiled_graph.execution.validation import (
     DeterministicExecutionFlowValidator,
     ExecutionFlowValidator,
@@ -55,9 +66,18 @@ from skillfabric.compiled_graph.interface.health import (
     render_interface_health_report,
 )
 from skillfabric.compiled_graph.interface.models import InterfaceExtractionRecord, SkillInterface
+from skillfabric.compiled_graph.interface.prompts import INTERFACE_PROMPT_ID
 from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.compiled_graph.relations.candidates import generate_relation_candidates
 from skillfabric.compiled_graph.relations.edge_safety import enforce_depend_on_acyclicity
+from skillfabric.compiled_graph.relations.policy import (
+    RELATION_POLICY_DIGEST,
+    RELATION_POLICY_VERSION,
+)
+from skillfabric.compiled_graph.relations.prompts import (
+    COMPACT_RELATION_PROMPT_ID,
+    RELATION_PROMPT_ID,
+)
 from skillfabric.compiled_graph.relations.similarity import build_similar_edges
 from skillfabric.compiled_graph.relations.validation import (
     LiteLLMPairValidator,
@@ -81,6 +101,10 @@ from skillfabric.runtime.llm import llm_usage_context
 from skillfabric.runtime.usage import load_usage_records, summarize_usage
 from skillfabric.storage import Workspace, atomic_write_text
 
+DEFAULT_SIMILAR_TOP_K = 5
+DEFAULT_CANDIDATE_TOP_K = 20
+DEFAULT_EXECUTION_BUCKET_LIMIT = 100
+
 
 @dataclass(slots=True)
 class BuildConfig:
@@ -88,25 +112,21 @@ class BuildConfig:
 
     skill_root: str | Path
     workspace: str | Path = ".skillfabric"
-    similar_top_k: int = 5
-    candidate_top_k: int = 20
-    validator: PairValidator | None = None
+    llm_env_path: str | Path = ".env"
+    skip_llm_validation: bool = False
+    llm_options: LLMJobOptions | None = None
+
+
+@dataclass(slots=True)
+class _BuildDependencies:
+    """Private dependency overrides for tests and internal adapters."""
+
+    pair_validator: PairValidator | None = None
     execution_validator: ExecutionFlowValidator | None = None
     interface_extractor: SkillInterfaceExtractor | None = None
     canonicalization_provider: CanonicalizationProvider | None = None
     embedding_provider: EmbeddingProvider | None = None
-    llm_env_path: str | Path = ".env"
     build_id: str | None = None
-    skip_llm_validation: bool = False
-    skip_interface_extraction: bool = False
-    skip_execution_layer: bool = False
-    execution_bucket_limit: int = 100
-    llm_concurrency: int | None = None
-    llm_rate_limit_per_minute: float | None = None
-    llm_max_retries: int | None = None
-    llm_retry_backoff_seconds: float | None = None
-    llm_progress_every: int | None = None
-    llm_batch_size: int | None = None
 
 
 @dataclass(slots=True)
@@ -161,23 +181,32 @@ class _StageTimer:
         return round(time.perf_counter() - self.started_at, 6)
 
 
-def build_graph(config: BuildConfig) -> BuildResult:
+def build_graph(config: BuildConfig, *, dependencies: _BuildDependencies | None = None) -> BuildResult:
     """Run the full offline KG build pipeline."""
 
+    deps = dependencies or _BuildDependencies()
     workspace = Workspace(config.workspace)
-    build_id = config.build_id or str(int(time.time()))
-    embedding_provider = config.embedding_provider or default_embedding_provider(env_path=config.llm_env_path)
+    build_id = deps.build_id or str(int(time.time()))
+    embedding_provider = deps.embedding_provider or default_embedding_provider(env_path=config.llm_env_path)
     llm_job_options = _llm_job_options(config)
-    config_digest = _config_digest(config)
     stage_timer = _StageTimer()
     usage_log_path = workspace.reports_dir / "llm_usage.jsonl"
     workspace.ensure()
 
     with workspace.lock(), llm_usage_context(log_path=usage_log_path, metadata={"build_id": build_id}):
-        validator = _resolve_pair_validator(config)
-        interface_extractor = _resolve_interface_extractor(config)
-        execution_validator = _resolve_execution_validator(config)
-        canonicalization_provider = _resolve_canonicalization_provider(config)
+        validator = _resolve_pair_validator(config, deps)
+        interface_extractor = _resolve_interface_extractor(config, deps)
+        execution_validator = _resolve_execution_validator(config, deps)
+        canonicalization_provider = _resolve_canonicalization_provider(config, deps)
+        config_digest = _config_digest(
+            config,
+            embedding_provider=embedding_provider,
+            pair_validator=validator,
+            interface_extractor=interface_extractor,
+            canonicalization_provider=canonicalization_provider,
+            execution_validator=execution_validator,
+            llm_job_options=llm_job_options,
+        )
         workspace.write_json(
             workspace.checkpoint_path,
             {"stage": "scan", "build_id": build_id, "config_digest": config_digest},
@@ -193,26 +222,15 @@ def build_graph(config: BuildConfig) -> BuildResult:
             workspace.checkpoint_path,
             {"stage": "index", "build_id": build_id, "config_digest": config_digest},
         )
-        bm25_path = workspace.index_dir / "bm25.sqlite"
+        bm25_path = workspace.graph_dir / "bm25.sqlite"
         build_bm25_index(skills, bm25_path)
         embeddings = build_embedding_store(
             skills,
-            workspace.index_dir / "embeddings.json",
+            workspace.graph_dir / "embeddings.json",
             provider=embedding_provider,
         )
+        _remove_obsolete_embedding_artifacts(workspace)
         embedding_metrics = _embedding_metrics(skills, embeddings, embedding_provider)
-        workspace.write_jsonl(
-            workspace.index_dir / "embedding_meta.jsonl",
-            [
-                {
-                    "skill_id": skill.id,
-                    "content_hash": skill.content_hash,
-                    "model_id": embedding_provider.model_id,
-                    "vector_index": index,
-                }
-                for index, skill in enumerate(skills)
-            ],
-        )
         stage_timer.mark("index")
 
         workspace.write_json(
@@ -222,11 +240,11 @@ def build_graph(config: BuildConfig) -> BuildResult:
         neighbor_scores = build_neighbor_scores(
             skills,
             embeddings,
-            top_k=config.similar_top_k,
+            top_k=DEFAULT_SIMILAR_TOP_K,
             bm25_neighbors=_bm25_neighbor_lookup(
                 skills,
                 bm25_path,
-                limit=max(config.similar_top_k * 4, 20),
+                limit=max(DEFAULT_SIMILAR_TOP_K * 4, 20),
             ),
         )
         similar_edges = build_similar_edges(neighbor_scores)
@@ -264,24 +282,20 @@ def build_graph(config: BuildConfig) -> BuildResult:
             workspace.checkpoint_path,
             {"stage": "execution", "build_id": build_id, "config_digest": config_digest},
         )
-        if config.skip_execution_layer:
-            execution_graph = ExecutionGraphBuild()
-            execution_records: list[ExecutionValidationRecord] = []
-        else:
-            execution_graph = compile_execution_graph(
-                interfaces,
-                bucket_limit=config.execution_bucket_limit,
-                canonicalization=canonicalization,
-            )
-            execution_records = validate_execution_flow_candidates(
-                execution_graph.candidates,
-                skills,
-                interfaces=interfaces,
-                validator=execution_validator,
-                cache_path=workspace.cache_dir / "execution_validation_cache.json",
-                job_options=llm_job_options,
-            )
-            execution_graph.execution_index = execution_index_from_validation_records(execution_records)
+        execution_graph = compile_execution_graph(
+            interfaces,
+            bucket_limit=DEFAULT_EXECUTION_BUCKET_LIMIT,
+            canonicalization=canonicalization,
+        )
+        execution_records = validate_execution_flow_candidates(
+            execution_graph.candidates,
+            skills,
+            interfaces=interfaces,
+            validator=execution_validator,
+            cache_path=workspace.cache_dir / "execution_validation_cache.json",
+            job_options=llm_job_options,
+        )
+        execution_graph.execution_index = execution_index_from_validation_records(execution_records)
         _write_execution_artifacts(workspace, execution_graph, execution_records)
         execution_validation_summary = summarize_execution_validation_records(execution_records)
         stage_timer.mark("execution")
@@ -291,7 +305,7 @@ def build_graph(config: BuildConfig) -> BuildResult:
             {"stage": "compose_depend", "build_id": build_id, "config_digest": config_digest},
         )
         relation_candidates = generate_relation_candidates(
-            per_skill_limit=config.candidate_top_k,
+            per_skill_limit=DEFAULT_CANDIDATE_TOP_K,
             interfaces=interfaces,
             execution_records=execution_records,
             canonicalization=canonicalization,
@@ -333,6 +347,13 @@ def build_graph(config: BuildConfig) -> BuildResult:
             "raw_contract_object_count": len(canonicalization.raw_terms),
             "canonical_object_count": len(canonicalization.objects),
             "canonical_assignment_count": len(canonicalization.assignments),
+            "canonicalization_cluster_count": canonicalization.cluster_count,
+            "canonicalization_llm_call_count": canonicalization.llm_call_count,
+            "canonicalization_omitted_term_count": canonicalization.omitted_term_count,
+            "canonicalization_cache_hit_count": canonicalization.cache_hit_count,
+            "semantic_threshold": DEFAULT_SEMANTIC_THRESHOLD,
+            "semantic_top_k": DEFAULT_SEMANTIC_TOP_K,
+            "max_group_size": DEFAULT_MAX_GROUP_SIZE,
             "raw_artifact_count": len(execution_graph.raw_artifact_nodes),
             "raw_scenario_count": len(execution_graph.raw_scenario_nodes),
             "canonical_artifact_count": len(
@@ -401,11 +422,19 @@ def build_graph(config: BuildConfig) -> BuildResult:
                 "interface_count": stats["interface_count"],
                 "interface_accepted_count": stats["interface_accepted_count"],
                 "interface_rejected_count": stats["interface_rejected_count"],
+                "embedding_model_id": stats["embedding_model_id"],
                 "interface_model_id": stats["interface_model_id"],
                 "canonicalization_model_id": stats["canonicalization_model_id"],
                 "raw_contract_object_count": stats["raw_contract_object_count"],
                 "canonical_object_count": stats["canonical_object_count"],
                 "canonical_assignment_count": stats["canonical_assignment_count"],
+                "canonicalization_cluster_count": stats["canonicalization_cluster_count"],
+                "canonicalization_llm_call_count": stats["canonicalization_llm_call_count"],
+                "canonicalization_omitted_term_count": stats["canonicalization_omitted_term_count"],
+                "canonicalization_cache_hit_count": stats["canonicalization_cache_hit_count"],
+                "semantic_threshold": stats["semantic_threshold"],
+                "semantic_top_k": stats["semantic_top_k"],
+                "max_group_size": stats["max_group_size"],
                 "raw_artifact_count": stats["raw_artifact_count"],
                 "raw_scenario_count": stats["raw_scenario_count"],
                 "canonical_artifact_count": stats["canonical_artifact_count"],
@@ -428,14 +457,15 @@ def build_graph(config: BuildConfig) -> BuildResult:
                     "skill_interfaces": str(workspace.graph_dir / "contracts.jsonl"),
                     "interface_evidence": str(workspace.graph_dir / "interface_evidence.jsonl"),
                     "interface_health_report": str(workspace.graph_dir / "interface_health_report.md"),
-                    "canonical_objects": str(workspace.execution_dir / "canonical_objects.jsonl"),
-                    "canonical_aliases": str(workspace.execution_dir / "canonical_aliases.jsonl"),
+                    "canonical_objects": str(workspace.graph_dir / "canonical_objects.jsonl"),
+                    "canonical_aliases": str(workspace.graph_dir / "canonical_aliases.jsonl"),
+                    "canonicalization_aliases": str(workspace.graph_dir / "canonicalization_aliases.json"),
                     "canonicalization_cache": str(workspace.cache_dir / "canonicalization_cache.json"),
-                    "canonicalization_health_report": str(workspace.execution_dir / "canonicalization_health_report.md"),
-                    "execution_index": str(workspace.execution_dir / "execution_index.jsonl"),
-                    "canonicalization_aliases": str(workspace.execution_dir / "canonicalization_aliases.json"),
-                    "execution_evidence": str(workspace.execution_dir / "execution_evidence.jsonl"),
-                    "execution_health_report": str(workspace.execution_dir / "execution_health_report.md"),
+                    "canonicalization_health_report": str(workspace.graph_dir / "canonicalization_health_report.md"),
+                    "execution_index": str(workspace.graph_dir / "execution_index.jsonl"),
+                    "execution_aliases": str(workspace.graph_dir / "execution_aliases.json"),
+                    "execution_evidence": str(workspace.graph_dir / "execution_evidence.jsonl"),
+                    "execution_health_report": str(workspace.graph_dir / "execution_health_report.md"),
                     "build_metrics": str(workspace.reports_dir / "build_summary.json"),
                 },
             },
@@ -507,12 +537,12 @@ def _write_interface_artifacts(
         [record.interface.to_dict() for record in records],
     )
     workspace.write_jsonl(
-        workspace.interfaces_dir / "interface_evidence.jsonl",
+        workspace.graph_dir / "interface_evidence.jsonl",
         [record.to_record() for record in records],
     )
     health = analyze_interface_health([record.interface for record in records])
     atomic_write_text(
-        workspace.interfaces_dir / "interface_health_report.md",
+        workspace.graph_dir / "interface_health_report.md",
         render_interface_health_report(health),
     )
 
@@ -522,11 +552,11 @@ def _write_canonicalization_artifacts(
     build: CanonicalizationBuild,
 ) -> None:
     workspace.write_jsonl(
-        workspace.execution_dir / "canonical_objects.jsonl",
+        workspace.graph_dir / "canonical_objects.jsonl",
         [item.to_dict() for item in build.objects],
     )
     workspace.write_jsonl(
-        workspace.execution_dir / "canonical_aliases.jsonl",
+        workspace.graph_dir / "canonical_aliases.jsonl",
         [item.to_dict() for item in build.assignments],
     )
     workspace.write_json(
@@ -541,7 +571,7 @@ def _write_canonicalization_artifacts(
     )
     health = analyze_canonicalization_health(build)
     atomic_write_text(
-        workspace.execution_dir / "canonicalization_health_report.md",
+        workspace.graph_dir / "canonicalization_health_report.md",
         render_canonicalization_health_report(health),
     )
 
@@ -553,11 +583,11 @@ def _write_execution_artifacts(
 ) -> None:
     _remove_obsolete_execution_artifacts(workspace)
     workspace.write_jsonl(
-        workspace.execution_dir / "execution_index.jsonl",
+        workspace.graph_dir / "execution_index.jsonl",
         [record.to_dict() for record in build.execution_index],
     )
     workspace.write_json(
-        workspace.execution_dir / "canonicalization_aliases.json",
+        workspace.graph_dir / "execution_aliases.json",
         {
             "schema_version": "1.0",
             "aliases": build.canonical_aliases,
@@ -567,16 +597,16 @@ def _write_execution_artifacts(
         },
     )
     workspace.write_jsonl(
-        workspace.execution_dir / "execution_evidence.jsonl",
+        workspace.graph_dir / "execution_evidence.jsonl",
         [record.to_record() for record in records],
     )
     workspace.write_json(
-        workspace.execution_dir / "execution_validation_summary.json",
+        workspace.graph_dir / "execution_validation_summary.json",
         summarize_execution_validation_records(records),
     )
     health = analyze_execution_health(build, records)
     atomic_write_text(
-        workspace.execution_dir / "execution_health_report.md",
+        workspace.graph_dir / "execution_health_report.md",
         render_execution_health_report(health),
     )
 
@@ -598,9 +628,16 @@ def _remove_obsolete_execution_artifacts(workspace: Workspace) -> None:
         "predicate_cache.json",
     ):
         try:
-            (workspace.execution_dir / filename).unlink()
+            (workspace.graph_dir / filename).unlink()
         except FileNotFoundError:
             pass
+
+
+def _remove_obsolete_embedding_artifacts(workspace: Workspace) -> None:
+    try:
+        (workspace.graph_dir / "embedding_meta.jsonl").unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _write_compiled_graph_artifact(
@@ -633,16 +670,6 @@ def _write_compiled_graph_artifact(
                     "alias_merge_ratio": _alias_merge_ratio(execution_graph.canonical_aliases),
                 },
                 "validated_flows": [record.to_record() for record in execution_records],
-                "debug_extraction": {
-                    "raw_artifact_nodes": [node.to_dict() for node in execution_graph.raw_artifact_nodes],
-                    "raw_scenario_nodes": [node.to_dict() for node in execution_graph.raw_scenario_nodes],
-                    "raw_skill_artifact_edges": [
-                        edge.to_dict() for edge in execution_graph.raw_skill_artifact_edges
-                    ],
-                    "raw_skill_scenario_edges": [
-                        edge.to_dict() for edge in execution_graph.raw_skill_scenario_edges
-                    ],
-                },
             },
             "stats": stats,
             "config_digest": config_digest,
@@ -671,6 +698,16 @@ def _write_build_metrics(
             "build_wall_time_seconds": stats.get("build_wall_time_seconds", 0.0),
             "llm_usage": llm_usage,
             "embedding": stats.get("embedding", {}),
+            "canonicalization": {
+                "cluster_count": stats.get("canonicalization_cluster_count", 0),
+                "llm_call_count": stats.get("canonicalization_llm_call_count", 0),
+                "assignment_count": stats.get("canonical_assignment_count", 0),
+                "omitted_term_count": stats.get("canonicalization_omitted_term_count", 0),
+                "cache_hit_count": stats.get("canonicalization_cache_hit_count", 0),
+                "semantic_threshold": stats.get("semantic_threshold", DEFAULT_SEMANTIC_THRESHOLD),
+                "semantic_top_k": stats.get("semantic_top_k", DEFAULT_SEMANTIC_TOP_K),
+                "max_group_size": stats.get("max_group_size", DEFAULT_MAX_GROUP_SIZE),
+            },
             "execution_validation": stats.get("execution_validation", {}),
             "relation_validation": stats.get("relation_validation", {}),
             "cache": {
@@ -749,25 +786,93 @@ def _bm25_neighbor_lookup(
     return lookup
 
 
-def _config_digest(config: BuildConfig) -> str:
+def _config_digest(
+    config: BuildConfig,
+    *,
+    embedding_provider: EmbeddingProvider,
+    pair_validator: PairValidator,
+    interface_extractor: SkillInterfaceExtractor,
+    canonicalization_provider: CanonicalizationProvider,
+    execution_validator: ExecutionFlowValidator,
+    llm_job_options: LLMJobOptions,
+) -> str:
     payload = {
+        "schema_version": "2.0",
         "skill_root": str(config.skill_root),
-        "similar_top_k": config.similar_top_k,
-        "candidate_top_k": config.candidate_top_k,
         "llm_env_path": str(config.llm_env_path),
-        "skip_llm_validation": config.skip_llm_validation,
-        "skip_interface_extraction": config.skip_interface_extraction,
-        "skip_execution_layer": config.skip_execution_layer,
-        "canonicalization_provider": type(config.canonicalization_provider).__name__ if config.canonicalization_provider else "",
-        "execution_bucket_limit": config.execution_bucket_limit,
-        "llm_concurrency": config.llm_concurrency,
-        "llm_rate_limit_per_minute": config.llm_rate_limit_per_minute,
-        "llm_max_retries": config.llm_max_retries,
-        "llm_retry_backoff_seconds": config.llm_retry_backoff_seconds,
-        "llm_progress_every": config.llm_progress_every,
-        "llm_batch_size": config.llm_batch_size,
+        "runtime_flags": {
+            "skip_llm_validation": config.skip_llm_validation,
+        },
+        "retrieval": {
+            "similar_top_k": DEFAULT_SIMILAR_TOP_K,
+            "candidate_top_k": DEFAULT_CANDIDATE_TOP_K,
+            "embedding": _provider_fingerprint(embedding_provider),
+        },
+        "interface_extraction": {
+            "extractor": _provider_fingerprint(interface_extractor),
+            "prompt_id": INTERFACE_PROMPT_ID,
+        },
+        "canonicalization": {
+            "provider": _provider_fingerprint(canonicalization_provider),
+            "prompt_id": CANONICALIZATION_PROMPT_ID,
+            "semantic_embedder": _provider_fingerprint(embedding_provider),
+            "semantic_threshold": DEFAULT_SEMANTIC_THRESHOLD,
+            "semantic_top_k": DEFAULT_SEMANTIC_TOP_K,
+            "max_group_size": DEFAULT_MAX_GROUP_SIZE,
+        },
+        "execution": {
+            "validator": _provider_fingerprint(execution_validator),
+            "bucket_limit": DEFAULT_EXECUTION_BUCKET_LIMIT,
+            "policy_version": EXECUTION_POLICY_VERSION,
+            "policy_digest": EXECUTION_POLICY_DIGEST,
+            "prompt_id": EXECUTION_PROMPT_ID,
+            "compact_prompt_id": COMPACT_EXECUTION_PROMPT_ID,
+        },
+        "relations": {
+            "validator": _provider_fingerprint(pair_validator),
+            "policy_version": RELATION_POLICY_VERSION,
+            "policy_digest": RELATION_POLICY_DIGEST,
+            "prompt_id": RELATION_PROMPT_ID,
+            "compact_prompt_id": COMPACT_RELATION_PROMPT_ID,
+        },
+        "llm_jobs": _llm_job_options_fingerprint(llm_job_options),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _provider_fingerprint(provider: object) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "class": provider.__class__.__name__,
+        "model_id": str(getattr(provider, "model_id", "")),
+    }
+    provider_name = getattr(provider, "provider_name", None)
+    if provider_name is not None:
+        data["provider_name"] = str(provider_name)
+    dimension = getattr(provider, "dimension", None)
+    if dimension is not None:
+        data["dimension"] = int(dimension or 0)
+    batch_size = getattr(provider, "batch_size", None)
+    if batch_size is not None:
+        data["batch_size"] = int(batch_size or 0)
+    max_text_chars = getattr(provider, "max_text_chars", None)
+    if max_text_chars is not None:
+        data["max_text_chars"] = int(max_text_chars or 0)
+    timeout = getattr(provider, "timeout", None)
+    if timeout is not None:
+        data["timeout"] = float(timeout or 0.0)
+    return data
+
+
+def _llm_job_options_fingerprint(options: LLMJobOptions) -> dict[str, int | float | None]:
+    normalized = options.normalized()
+    return {
+        "concurrency": normalized.concurrency,
+        "rate_limit_per_minute": normalized.rate_limit_per_minute,
+        "max_retries": normalized.max_retries,
+        "retry_backoff_seconds": normalized.retry_backoff_seconds,
+        "progress_every": normalized.progress_every,
+        "batch_size": normalized.batch_size,
+    }
 
 
 def _alias_merge_ratio(aliases: dict[str, str]) -> float:
@@ -791,47 +896,50 @@ def _canonicalization_evidence_rows(build: CanonicalizationBuild) -> list[dict[s
     return rows
 
 
-def _resolve_pair_validator(config: BuildConfig) -> PairValidator:
+def _resolve_pair_validator(config: BuildConfig, dependencies: _BuildDependencies) -> PairValidator:
+    if dependencies.pair_validator is not None:
+        return dependencies.pair_validator
     if config.skip_llm_validation:
         return NoopPairValidator()
-    if config.validator is not None:
-        return config.validator
     return LiteLLMPairValidator.from_env(env_path=config.llm_env_path)
 
 
-def _resolve_interface_extractor(config: BuildConfig) -> SkillInterfaceExtractor:
-    if config.interface_extractor is not None:
-        return config.interface_extractor
-    if config.skip_llm_validation or config.skip_interface_extraction:
+def _resolve_interface_extractor(
+    config: BuildConfig,
+    dependencies: _BuildDependencies,
+) -> SkillInterfaceExtractor:
+    if dependencies.interface_extractor is not None:
+        return dependencies.interface_extractor
+    if config.skip_llm_validation:
         return DeterministicInterfaceExtractor()
     return LiteLLMInterfaceExtractor.from_env(env_path=config.llm_env_path)
 
 
-def _resolve_canonicalization_provider(config: BuildConfig) -> CanonicalizationProvider:
-    if config.canonicalization_provider is not None:
-        return config.canonicalization_provider
-    if config.skip_llm_validation or config.skip_execution_layer:
-        return DeterministicCanonicalizationProvider()
+def _resolve_canonicalization_provider(
+    config: BuildConfig,
+    dependencies: _BuildDependencies,
+) -> CanonicalizationProvider:
+    if dependencies.canonicalization_provider is not None:
+        return dependencies.canonicalization_provider
     return LiteLLMCanonicalizationProvider.from_env(env_path=config.llm_env_path)
 
 
-def _resolve_execution_validator(config: BuildConfig) -> ExecutionFlowValidator:
-    if config.execution_validator is not None:
-        return config.execution_validator
-    if config.skip_llm_validation or config.skip_execution_layer:
+def _resolve_execution_validator(
+    config: BuildConfig,
+    dependencies: _BuildDependencies,
+) -> ExecutionFlowValidator:
+    if dependencies.execution_validator is not None:
+        return dependencies.execution_validator
+    if config.skip_llm_validation:
         return DeterministicExecutionFlowValidator()
     return LiteLLMExecutionFlowValidator.from_env(env_path=config.llm_env_path)
 
 
 def _llm_job_options(config: BuildConfig) -> LLMJobOptions:
+    if config.llm_options is not None:
+        return config.llm_options
     return LLMJobOptions.from_env(
         env_path=config.llm_env_path,
-        concurrency=config.llm_concurrency,
-        rate_limit_per_minute=config.llm_rate_limit_per_minute,
-        max_retries=config.llm_max_retries,
-        retry_backoff_seconds=config.llm_retry_backoff_seconds,
-        progress_every=config.llm_progress_every,
-        batch_size=config.llm_batch_size,
     )
 
 

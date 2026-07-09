@@ -18,6 +18,5 @@ def _fallback_interface(skill: SkillNode, *, model_id: str = "deterministic-inte
         produces=[],
         uses_tools=[],
         evidence=[],
-        provenance="deterministic_fallback",
         model_id=model_id,
     )

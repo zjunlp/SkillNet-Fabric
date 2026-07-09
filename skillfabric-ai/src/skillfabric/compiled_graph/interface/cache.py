@@ -50,11 +50,9 @@ def write_interface_cache(path: str | Path | None, payload: dict[str, dict[str, 
 
 
 def cached_interface_from_payload(payload: dict[str, Any]) -> SkillInterface:
-    """Load a cached interface and mark provenance as cache."""
+    """Load a cached interface payload."""
 
-    interface = SkillInterface.from_dict(payload)
-    interface.provenance = "cache"
-    return interface
+    return SkillInterface.from_dict(payload)
 
 
 def _input_digest(skill: SkillNode) -> str:

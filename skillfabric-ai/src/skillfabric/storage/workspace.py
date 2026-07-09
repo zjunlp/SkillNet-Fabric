@@ -17,14 +17,6 @@ class Workspace:
         self.root = Path(root)
 
     @property
-    def registry_dir(self) -> Path:
-        return self.graph_dir
-
-    @property
-    def index_dir(self) -> Path:
-        return self.graph_dir
-
-    @property
     def graph_dir(self) -> Path:
         return self.root / "graph"
 
@@ -35,18 +27,6 @@ class Workspace:
     @property
     def reports_dir(self) -> Path:
         return self.root / "reports"
-
-    @property
-    def wiki_debug_dir(self) -> Path:
-        return self.reports_dir / "wiki-debug"
-
-    @property
-    def interfaces_dir(self) -> Path:
-        return self.graph_dir
-
-    @property
-    def execution_dir(self) -> Path:
-        return self.graph_dir
 
     @property
     def wiki_dir(self) -> Path:
@@ -73,14 +53,6 @@ class Workspace:
         return self.wiki_skills_dir / "sources"
 
     @property
-    def wiki_debug_raw_artifacts_dir(self) -> Path:
-        return self.wiki_debug_dir / "raw_artifacts"
-
-    @property
-    def wiki_debug_raw_scenarios_dir(self) -> Path:
-        return self.wiki_debug_dir / "raw_scenarios"
-
-    @property
     def runs_dir(self) -> Path:
         return self.root / "runs"
 
@@ -98,13 +70,9 @@ class Workspace:
 
     def ensure(self) -> None:
         for path in (
-            self.registry_dir,
-            self.index_dir,
             self.graph_dir,
             self.cache_dir,
             self.reports_dir,
-            self.interfaces_dir,
-            self.execution_dir,
             self.wiki_dir,
             self.wiki_skills_dir,
             self.wiki_skill_cards_dir,

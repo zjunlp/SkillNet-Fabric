@@ -35,21 +35,15 @@ def _seed_scores(
     env_file: str | Path | None = None,
 ) -> dict[str, RouterSkillCandidate]:
     seeds: dict[str, RouterSkillCandidate] = {}
-    bm25_hits = search_bm25(workspace.index_dir / "bm25.sqlite", query, limit=max(len(skills), 10))
+    bm25_hits = search_bm25(workspace.graph_dir / "bm25.sqlite", query, limit=max(len(skills), 10))
     _add_rrf_channel(seeds, skills, bm25_hits, "bm25")
     _add_rrf_channel(seeds, skills, _rank_scores(_lexical_scores(query, skills)), "lexical")
 
-    embeddings_path = workspace.index_dir / "embeddings.json"
+    embeddings_path = workspace.graph_dir / "embeddings.json"
     if embeddings_path.exists():
         try:
             store = load_embedding_store_payload(embeddings_path)
             embeddings = store.vectors
-            if not _embedding_store_is_reconstructable(store.provider):
-                warnings.append(
-                    "embedding search skipped: stored embedding provider "
-                    f"{store.provider!r} is not available at route time"
-                )
-                return seeds
             if env_file is None:
                 provider = embedding_provider_for_model(store.model_id, dimension=store.dimension)
             else:
@@ -70,18 +64,6 @@ def _seed_scores(
     else:
         warnings.append(f"embedding store not found: {embeddings_path}")
     return seeds
-
-
-def _embedding_store_is_reconstructable(provider: str) -> bool:
-    if not provider:
-        return True
-    normalized = provider.strip().lower()
-    return normalized in {
-        "api",
-        "litellm",
-        "openai",
-        "disabled",
-    }
 
 
 def _lexical_scores(query: str, skills: dict[str, SkillNode]) -> dict[str, float]:
@@ -184,7 +166,7 @@ def _object_hits(workspace: Workspace, query_terms: set[str]) -> dict[str, dict[
         "object:produces": {},
         "object:requires": {},
     }
-    for payload in _read_jsonl(workspace.execution_dir / "canonical_objects.jsonl"):
+    for payload in _read_jsonl(workspace.graph_dir / "canonical_objects.jsonl"):
         text = _canonical_object_text(payload)
         score = _term_score(query_terms, text)
         if score <= 0:

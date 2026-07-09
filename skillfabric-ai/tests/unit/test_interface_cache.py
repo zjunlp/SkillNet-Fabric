@@ -52,7 +52,7 @@ class InterfaceCacheTests(unittest.TestCase):
         self.assertEqual(extractor.calls, 1)
         self.assertEqual(first[0].interface.capability_summary, "summary 1")
         self.assertEqual(second[0].interface.capability_summary, "summary 1")
-        self.assertEqual(second[0].interface.provenance, "cache")
+        self.assertNotIn("provenance", second[0].interface.to_dict())
 
     def test_interface_extraction_retries_and_writes_cache(self) -> None:
         skills = [

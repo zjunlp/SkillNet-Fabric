@@ -134,43 +134,6 @@ def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
     )
 
 
-def _debug_pages(source: WikiSource, workspace: Workspace) -> list[WikiPage]:
-    pages: list[WikiPage] = []
-    for artifact_id, artifact in sorted(source.raw_artifacts.items(), key=lambda item: item[1].name):
-        text = "\n\n".join(
-            [
-                frontmatter({"type": "debug", "debug_type": "raw_artifact", "artifact_id": artifact_id}),
-                f"# {artifact.name}",
-                "## Evidence\n\n" + bullet_list([f"{item.skill}:{item.line} - {item.text}" for item in artifact.evidence[:8]]),
-            ]
-        ) + "\n"
-        pages.append(WikiPage(page_path(workspace.wiki_debug_dir, "raw_artifacts", artifact_id), "debug", artifact_id, artifact.name, text))
-    for scenario_id, scenario in sorted(source.raw_scenarios.items(), key=lambda item: item[1].name):
-        text = "\n\n".join(
-            [
-                frontmatter({"type": "debug", "debug_type": "raw_scenario", "scenario_id": scenario_id}),
-                f"# {scenario.name}",
-                "## Evidence\n\n" + bullet_list([f"{item.skill}:{item.line} - {item.text}" for item in scenario.evidence[:8]]),
-            ]
-        ) + "\n"
-        pages.append(WikiPage(page_path(workspace.wiki_debug_dir, "raw_scenarios", scenario_id), "debug", scenario_id, scenario.name, text))
-    report = "\n\n".join(
-        [
-            "# Extraction Report",
-            "## Counts",
-            bullet_list(
-                [
-                    f"raw_artifacts: {len(source.raw_artifacts)}",
-                    f"raw_scenarios: {len(source.raw_scenarios)}",
-                    f"execution_index: {len(source.execution_index)}",
-                ]
-            ),
-        ]
-    ) + "\n"
-    pages.append(WikiPage(workspace.wiki_debug_dir / "extraction_report.md", "debug", "extraction_report", "Extraction Report", report))
-    return pages
-
-
 def _render_use_when(interface: SkillInterface | None, summary: WikiSummaryRecord) -> str:
     values = []
     if interface is not None and interface.when_to_use:

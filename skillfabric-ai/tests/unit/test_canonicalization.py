@@ -8,6 +8,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.compiled_graph.canonicalization.candidates import (
+    DEFAULT_MAX_GROUP_SIZE,
+    DEFAULT_SEMANTIC_THRESHOLD,
+    DEFAULT_SEMANTIC_TOP_K,
     CanonicalSemanticEmbedder,
     EmbeddingProviderCanonicalEmbedder,
     candidate_groups_from_terms,
@@ -15,7 +18,6 @@ from skillfabric.compiled_graph.canonicalization.candidates import (
     normalized_candidate_text,
 )
 from skillfabric.compiled_graph.canonicalization.compiler import (
-    DeterministicCanonicalizationProvider,
     LiteLLMCanonicalizationProvider,
     canonicalize_contract_objects,
 )
@@ -83,6 +85,28 @@ class StaticCanonicalizationProvider:
         }
 
 
+class NameBasedCanonicalizationProvider:
+    model_id = "name-based-canonicalizer"
+
+    def __init__(self) -> None:
+        self.calls: list[CanonicalizationCluster] = []
+
+    def canonicalize(self, cluster: CanonicalizationCluster):
+        self.calls.append(cluster)
+        return {
+            "canonical_objects": [
+                {
+                    "name": normalized_candidate_text(term.name).replace(" ", "_"),
+                    "type": term.kind,
+                    "term_ids": [term.term_id],
+                    "confidence": 0.8,
+                }
+                for term in cluster.terms
+            ],
+            "omitted_term_ids": [],
+        }
+
+
 class OmitCanonicalizationProvider:
     model_id = "omit-canonicalizer"
 
@@ -115,6 +139,39 @@ class SplitSingletonCanonicalizationProvider:
         }
 
 
+class MultiObjectCanonicalizationProvider:
+    model_id = "multi-object-canonicalizer"
+
+    def canonicalize(self, cluster: CanonicalizationCluster):
+        md_terms = [
+            term.term_id
+            for term in cluster.terms
+            if "md file" in term.name.lower() or "markdown file" in term.name.lower()
+        ]
+        spreadsheet_terms = [
+            term.term_id
+            for term in cluster.terms
+            if "spreadsheet" in term.name.lower() or "worksheet" in term.name.lower()
+        ]
+        return {
+            "canonical_objects": [
+                {
+                    "name": "markdown_file",
+                    "type": "artifact",
+                    "term_ids": md_terms,
+                    "confidence": 0.91,
+                },
+                {
+                    "name": "spreadsheet_table",
+                    "type": "data",
+                    "term_ids": spreadsheet_terms,
+                    "confidence": 0.9,
+                },
+            ],
+            "omitted_term_ids": [],
+        }
+
+
 class WrongTypeCanonicalizationProvider:
     model_id = "wrong-type-canonicalizer"
 
@@ -127,6 +184,30 @@ class WrongTypeCanonicalizationProvider:
                     "term_ids": [term.term_id for term in cluster.terms],
                     "confidence": 0.98,
                 }
+            ],
+            "omitted_term_ids": [],
+        }
+
+
+class DuplicateTermCanonicalizationProvider:
+    model_id = "duplicate-term-canonicalizer"
+
+    def canonicalize(self, cluster: CanonicalizationCluster):
+        term_ids = [term.term_id for term in cluster.terms]
+        return {
+            "canonical_objects": [
+                {
+                    "name": "first_object",
+                    "type": "artifact",
+                    "term_ids": term_ids,
+                    "confidence": 0.8,
+                },
+                {
+                    "name": "second_object",
+                    "type": "artifact",
+                    "term_ids": term_ids,
+                    "confidence": 0.9,
+                },
             ],
             "omitted_term_ids": [],
         }
@@ -208,22 +289,29 @@ class CanonicalizationTests(unittest.TestCase):
         )
 
         messages = build_canonicalization_messages(cluster)
-        payload = json.loads(messages[1]["content"])
+        user_prompt = messages[1]["content"]
         prompt_text = json.dumps(messages, ensure_ascii=False)
 
-        self.assertEqual(payload["prompt_id"], "interface_term_canonicalization_v2")
-        self.assertEqual(set(payload), {"prompt_id", "task", "context", "input", "output_schema", "terms"})
+        self.assertIn("<task>", user_prompt)
+        self.assertIn("<rules>", user_prompt)
+        self.assertIn("<allowed_types>", user_prompt)
+        self.assertIn("<output_schema>", user_prompt)
+        self.assertIn("<terms>", user_prompt)
+        terms_json = user_prompt.split("<terms>", 1)[1].split("</terms>", 1)[0].strip()
+        terms = json.loads(terms_json)
         self.assertEqual(
-            set(payload["output_schema"]),
-            {"canonical_objects", "omitted_term_ids"},
+            set(terms[0]),
+            {"term_id", "name", "normalized_name", "role", "kind", "description"},
         )
         self.assertNotIn("depend_on", prompt_text)
         self.assertNotIn("compose_with", prompt_text)
-        self.assertNotIn("Do not", prompt_text)
         self.assertNotIn("candidate_edges", prompt_text)
+        self.assertNotIn("capability_summary", prompt_text)
+        self.assertNotIn("evidence", prompt_text)
+        self.assertNotIn("skill_id", prompt_text)
         self.assertLess(len(prompt_text), 3500)
 
-    def test_exact_normalized_terms_are_accepted_without_provider(self) -> None:
+    def test_exact_normalized_terms_are_resolved_by_provider(self) -> None:
         provider = StaticCanonicalizationProvider()
         producer = _interface("skill:producer", produces=[_field("skill:producer", "CSV-table")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "csv_table")])
@@ -235,28 +323,29 @@ class CanonicalizationTests(unittest.TestCase):
             semantic_embedder=NoSimilarityEmbedder(),
         )
 
-        self.assertEqual(provider.calls, [])
-        self.assertEqual(build.lookup("skill:producer", "produces", "CSV-table", "artifact"), "artifact:csv_table")
-        self.assertEqual(build.lookup("skill:consumer", "requires", "csv_table", "artifact"), "artifact:csv_table")
+        self.assertEqual(len(provider.calls), 1)
+        self.assertEqual(build.lookup("skill:producer", "produces", "CSV-table", "artifact"), "data:spreadsheet_table")
+        self.assertEqual(build.lookup("skill:consumer", "requires", "csv_table", "artifact"), "data:spreadsheet_table")
         self.assertEqual(len(build.objects), 1)
         self.assertFalse(hasattr(build.objects[0], "promoted"))
         self.assertFalse(hasattr(build.objects[0], "reuse_count"))
         self.assertEqual(build.objects[0].produced_by, ["skill:producer"])
         self.assertEqual(build.objects[0].required_by, ["skill:consumer"])
 
-    def test_same_role_exact_terms_are_not_canonicalized_without_consumer(self) -> None:
+    def test_same_role_exact_terms_can_be_canonicalized_without_consumer(self) -> None:
         build = canonicalize_contract_objects(
             {
                 "skill:first": _interface("skill:first", produces=[_field("skill:first", "verification_report", "report")]),
                 "skill:second": _interface("skill:second", produces=[_field("skill:second", "verification report", "report")]),
             },
-            provider=DeterministicCanonicalizationProvider(),
+            provider=NameBasedCanonicalizationProvider(),
             job_options=LLMJobOptions(progress_every=0),
             semantic_embedder=NoSimilarityEmbedder(),
         )
 
-        self.assertEqual(build.objects, [])
-        self.assertEqual(build.assignments, [])
+        self.assertEqual(len(build.objects), 1)
+        self.assertEqual(build.objects[0].canonical_id, "report:verification_report")
+        self.assertEqual(len(build.assignments), 2)
 
     def test_format_aliases_are_not_heuristically_merged(self) -> None:
         provider = OmitCanonicalizationProvider()
@@ -276,7 +365,7 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.lookup("skill:producer", "produces", "md file", "artifact"), "")
         self.assertEqual(build.lookup("skill:consumer", "requires", "markdown file", "artifact"), "")
 
-    def test_isolated_terms_are_not_canonicalized(self) -> None:
+    def test_isolated_terms_can_be_canonicalized(self) -> None:
         build = canonicalize_contract_objects(
             {
                 "skill:producer": _interface(
@@ -284,16 +373,16 @@ class CanonicalizationTests(unittest.TestCase):
                     produces=[_field("skill:producer", "single_use_artifact")],
                 )
             },
-            provider=DeterministicCanonicalizationProvider(),
+            provider=NameBasedCanonicalizationProvider(),
             job_options=LLMJobOptions(progress_every=0),
             semantic_embedder=NoSimilarityEmbedder(),
         )
 
-        self.assertEqual(build.objects, [])
-        self.assertEqual(build.assignments, [])
+        self.assertEqual(build.objects[0].canonical_id, "artifact:single_use_artifact")
+        self.assertEqual(len(build.assignments), 1)
         self.assertEqual(build.raw_terms[0].name, "single_use_artifact")
 
-    def test_pure_generic_interface_names_are_dropped_but_specific_phrases_remain(self) -> None:
+    def test_generic_interface_names_are_collected_for_llm_resolution(self) -> None:
         producer = _interface(
             "skill:producer",
             produces=[
@@ -313,17 +402,24 @@ class CanonicalizationTests(unittest.TestCase):
 
         build = canonicalize_contract_objects(
             {producer.skill_id: producer, consumer.skill_id: consumer},
-            provider=DeterministicCanonicalizationProvider(),
+            provider=NameBasedCanonicalizationProvider(),
             job_options=LLMJobOptions(progress_every=0),
             semantic_embedder=NoSimilarityEmbedder(),
         )
 
         self.assertEqual(
             {term.name for term in build.raw_terms},
-            {"command_result", "project_directory_path", "command result", "project directory path"},
+            {
+                "output",
+                "command_result",
+                "project_directory_path",
+                "files",
+                "command result",
+                "project directory path",
+            },
         )
-        self.assertEqual(build.lookup("skill:producer", "produces", "output", "artifact"), "")
-        self.assertEqual(build.lookup("skill:consumer", "requires", "files", "artifact"), "")
+        self.assertEqual(build.lookup("skill:producer", "produces", "output", "artifact"), "artifact:output")
+        self.assertEqual(build.lookup("skill:consumer", "requires", "files", "artifact"), "artifact:files")
         self.assertEqual(
             build.lookup("skill:producer", "produces", "command_result", "artifact"),
             "artifact:command_result",
@@ -333,19 +429,19 @@ class CanonicalizationTests(unittest.TestCase):
             "artifact:command_result",
         )
 
-    def test_deterministic_provider_skips_semantic_embedding(self) -> None:
+    def test_semantic_grouping_runs_for_llm_provider(self) -> None:
         embedder = CountingSemanticEmbedder()
         producer = _interface("skill:producer", produces=[_field("skill:producer", "spreadsheet export")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "worksheet rows", "data")])
 
         build = canonicalize_contract_objects(
             {producer.skill_id: producer, consumer.skill_id: consumer},
-            provider=DeterministicCanonicalizationProvider(),
+            provider=OmitCanonicalizationProvider(),
             job_options=LLMJobOptions(progress_every=0),
             semantic_embedder=embedder,
         )
 
-        self.assertEqual(embedder.calls, [])
+        self.assertEqual([len(call) for call in embedder.calls], [2])
         self.assertEqual(build.objects, [])
         self.assertEqual(build.assignments, [])
 
@@ -366,7 +462,7 @@ class CanonicalizationTests(unittest.TestCase):
         self.assertEqual(build.lookup("skill:producer", "produces", "spreadsheet export", "artifact"), "data:spreadsheet_table")
         self.assertEqual(build.lookup("skill:consumer", "requires", "worksheet rows", "data"), "data:spreadsheet_table")
 
-    def test_provider_singleton_splits_are_ignored(self) -> None:
+    def test_provider_singleton_splits_are_accepted(self) -> None:
         producer = _interface("skill:producer", produces=[_field("skill:producer", "target object", "data")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "target receptacle object", "data")])
 
@@ -377,10 +473,10 @@ class CanonicalizationTests(unittest.TestCase):
             semantic_embedder=FixedSemanticEmbedder(),
         )
 
-        self.assertEqual(build.objects, [])
-        self.assertEqual(build.assignments, [])
+        self.assertEqual(len(build.objects), 2)
+        self.assertEqual(len(build.assignments), 2)
 
-    def test_provider_type_mismatch_is_ignored(self) -> None:
+    def test_provider_type_mismatch_is_accepted(self) -> None:
         producer = _interface("skill:producer", produces=[_field("skill:producer", "markdown report", "report")])
         consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "md report", "artifact")])
 
@@ -391,8 +487,23 @@ class CanonicalizationTests(unittest.TestCase):
             semantic_embedder=FixedSemanticEmbedder(),
         )
 
-        self.assertEqual(build.objects, [])
-        self.assertEqual(build.assignments, [])
+        self.assertEqual(len(build.objects), 1)
+        self.assertEqual(build.objects[0].canonical_id, "environment:markdown_report")
+        self.assertEqual(len(build.assignments), 2)
+
+    def test_duplicate_provider_term_assignments_keep_single_canonical_owner(self) -> None:
+        producer = _interface("skill:producer", produces=[_field("skill:producer", "csv table")])
+        consumer = _interface("skill:consumer", requires=[_field("skill:consumer", "csv table")])
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=DuplicateTermCanonicalizationProvider(),
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=NoSimilarityEmbedder(),
+        )
+
+        self.assertEqual([item.canonical_id for item in build.objects], ["artifact:first_object"])
+        self.assertEqual({assignment.canonical_id for assignment in build.assignments}, {"artifact:first_object"})
 
     def test_kind_mismatch_is_sent_to_provider_when_text_matches(self) -> None:
         provider = StaticCanonicalizationProvider()
@@ -482,6 +593,36 @@ class CanonicalizationTests(unittest.TestCase):
             )
             self.assertEqual([len(call) for call in embedder.calls], [2, 1])
 
+    def test_semantic_text_uses_only_name_and_description(self) -> None:
+        terms = [
+            RawContractObject(
+                "skill:a",
+                "produces",
+                "shared object",
+                "artifact",
+                description="same normalized description",
+            ),
+            RawContractObject(
+                "skill:b",
+                "requires",
+                "shared object",
+                "data",
+                description="same normalized description",
+            ),
+        ]
+
+        embedder = CountingSemanticEmbedder()
+        generate_semantic_candidate_pairs(terms, embedder=embedder, threshold=0.0, top_k=1)
+
+        self.assertEqual(embedder.calls[0], ["shared object same normalized description"] * 2)
+        self.assertNotIn("produces", " ".join(embedder.calls[0]))
+        self.assertNotIn("artifact", " ".join(embedder.calls[0]))
+
+    def test_default_semantic_grouping_parameters_are_high_recall(self) -> None:
+        self.assertEqual(DEFAULT_SEMANTIC_THRESHOLD, 0.76)
+        self.assertEqual(DEFAULT_SEMANTIC_TOP_K, 8)
+        self.assertEqual(DEFAULT_MAX_GROUP_SIZE, 16)
+
     def test_embedding_provider_adapter_uses_shared_embed_many_interface(self) -> None:
         provider = EmbedManyOnlyProvider()
         embedder = EmbeddingProviderCanonicalEmbedder(provider)
@@ -505,10 +646,55 @@ class CanonicalizationTests(unittest.TestCase):
             semantic_top_k=2,
         )
 
-        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups), 2)
         self.assertTrue(all(not hasattr(group, "candidate_edges") for group in groups))
         semantic_group = next(group for group in groups if len(group.terms) == 2)
         self.assertEqual({term.name for term in semantic_group.terms}, {"spreadsheet export", "worksheet rows"})
+
+    def test_exact_terms_are_not_removed_from_semantic_grouping(self) -> None:
+        terms = [
+            RawContractObject("skill:a", "produces", "csv", "artifact"),
+            RawContractObject("skill:b", "requires", "csv", "artifact"),
+            RawContractObject("skill:c", "requires", "csv table", "artifact"),
+        ]
+
+        groups = candidate_groups_from_terms(
+            terms,
+            semantic_embedder=FixedSemanticEmbedder(),
+            semantic_threshold=0.0,
+            semantic_top_k=8,
+        )
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual({term.name for term in groups[0].terms}, {"csv", "csv table"})
+
+    def test_cluster_can_split_into_multiple_canonical_objects(self) -> None:
+        producer = _interface(
+            "skill:producer",
+            produces=[
+                _field("skill:producer", "md file"),
+                _field("skill:producer", "spreadsheet export"),
+            ],
+        )
+        consumer = _interface(
+            "skill:consumer",
+            requires=[
+                _field("skill:consumer", "markdown file"),
+                _field("skill:consumer", "worksheet rows", "data"),
+            ],
+        )
+
+        build = canonicalize_contract_objects(
+            {producer.skill_id: producer, consumer.skill_id: consumer},
+            provider=MultiObjectCanonicalizationProvider(),
+            job_options=LLMJobOptions(progress_every=0),
+            semantic_embedder=FixedSemanticEmbedder(),
+        )
+
+        self.assertEqual(
+            {item.canonical_id for item in build.objects},
+            {"artifact:markdown_file", "data:spreadsheet_table"},
+        )
 
     def test_litellm_canonicalization_provider_uses_config_max_tokens(self) -> None:
         calls: list[dict[str, object]] = []

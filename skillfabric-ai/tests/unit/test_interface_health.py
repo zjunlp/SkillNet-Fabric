@@ -16,7 +16,6 @@ class InterfaceHealthTests(unittest.TestCase):
             content_hash="hash-a",
             capability_summary="",
             produces=[InterfaceField(name="csv", kind="artifact", confidence=0.2)],
-            provenance="llm_extracted",
             model_id="model",
         )
 

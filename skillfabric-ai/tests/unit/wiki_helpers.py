@@ -5,13 +5,11 @@ import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from skillfabric.compiled_graph.builder import BuildConfig, build_graph
-from skillfabric.compiled_graph.canonicalization.compiler import (
-    DeterministicCanonicalizationProvider,
-)
+from skillfabric.compiled_graph.builder import BuildConfig, _BuildDependencies, build_graph
 from skillfabric.compiled_graph.execution.validation import DeterministicExecutionFlowValidator
 from skillfabric.compiled_graph.relations.validation import StaticPairValidator
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
+from skillfabric.indexing.embeddings import DisabledEmbeddingProvider
+from tests.unit.fake_canonicalization import FixtureCanonicalizationProvider
 from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,15 +92,15 @@ def _build_fixture_workspace_uncached(workspace: Path) -> None:
         BuildConfig(
             skill_root=FIXTURE_SKILLS,
             workspace=workspace,
-            similar_top_k=3,
-            candidate_top_k=6,
-            validator=validator,
+        ),
+        dependencies=_BuildDependencies(
+            pair_validator=validator,
             interface_extractor=FixtureInterfaceExtractor(),
             execution_validator=DeterministicExecutionFlowValidator(),
-            canonicalization_provider=DeterministicCanonicalizationProvider(),
-            embedding_provider=FakeEmbeddingProvider(),
+            canonicalization_provider=FixtureCanonicalizationProvider(),
+            embedding_provider=DisabledEmbeddingProvider(),
             build_id="wiki-test-build",
-        )
+        ),
     )
 
 

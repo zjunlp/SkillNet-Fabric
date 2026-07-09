@@ -26,7 +26,6 @@ from skillfabric.compiled_graph.interface.providers import (
     InterfaceSchemaError,
     LiteLLMInterfaceExtractor,
     SkillInterfaceExtractor,
-    _provenance,
 )
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
@@ -75,7 +74,7 @@ def extract_skill_interfaces(
         raw = outcome.value
         if not isinstance(raw, dict):
             return
-        interface = _interface_from_raw(skill, raw, model_id=extractor.model_id, provenance=_provenance(extractor))
+        interface = _interface_from_raw(skill, raw, model_id=extractor.model_id)
         records[index] = InterfaceExtractionRecord(
             skill_id=skill.id,
             raw_output=raw,

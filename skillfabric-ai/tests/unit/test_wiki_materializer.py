@@ -102,22 +102,18 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertFalse(stale_card.exists())
             self.assertTrue((workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").exists())
 
-    def test_build_wiki_can_emit_debug_extraction_pages_when_requested(self) -> None:
+    def test_build_wiki_removes_stale_debug_extraction_pages(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
+            stale_debug = workspace / "reports" / "wiki-debug" / "raw_artifacts" / "old.md"
+            stale_debug.parent.mkdir(parents=True, exist_ok=True)
+            stale_debug.write_text("# stale debug\n", encoding="utf-8")
 
-            build_wiki(
-                WikiBuildConfig(
-                    workspace=workspace,
-                    use_llm_summaries=False,
-                    include_debug_pages=True,
-                )
-            )
+            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
             self.assertFalse((workspace / "wiki" / "debug").exists())
-            self.assertTrue(list((workspace / "reports" / "wiki-debug" / "raw_artifacts").glob("*.md")))
-            self.assertTrue((workspace / "reports" / "wiki-debug" / "extraction_report.md").exists())
+            self.assertFalse((workspace / "reports" / "wiki-debug").exists())
 
     def test_build_wiki_removes_stale_artifact_and_scenario_directories(self) -> None:
         with TemporaryDirectory() as tmp:

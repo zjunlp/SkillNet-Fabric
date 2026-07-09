@@ -20,6 +20,10 @@ from skillfabric.indexing.embeddings import (
     default_embedding_provider,
 )
 
+DEFAULT_SEMANTIC_THRESHOLD = 0.76
+DEFAULT_SEMANTIC_TOP_K = 8
+DEFAULT_MAX_GROUP_SIZE = 16
+
 
 class CanonicalSemanticEmbedder(Protocol):
     """Embedding interface for semantic candidate generation."""
@@ -87,31 +91,30 @@ def candidate_groups_from_terms(
     *,
     semantic_embedder: CanonicalSemanticEmbedder | None = None,
     embedding_cache_path: str | Path | None = None,
-    semantic_threshold: float = 0.82,
-    semantic_top_k: int = 3,
-    max_group_size: int = 12,
-    include_semantic: bool = True,
+    semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
+    semantic_top_k: int = DEFAULT_SEMANTIC_TOP_K,
+    max_group_size: int = DEFAULT_MAX_GROUP_SIZE,
 ) -> list[CanonicalizationCluster]:
-    """Build small candidate groups for deterministic or provider resolution."""
+    """Build high-recall candidate groups for provider resolution."""
 
     if not terms:
         return []
-    exact_groups = _normalized_exact_groups(terms)
-    exact_group_keys = {term.key for group in exact_groups for term in group}
-    semantic_groups: list[list[RawContractObject]] = []
-    if include_semantic:
-        semantic_pairs = generate_semantic_candidate_pairs(
-            [term for term in terms if term.key not in exact_group_keys],
-            embedder=semantic_embedder or _default_embedder(),
-            threshold=semantic_threshold,
-            top_k=semantic_top_k,
-            cache_path=embedding_cache_path,
-        )
-        semantic_groups = _groups_from_pairs(terms, semantic_pairs)
-    groups = [group for group in [*exact_groups, *semantic_groups] if _group_has_producer_and_consumer(group)]
+    exact_pairs = _exact_candidate_pairs(terms)
+    semantic_pairs = generate_semantic_candidate_pairs(
+        terms,
+        embedder=semantic_embedder or _default_embedder(),
+        threshold=semantic_threshold,
+        top_k=semantic_top_k,
+        cache_path=embedding_cache_path,
+    )
+    groups = _groups_from_pairs(terms, [*exact_pairs, *semantic_pairs])
+    grouped_keys = {term.key for group in groups for term in group}
+    residual_terms = [term for term in terms if term.key not in grouped_keys]
     output: list[CanonicalizationCluster] = []
     seen: set[tuple[str, ...]] = set()
-    for group in groups:
+    for group in [*groups, residual_terms]:
+        if not group:
+            continue
         for chunk in _chunk_terms(sorted(group, key=lambda item: item.key), max_group_size):
             key = tuple(term.key for term in chunk)
             if key in seen:
@@ -125,8 +128,8 @@ def generate_semantic_candidate_pairs(
     terms: list[RawContractObject],
     *,
     embedder: CanonicalSemanticEmbedder,
-    threshold: float = 0.82,
-    top_k: int = 3,
+    threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
+    top_k: int = DEFAULT_SEMANTIC_TOP_K,
     cache_path: str | Path | None = None,
 ) -> list[SemanticCandidatePair]:
     """Generate top-k semantic neighbor pairs."""
@@ -192,13 +195,21 @@ def _default_embedder() -> CanonicalSemanticEmbedder:
         return HashingCanonicalEmbedder()
 
 
-def _normalized_exact_groups(terms: list[RawContractObject]) -> list[list[RawContractObject]]:
+def _exact_candidate_pairs(terms: list[RawContractObject]) -> list[SemanticCandidatePair]:
     buckets: dict[str, list[RawContractObject]] = defaultdict(list)
     for term in terms:
         normalized = normalized_candidate_text(term.name)
         if normalized:
             buckets[normalized].append(term)
-    return [group for group in buckets.values() if len(group) >= 2]
+    pairs: list[SemanticCandidatePair] = []
+    for group in buckets.values():
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=lambda item: item.key)
+        for left_index, left in enumerate(ordered):
+            for right in ordered[left_index + 1 :]:
+                pairs.append(SemanticCandidatePair(left.key, right.key, 1.0))
+    return pairs
 
 
 def _groups_from_pairs(
@@ -231,11 +242,6 @@ def _groups_from_pairs(
     return [group for group in groups.values() if len(group) >= 2]
 
 
-def _group_has_producer_and_consumer(group: list[RawContractObject]) -> bool:
-    roles = {term.role for term in group}
-    return "produces" in roles and "requires" in roles
-
-
 def _chunk_terms(terms: list[RawContractObject], size: int) -> list[list[RawContractObject]]:
     return [terms[index : index + size] for index in range(0, len(terms), size)]
 
@@ -248,14 +254,9 @@ def _cluster_id(terms: list[RawContractObject]) -> str:
 
 
 def _semantic_text(term: RawContractObject) -> str:
-    return " | ".join(
+    return " ".join(
         item
-        for item in [
-            normalized_candidate_text(term.name),
-            contract_object_type(term.kind),
-            term.role,
-            normalized_candidate_text(term.description),
-        ]
+        for item in [normalized_candidate_text(term.name), normalized_candidate_text(term.description)]
         if item
     )
 
