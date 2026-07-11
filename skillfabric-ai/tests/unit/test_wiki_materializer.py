@@ -37,11 +37,6 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("## Tools And Dependencies", text)
             self.assertIn("## Composition Notes", text)
             self.assertIn("## Read Full Source", text)
-            self.assertIn(
-                "## Purpose\n\nExtract tables from PDF files and save structured CSV output.\n\n## Use When",
-                text,
-            )
-            self.assertNotIn("participates in graph-backed skill selection", text)
             self.assertNotIn("## Evidence", text)
             self.assertNotIn("## Source", text)
             self.assertNotIn("content_hash", text)

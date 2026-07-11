@@ -29,14 +29,13 @@ These values are bridged to the OpenAI-compatible LiteLLM path and to Claude
 Code SDK `ANTHROPIC_*` runtime aliases. Keep real keys in a private shell,
 conda, or untracked `.env` configuration.
 
-Public builds keep LLM-backed skill contracts, while wiki cards reuse those
-contracts without a second summary call by default. Use `--wiki-summary-mode all`
-to enable additional LLM summaries. Relation and execution validation use
-selective interface-first checks to avoid sending every candidate pair through
-full `SKILL.md` prompts. Plain route/plan uses the Claude Code explorer by default.
+Public builds keep LLM-backed skill contracts and wiki summaries, while relation
+and execution validation use selective interface-first checks to avoid sending
+every candidate pair through full `SKILL.md` prompts. Plain route/plan uses
+fallback routing unless you explicitly request the Claude Code explorer.
 
 ```bash
-skillfabric build --skill-root /path/to/skills --embedding-provider disabled --wiki-summary-mode off
+skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
 ```
 
 ```python
@@ -45,12 +44,9 @@ from skillfabric import SkillFabric
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
 sf.build("/path/to/skills")
 route = sf.route("summarize this repository and identify release risks")
-prepared = sf.prepare_plan(route=route)
-print(prepared.planner_prompt_path)
+plan = sf.plan(route=route)
+print(plan.prompt_path)
 ```
-
-An agent planner must then return the strict `execution_prompt` JSON described by
-`planner_request.json`; pass that payload to `sf.finalize_plan(...)`.
 
 The public package uses API embeddings through LiteLLM. Use
 `--embedding-provider disabled` only for deterministic smoke checks that should

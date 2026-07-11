@@ -177,7 +177,7 @@ class SkillFabric:
         package_root: str | Path,
         planner_output: dict[str, object],
         *,
-        renderer: str | None = None,
+        renderer: str = "claude-code",
     ) -> ExecutionPackageResult:
         """Validate planner output and write the final workflow/prompt artifacts."""
 

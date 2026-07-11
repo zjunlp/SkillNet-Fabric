@@ -52,7 +52,7 @@ class InterfaceExtractionTests(unittest.TestCase):
         return calls
 
     def test_valid_litellm_json_generates_interface(self) -> None:
-        calls = self._install_fake_litellm(
+        self._install_fake_litellm(
             json.dumps(
                 {
                     "capability_summary": "Extract PDF tables into CSV.",
@@ -71,14 +71,7 @@ class InterfaceExtractionTests(unittest.TestCase):
             )
         )
         skill = make_skill("skill:pdf", "pdf", "Write CSV tables.")
-        extractor = LiteLLMInterfaceExtractor(
-            LLMConfig(
-                api_base="https://example.test/api",
-                api_key="sk-test",
-                max_tokens=32768,
-                reasoning_effort="medium",
-            )
-        )
+        extractor = LiteLLMInterfaceExtractor(LLMConfig(api_base="https://example.test/api", api_key="sk-test"))
 
         records = extract_skill_interfaces([skill], extractor=extractor)
 
@@ -88,26 +81,6 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertEqual(records[0].interface.produces[0].name, "csv tables")
         self.assertNotIn("inferred", records[0].interface.produces[0].to_dict())
         self.assertNotIn("provenance", records[0].interface.to_dict())
-        self.assertEqual(calls[0]["max_tokens"], 6144)
-        self.assertEqual(calls[0]["reasoning_effort"], "low")
-
-    def test_prompt_example_conforms_to_declared_output_contract(self) -> None:
-        messages = build_interface_extraction_messages(
-            make_skill("skill:pdf", "pdf", "Extract tables from PDF files.")
-        )
-        user_prompt = messages[1]["content"]
-        example = json.loads(user_prompt.split("<example>", 1)[1].split("</example>", 1)[0])
-
-        self.assertEqual(
-            set(example),
-            {"capability_summary", "when_to_use", "requires", "produces", "uses_tools"},
-        )
-        for field_group in ("requires", "produces", "uses_tools"):
-            for field in example[field_group]:
-                self.assertEqual(
-                    set(field),
-                    {"name", "description", "kind", "confidence", "evidence"},
-                )
 
     def test_legacy_inferred_field_is_ignored(self) -> None:
         self._install_fake_litellm(
@@ -459,31 +432,24 @@ class InterfaceExtractionTests(unittest.TestCase):
 
         messages = build_interface_extraction_messages(skill)
         prompt = json.dumps(messages, ensure_ascii=False)
-        user_prompt = messages[1]["content"]
+        payload = json.loads(messages[1]["content"])
 
-        self.assertIn("<prompt_id>skill_contract_core_interface_v6</prompt_id>", user_prompt)
-        for section in (
-            "task",
-            "field_semantics",
-            "classification_rules",
-            "output_rules",
-            "output_schema",
-            "skill_metadata",
-            "full_skill_md",
+        self.assertEqual(payload["prompt_id"], "skill_contract_core_interface_v3")
+        for field in (
+            "role",
+            "objective",
+            "source_contract",
+            "contract_semantics",
+            "quality_standard",
+            "process",
+            "format_requirements",
+            "examples",
         ):
-            self.assertIn(f"<{section}>", user_prompt)
-            self.assertIn(f"</{section}>", user_prompt)
-        schema_text = user_prompt.split("<output_schema>", 1)[1].split("</output_schema>", 1)[0]
-        schema = json.loads(schema_text)
-        source_text = user_prompt.split("<full_skill_md>", 1)[1].split("</full_skill_md>", 1)[0]
-        source = json.loads(source_text)
+            self.assertIn(field, payload)
         self.assertEqual(
-            set(schema),
+            set(payload["output_schema"]),
             {"capability_summary", "when_to_use", "requires", "produces", "uses_tools"},
         )
-        self.assertEqual(set(source), {"line_numbered_text"})
-        self.assertIn("1: Line one.", source["line_numbered_text"])
-        self.assertIn("2: FULL_SKILL_LINE", source["line_numbered_text"])
         self.assertNotIn("granularity", prompt)
         self.assertNotIn("execution_role", prompt)
         self.assertNotIn("failure_modes", prompt)
@@ -498,15 +464,15 @@ class InterfaceExtractionTests(unittest.TestCase):
         self.assertIn("produces", prompt)
         self.assertIn("SkillContract", prompt)
         self.assertIn("reusable operational capability", prompt)
-        self.assertIn("lower_snake_case", prompt)
+        self.assertIn("stable snake_case", prompt)
+        self.assertIn("routing_value", prompt)
+        self.assertIn("environment_diagnosis", prompt)
         self.assertIn("world_state", prompt)
         self.assertIn("belief_state", prompt)
         self.assertIn("planning_state", prompt)
-        self.assertIn("verbatim", prompt)
-        self.assertIn("untrusted", prompt)
+        self.assertIn("Each evidence item is an object", prompt)
         self.assertNotIn("preconditions", prompt)
         self.assertNotIn("postconditions", prompt)
-        self.assertLess(len(prompt), 5200)
 
 
 if __name__ == "__main__":

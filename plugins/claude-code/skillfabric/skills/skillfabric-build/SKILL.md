@@ -30,11 +30,10 @@ optional build flags.
 - Forward `--progress-json` and `--quiet` when provided.
 - Forward `--embedding-provider api|disabled` and `--embedding-model` when
   provided.
-- Use `--embedding-provider disabled` only when the user explicitly asks to
-  skip dense embeddings. Wiki cards reuse interface summaries without a second
-  summary call by default; use `--wiki-summary-mode all` only when the user
-  requests an extra LLM summary pass. Build still requires configured LLM settings for interface,
-  canonicalization, and execution validation.
+- Use `--embedding-provider disabled --wiki-summary-mode off` only when the
+  user explicitly asks to skip dense embeddings and wiki LLM summaries. Build
+  still requires configured LLM settings for interface, canonicalization, and
+  execution validation.
 
 ## Safety Boundaries
 

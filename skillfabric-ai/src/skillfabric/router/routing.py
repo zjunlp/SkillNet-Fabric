@@ -8,7 +8,7 @@ from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.config import RouterConfig, RouterSdkRuntime
 from skillfabric.router.models import RouteResult
 from skillfabric.router.selection import _fallback_route
-from skillfabric.router.traces import _new_trace_id, validate_trace_id
+from skillfabric.router.traces import _new_trace_id
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
 from skillfabric.wiki.explorer.validation import route_from_skill_package
@@ -20,7 +20,7 @@ def route_task(config: RouterConfig, *, sdk_runtime: RouterSdkRuntime | None = N
 
     workspace = Workspace(config.workspace)
     workspace.ensure()
-    trace_id = validate_trace_id(config.trace_id or _new_trace_id(config.query))
+    trace_id = config.trace_id or _new_trace_id(config.query)
     trace_dir = workspace.runs_dir / trace_id
     trace_dir.mkdir(parents=True, exist_ok=True)
     bundle = build_router_bundle(
@@ -49,12 +49,7 @@ def route_task(config: RouterConfig, *, sdk_runtime: RouterSdkRuntime | None = N
         )
     else:
         try:
-            query_wiki = materialize_query_wiki(
-                workspace,
-                bundle,
-                trace_dir=trace_dir,
-                max_selected_skills=max(1, config.max_selected_skills),
-            )
+            query_wiki = materialize_query_wiki(workspace, bundle, trace_dir=trace_dir)
             explorer_run = explore_query_wiki(
                 WikiExplorerConfig(
                     env_file=config.env_file,

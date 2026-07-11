@@ -272,8 +272,6 @@ def _add_rrf_channel(
 
 
 def _stem_token(token: str) -> str:
-    if len(token) > 6 and token.endswith("ly"):
-        return token[:-2]
     if len(token) > 5 and token.endswith("ing"):
         return token[:-3]
     if len(token) > 4 and token.endswith("ed"):

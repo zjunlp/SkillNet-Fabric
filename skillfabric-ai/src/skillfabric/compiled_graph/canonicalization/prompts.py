@@ -8,7 +8,7 @@ from typing import Any
 from skillfabric.compiled_graph.canonicalization.candidates import normalized_candidate_text
 from skillfabric.compiled_graph.canonicalization.models import CanonicalizationCluster
 
-CANONICALIZATION_PROMPT_ID = "interface_term_canonicalization_v4"
+CANONICALIZATION_PROMPT_ID = "interface_term_canonicalization_v2"
 
 
 def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[dict[str, str]]:
@@ -46,7 +46,6 @@ def build_canonicalization_messages(cluster: CanonicalizationCluster) -> list[di
             "<rules>",
             "- Merge terms only when they refer to the same reusable object.",
             "- Split the cluster into multiple canonical_objects when needed.",
-            "- Generic names such as output, result, data, or file need descriptions that prove the same specific object; otherwise omit them.",
             "- Omit uncertain terms in omitted_term_ids.",
             "- Do not infer workflow direction.",
             "- Treat role as metadata, not as part of object identity.",

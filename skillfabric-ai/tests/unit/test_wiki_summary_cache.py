@@ -44,32 +44,7 @@ class FlakySummaryProvider:
 
 
 class WikiSummaryCacheTests(unittest.TestCase):
-    def test_deterministic_summary_reuses_interface_capability_without_duplication(self) -> None:
-        with TemporaryDirectory() as tmp:
-            config = WikiBuildConfig(workspace=Path(tmp) / ".skillfabric", use_llm_summaries=False)
-            summarizer = WikiSummarizer(config)
-
-            record = summarizer.summarize_entity(
-                page_type="skill",
-                entity_id="skill:parser",
-                content_hash="hash-parser",
-                payload={
-                    "name": "parser",
-                    "description": "Registry description.",
-                    "capability_summary": "Extract evidence-grounded tables from PDF files.",
-                    "when_to_use": "Use for PDF table extraction.",
-                    "requires": ["pdf_document"],
-                    "produces": ["csv_table"],
-                    "uses_tools": ["pdfplumber"],
-                },
-            )
-
-        self.assertEqual(record.summary, "Extract evidence-grounded tables from PDF files.")
-        self.assertEqual(record.routing_summary, record.summary)
-        self.assertEqual(record.workflow_summary, "")
-        self.assertNotIn("Requires:", record.summary)
-
-    def test_litellm_summary_provider_uses_bounded_low_effort_call(self) -> None:
+    def test_litellm_summary_provider_uses_env_max_tokens(self) -> None:
         calls: list[dict[str, object]] = []
         fake_litellm = types.SimpleNamespace()
 
@@ -118,18 +93,16 @@ class WikiSummaryCacheTests(unittest.TestCase):
             else:
                 sys.modules["litellm"] = original
 
-        self.assertEqual(calls[0]["max_tokens"], 2048)
-        self.assertEqual(calls[0]["reasoning_effort"], "low")
+        self.assertEqual(calls[0]["max_tokens"], 32768)
         prompt_payload = json.loads(calls[0]["messages"][1]["content"])
         prompt_text = json.dumps(calls[0]["messages"], ensure_ascii=False)
-        self.assertEqual(prompt_payload["prompt_id"], "skillcontract_summary_routing_guidance_v3")
-        for field in ("task", "rules", "output_schema", "entity"):
+        self.assertEqual(prompt_payload["prompt_id"], "skillcontract_summary_routing_guidance")
+        for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
             self.assertIn(field, prompt_payload)
         self.assertIn("routing_summary", prompt_text)
         self.assertIn("workflow_summary", prompt_text)
         self.assertIn("coverage-gap", prompt_text)
         self.assertIn("Do not solve", prompt_text)
-        self.assertLess(len(prompt_text), 2000)
 
     def test_summary_cache_reuses_content_hash_and_model_id(self) -> None:
         with TemporaryDirectory() as tmp:

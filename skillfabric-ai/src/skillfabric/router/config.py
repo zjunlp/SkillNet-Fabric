@@ -19,7 +19,7 @@ class RouterConfig:
     use_llm_router: bool = True
     max_selected_skills: int = 8
     seed_limit: int = 8
-    expanded_limit: int = 32
+    expanded_limit: int = 100
     workflow_confidence_threshold: float = 0.95
     max_workflow_hints: int = 12
     trace_id: str | None = None

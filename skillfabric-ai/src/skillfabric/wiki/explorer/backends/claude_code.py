@@ -19,7 +19,7 @@ from skillfabric.wiki.explorer.prompting import (
     render_system_prompt,
     render_user_prompt,
 )
-from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
+from skillfabric.wiki.explorer.skill_package import SkillPackage
 
 ClaudeCodeSdkRuntime = Any
 
@@ -263,7 +263,7 @@ def _build_claude_agent_options(
         "can_use_tool": can_use_tool,
         "output_format": {
             "type": "json_schema",
-            "schema": skill_package_json_schema(),
+            "schema": _skill_package_schema(),
         },
     }
     if model:
@@ -481,6 +481,93 @@ def _load_sdk_runtime() -> Any:
     Runtime.ResultMessage = ResultMessage
     Runtime.query = staticmethod(query)
     return Runtime
+
+
+def _skill_package_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "selected_skills": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "skill_id": {"type": "string", "description": "Manifest skill_id selected from query_wiki."},
+                        "role": {"type": "string", "description": "Short evidence-grounded reason for selecting this skill."},
+                        "evidence": {
+                            "type": "array",
+                            "description": "Files under query_wiki that justify selecting this skill.",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "path": {"type": "string", "description": "Relative query_wiki evidence path."},
+                                    "reason": {"type": "string", "description": "Why this file supports the selection."},
+                                },
+                                "required": ["path", "reason"],
+                            },
+                        },
+                    },
+                    "required": ["skill_id", "role", "evidence"],
+                },
+            },
+            "required_edges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "before": {"type": "string", "description": "Skill id that must run before the after skill."},
+                        "after": {"type": "string", "description": "Skill id that consumes context, artifacts, or state."},
+                        "relation_type": {
+                            "type": "string",
+                            "enum": ["depend_on", "compose_with", "artifact_compatibility", "state_compatibility"],
+                            "description": "Dependency type for the before -> after edge.",
+                        },
+                        "evidence_path": {"type": "string", "description": "Relative query_wiki evidence path for the edge."},
+                        "reason": {"type": "string", "description": "Why the edge direction is before -> after."},
+                    },
+                    "required": ["before", "after", "relation_type", "evidence_path", "reason"],
+                },
+            },
+            "ordered_hints": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"skill_id": {"type": "string"}, "hint": {"type": "string"}},
+                    "required": ["skill_id", "hint"],
+                },
+            },
+            "near_misses": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"skill_id": {"type": "string"}, "reason": {"type": "string"}},
+                    "required": ["skill_id", "reason"],
+                },
+            },
+            "coverage_notes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "requirement_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "skill_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["requirement_id", "status", "reason", "skill_ids"],
+                },
+            },
+            "rationale": {"type": "string"},
+        },
+        "required": ["selected_skills", "required_edges", "ordered_hints", "near_misses", "coverage_notes", "rationale"],
+    }
 
 
 def _unwrap_finish_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 {
   "name": "skillfabric",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Route tasks through a SkillFabric workspace and build external-agent execution packages.",
   "author": {
     "name": "SkillFabric Contributors"

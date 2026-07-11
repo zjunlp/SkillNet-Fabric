@@ -32,7 +32,6 @@ from skillfabric.router.bundle import build_router_bundle
 from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouteResult
 from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.router.traces import _new_trace_id as _new_agent_trace_id
-from skillfabric.router.traces import validate_trace_id
 from skillfabric.runtime.defaults import BuildOptions, default_build_options, default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import (
@@ -44,16 +43,13 @@ from skillfabric.runtime.llm import (
 from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.runtime.progress import ProgressReporter
 from skillfabric.storage import Workspace, atomic_write_text
-from skillfabric.wiki.explorer.skill_package import (
-    SkillPackage,
-    skill_package_json_schema,
-    validate_skill_package_payload,
-)
+from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
 from skillfabric.wiki.query_wiki import materialize_query_wiki, render_query_wiki_skill_card
 
+PUBLIC_COMMANDS = ("init", "help", "build", "route", "plan", "query-wiki", "doctor-state", "run-state")
 INIT_FIELDS = ("API_KEY", "BASE_URL", "MODEL", "EMBEDDING_MODEL")
 ENV_ALIASES = {
     "API_KEY": ("API_KEY", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
@@ -84,7 +80,7 @@ Claude Code SDK path:
 
 Values loaded from --env-file take precedence for SkillFabric commands; shell
 environment values are used only for fields missing from the env file.
-The public API uses OpenAI-compatible APIs through LiteLLM plus the optional
+SkillFabric v1 commits to OpenAI-compatible APIs through LiteLLM plus the optional
 Claude Code SDK explorer path. Vendor-specific SDKs are not part of the public API.
 
 Run `skillfabric init --env-file .env` to create a private env file. Do not paste
@@ -190,7 +186,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     plan_parser.add_argument("query", nargs="?")
     plan_parser.add_argument("--route-file")
     _add_route_options(plan_parser, include_query=False, agent_mode_choices=("prepare", "finalize", "latest"))
-    plan_parser.add_argument("--renderer", choices=["claude-code", "codex"])
+    plan_parser.add_argument("--renderer", choices=["claude-code", "codex"], default="claude-code")
     plan_parser.add_argument("--planner-output-file", help=argparse.SUPPRESS)
     plan_parser.add_argument("--package-root", help=argparse.SUPPRESS)
     plan_parser.set_defaults(handler=_plan)
@@ -255,7 +251,7 @@ def _add_route_options(
     parser.add_argument("--explorer-model")
     parser.add_argument("--strict-explorer", action="store_true")
     parser.add_argument("--seed-limit", type=int, default=8, help=argparse.SUPPRESS)
-    parser.add_argument("--expanded-limit", type=int, default=32, help=argparse.SUPPRESS)
+    parser.add_argument("--expanded-limit", type=int, default=100, help=argparse.SUPPRESS)
     parser.add_argument("--workflow-confidence-threshold", type=float, default=0.95, help=argparse.SUPPRESS)
     parser.add_argument("--max-workflow-hints", type=int, default=12, help=argparse.SUPPRESS)
     parser.add_argument("--agent-mode", choices=agent_mode_choices, help=argparse.SUPPRESS)
@@ -599,12 +595,11 @@ def _build_summary(
             "health_report": str(workspace.reports_dir / "wiki_health_report.md"),
             "pages_written": wiki_result.pages_written,
         }
-    warnings: list[str] = []
-    for key, value in graph_result.stats.items():
-        if key.endswith("warnings") and isinstance(value, list):
-            warnings.extend(str(item) for item in value if item)
-        elif key.endswith("warning") and value:
-            warnings.append(str(value))
+    warnings = [
+        str(value)
+        for key, value in graph_result.stats.items()
+        if key.endswith("warning") and value
+    ]
     return {
         "workspace": str(workspace.root),
         "skill_count": int(graph_result.stats.get("skill_count", len(graph_result.skills))),
@@ -634,10 +629,9 @@ def _route(args: argparse.Namespace) -> None:
 
 def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
     options = default_router_options()
-    max_selected_skills = max(1, args.max_selected_skills or options.max_selected_skills)
     workspace = Workspace(args.workspace)
     workspace.ensure()
-    trace_id = validate_trace_id(args.trace_id or _new_agent_trace_id(args.query))
+    trace_id = args.trace_id or _new_agent_trace_id(args.query)
     trace_dir = workspace.runs_dir / trace_id
     trace_dir.mkdir(parents=True, exist_ok=True)
     bundle = build_router_bundle(
@@ -651,12 +645,7 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
             max_workflow_hints=args.max_workflow_hints,
         )
     )
-    query_wiki = materialize_query_wiki(
-        workspace,
-        bundle,
-        trace_dir=trace_dir,
-        max_selected_skills=max_selected_skills,
-    )
+    query_wiki = materialize_query_wiki(workspace, bundle, trace_dir=trace_dir)
     schema = skill_package_json_schema()
     router_bundle_path = trace_dir / "router_bundle.json"
     request_path = trace_dir / "agent_route_request.json"
@@ -669,7 +658,6 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
         "query_wiki_root": str(query_wiki.root),
         "explorer_prompt": str(query_wiki.root / "EXPLORER.md"),
         "skill_package_output": str(skill_package_path),
-        "max_selected_skills": max_selected_skills,
         "expected_schema": schema,
     }
     atomic_write_text(request_path, json.dumps(request, ensure_ascii=False, indent=2) + "\n")
@@ -680,19 +668,18 @@ def _route_agent_prepare(args: argparse.Namespace) -> dict[str, object]:
         "router_bundle": str(router_bundle_path),
         "agent_route_request": str(request_path),
         "skill_package_file": str(skill_package_path),
-        "max_selected_skills": max_selected_skills,
         "expected_schema": schema,
     }
 
 
 def _route_agent_finalize(args: argparse.Namespace) -> RouteResult:
+    options = default_router_options()
     if not args.trace_id:
         raise SystemExit("route --agent-mode finalize requires --trace-id")
     if not args.skill_package_file:
         raise SystemExit("route --agent-mode finalize requires --skill-package-file")
     workspace = Workspace(args.workspace)
-    trace_id = validate_trace_id(args.trace_id)
-    trace_dir = workspace.runs_dir / trace_id
+    trace_dir = workspace.runs_dir / args.trace_id
     query_wiki_root = trace_dir / "query_wiki"
     bundle_path = trace_dir / "router_bundle.json"
     if not bundle_path.exists():
@@ -700,40 +687,7 @@ def _route_agent_finalize(args: argparse.Namespace) -> RouteResult:
     if not query_wiki_root.exists():
         raise SystemExit(f"missing query_wiki from prepare phase: {query_wiki_root}")
     bundle = RouterBundle.from_dict(json.loads(bundle_path.read_text(encoding="utf-8")))
-    request_path = trace_dir / "agent_route_request.json"
-    if not request_path.exists():
-        raise SystemExit(f"missing agent route request from prepare phase: {request_path}")
-    request = json.loads(request_path.read_text(encoding="utf-8"))
-    prepared_query = str(request.get("task", ""))
-    if not prepared_query or prepared_query != bundle.query:
-        raise SystemExit("agent route request task does not match the prepared router bundle")
-    if args.query != prepared_query:
-        raise SystemExit("route --agent-mode finalize query does not match the prepare phase")
-    prepared_limit = request.get("max_selected_skills")
-    if isinstance(prepared_limit, bool) or not isinstance(prepared_limit, int) or prepared_limit < 1:
-        raise SystemExit("invalid max_selected_skills in agent route request")
-    if args.max_selected_skills is not None and max(1, args.max_selected_skills) != prepared_limit:
-        raise SystemExit(
-            "route --agent-mode finalize max-selected-skills conflicts with the prepare phase"
-        )
     package_payload = _read_agent_skill_package(args.skill_package_file, trace_dir)
-    schema_errors = validate_skill_package_payload(package_payload)
-    if schema_errors:
-        atomic_write_text(
-            trace_dir / "agent_route_validation.json",
-            json.dumps(
-                {
-                    "valid": False,
-                    "valid_package": SkillPackage().to_dict(),
-                    "errors": schema_errors,
-                    "warnings": [],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
-        )
-        raise SystemExit(f"invalid SkillPackage schema: {'; '.join(schema_errors)}")
     package = SkillPackage.from_dict(package_payload)
     validation = validate_skill_package(package, query_wiki_root)
     atomic_write_text(
@@ -748,10 +702,10 @@ def _route_agent_finalize(args: argparse.Namespace) -> RouteResult:
         validation.valid_package,
         bundle,
         query=args.query,
-        trace_id=trace_id,
+        trace_id=args.trace_id,
         trace_dir=trace_dir,
         warnings=warnings,
-        max_selected_skills=prepared_limit,
+        max_selected_skills=max(1, args.max_selected_skills or options.max_selected_skills),
     )
     atomic_write_text(trace_dir / "route.json", json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n")
     return result
@@ -763,11 +717,7 @@ def _plan(args: argparse.Namespace) -> None:
         return
     if args.agent_mode == "prepare":
         route = _route_from_args_or_file(args)
-        prepared = prepare_execution_package(
-            args.workspace,
-            route,
-            renderer=args.renderer or "claude-code",
-        )
+        prepared = prepare_execution_package(args.workspace, route, renderer=args.renderer)
         print(json.dumps(prepared.to_dict(), ensure_ascii=False, indent=2))
         return
     if args.agent_mode == "finalize":

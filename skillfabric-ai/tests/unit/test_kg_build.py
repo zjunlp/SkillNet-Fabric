@@ -232,7 +232,6 @@ class KGBuildTests(unittest.TestCase):
                 set(build_metrics["canonicalization"]),
                 {
                     "cluster_count",
-                    "deterministic_count",
                     "llm_call_count",
                     "assignment_count",
                     "omitted_term_count",
@@ -240,7 +239,6 @@ class KGBuildTests(unittest.TestCase):
                     "semantic_threshold",
                     "semantic_top_k",
                     "max_group_size",
-                    "warnings",
                 },
             )
             self.assertEqual(build_metrics["canonicalization"]["semantic_threshold"], 0.76)
@@ -387,7 +385,7 @@ class KGBuildTests(unittest.TestCase):
             calls.append(kwargs)
             messages = kwargs.get("messages", [])
             user_content = messages[-1].get("content", "") if messages else ""
-            if "skill_contract_core_interface_v6" in user_content:
+            if "SkillFabric interface analyst" in user_content:
                 return {
                     "choices": [
                         {
@@ -402,7 +400,7 @@ class KGBuildTests(unittest.TestCase):
                         }
                     ]
                 }
-            if "execution_validation_compact_handoff_v4" in user_content:
+            if "Validate whether an execution-level flow exists" in user_content:
                 return {
                     "choices": [
                         {
@@ -420,7 +418,22 @@ class KGBuildTests(unittest.TestCase):
                         }
                     ]
                 }
-            if "interface_term_canonicalization_v4" in user_content:
+            if "interface_term_canonicalization_v2" in user_content:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "canonical_objects": [],
+                                        "omitted_term_ids": [],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            if "interface_term_canonicalization_v2" in user_content:
                 return {
                     "choices": [
                         {
@@ -503,7 +516,7 @@ class KGBuildTests(unittest.TestCase):
         def fake_completion(**kwargs):
             messages = kwargs.get("messages", [])
             user_content = messages[-1].get("content", "") if messages else ""
-            if "skill_contract_core_interface_v6" in user_content:
+            if "SkillFabric interface analyst" in user_content:
                 return {
                     "choices": [
                         {
@@ -518,7 +531,7 @@ class KGBuildTests(unittest.TestCase):
                         }
                     ]
                 }
-            if "execution_validation_compact_handoff_v4" in user_content:
+            if "Validate whether an execution-level flow exists" in user_content:
                 return {
                     "choices": [
                         {
@@ -536,7 +549,7 @@ class KGBuildTests(unittest.TestCase):
                         }
                     ]
                 }
-            if "interface_term_canonicalization_v4" in user_content:
+            if "interface_term_canonicalization_v2" in user_content:
                 return {
                     "choices": [
                         {

@@ -161,24 +161,17 @@ def route_from_skill_package(
             )
         )
     selected_ids = {item.skill_id for item in selected}
-    package_edges: list[RouteEdge] = []
-    for edge in package.required_edges:
-        if edge.before not in selected_ids or edge.after not in selected_ids:
-            warnings.append(
-                "dropped required edge whose endpoint exceeded the selection limit: "
-                f"{edge.before} -> {edge.after}"
-            )
-            continue
-        package_edges.append(
-            RouteEdge(
-                before_skill=edge.before,
-                after_skill=edge.after,
-                edge_type=edge.relation_type,
-                confidence=0.0,
-                reason=edge.reason,
-                source="wiki_agent",
-            )
+    package_edges = [
+        RouteEdge(
+            before_skill=edge.before,
+            after_skill=edge.after,
+            edge_type=edge.relation_type,
+            confidence=0.0,
+            reason=edge.reason,
+            source="wiki_agent",
         )
+        for edge in package.required_edges
+    ]
     hint_edges = _edges_from_ordered_skill_ids(
         [hint.skill_id for hint in package.ordered_hints],
         selected_ids,

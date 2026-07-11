@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.compiled_graph.models import Edge
 from skillfabric.registry.models import SkillNode
@@ -234,7 +236,6 @@ def _skill_summary_payload(skill: SkillNode, interface: SkillInterface | None) -
     return {
         "name": skill.name,
         "description": skill.description,
-        "capability_summary": interface.capability_summary if interface else "",
         "when_to_use": interface.when_to_use if interface else "",
         "requires": _field_names(interface.requires) if interface else [],
         "produces": _field_names(interface.produces) if interface else [],
@@ -280,6 +281,14 @@ def _directed_link_label(edge: Edge, current_skill_id: str) -> tuple[str, str]:
         return "compose_with", other
     other = edge.target if edge.source == current_skill_id else edge.source
     return edge.type, other
+
+
+def _content_hash(values: list[str]) -> str:
+    digest = hashlib.sha256()
+    for value in values:
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _first_paragraph(text: str) -> str:

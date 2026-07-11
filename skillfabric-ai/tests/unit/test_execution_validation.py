@@ -108,7 +108,7 @@ class ExecutionValidationTests(unittest.TestCase):
         }
 
     def test_litellm_accepts_fenced_json_response(self) -> None:
-        calls = self._install_fake_litellm(
+        self._install_fake_litellm(
             "```json\n"
             + json.dumps(
                 {
@@ -126,19 +126,12 @@ class ExecutionValidationTests(unittest.TestCase):
             self._skills(),
             interfaces=self._interfaces(),
             validator=LiteLLMExecutionFlowValidator(
-                config=LLMConfig(
-                    api_base="https://example.test/api",
-                    api_key="sk-test",
-                    max_tokens=32768,
-                    reasoning_effort="medium",
-                )
+                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
             ),
         )
 
         self.assertTrue(records[0].accepted)
         self.assertEqual(records[0].flow_edge.metadata["artifact_id"], "artifact:csv")
-        self.assertEqual(calls[0]["max_tokens"], 2048)
-        self.assertEqual(calls[0]["reasoning_effort"], "low")
 
     def test_prompt_defines_projection_direction(self) -> None:
         messages = build_execution_validation_messages(
@@ -150,22 +143,11 @@ class ExecutionValidationTests(unittest.TestCase):
         prompt_text = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "execution_validation_handoff_precision_v5")
-        self.assertEqual(
-            set(payload),
-            {
-                "prompt_id",
-                "prompt_tier",
-                "task",
-                "direction",
-                "decision_rules",
-                "output_contract",
-                "output_schema",
-                "candidate",
-                "source_skill",
-                "target_skill",
-            },
-        )
+        self.assertEqual(payload["prompt_id"], "execution_validation_handoff_precision_v2")
+        for field in ("role", "goal", "input", "output", "workflow", "rules", "constraints"):
+            self.assertIn(field, payload)
+        self.assertIn("decision_workflow", payload)
+        self.assertIn("precision_goal", payload["direction_semantics"])
         self.assertIn("For projected_edge_type=depend_on, the target skill depends on the source skill", prompt_text)
         self.assertIn("source_skill produces or enables a post-state", prompt_text)
         self.assertIn("target_skill consumes or requires a pre-state", prompt_text)
@@ -179,9 +161,6 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertIn("non-strict workflow progression", prompt_text)
         self.assertIn("duplicate_or_alternative", prompt_text)
         self.assertIn("topical_only", prompt_text)
-        self.assertIn("exactly one JSON object", payload["output_contract"])
-        self.assertIn("no prose or Markdown", payload["output_contract"])
-        self.assertLess(len(prompt_text), 6500)
 
     def test_compact_prompt_uses_same_handoff_taxonomy_as_full_prompt(self) -> None:
         messages = build_compact_execution_validation_messages(
@@ -193,20 +172,18 @@ class ExecutionValidationTests(unittest.TestCase):
         prompt_text = json.dumps(messages, ensure_ascii=False)
         payload = json.loads(messages[1]["content"])
 
-        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v4")
+        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v2")
         self.assertIn("post-state", prompt_text)
         self.assertIn("pre-state", prompt_text)
         self.assertIn("strict consumable handoff", prompt_text)
         self.assertIn("non-strict workflow progression", prompt_text)
         self.assertIn("duplicate_or_alternative", prompt_text)
         self.assertIn("topical_only", prompt_text)
-        self.assertIn("exactly one JSON object", payload["output_contract"])
         self.assertEqual(
             set(payload["output_schema"]),
             {"accepted", "flow_type", "projected_edge_type", "confidence", "evidence", "needs_full_context"},
         )
         self.assertNotIn("\n", messages[1]["content"])
-        self.assertLess(len(prompt_text), 5000)
 
     def test_execution_prompt_payload_is_compact_json_to_reduce_tokens(self) -> None:
         messages = build_execution_validation_messages(
@@ -242,22 +219,6 @@ class ExecutionValidationTests(unittest.TestCase):
         )
         self.assertFalse(failed[0].accepted)
         self.assertIn("api_error", failed[0].rejection_reason)
-
-    def test_non_object_json_is_reported_as_schema_error(self) -> None:
-        self._install_fake_litellm("[]")
-
-        records = validate_execution_flow_candidates(
-            [self._candidate()],
-            self._skills(),
-            interfaces=self._interfaces(),
-            validator=LiteLLMExecutionFlowValidator(
-                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
-            ),
-        )
-
-        self.assertFalse(records[0].accepted)
-        self.assertIn("schema_error", records[0].rejection_reason)
-        self.assertNotIn("api_error", records[0].rejection_reason)
 
     def test_schema_invalid_confidence_is_rejected_without_crashing(self) -> None:
         self._install_fake_litellm(
@@ -527,15 +488,10 @@ class ExecutionValidationTests(unittest.TestCase):
             interfaces=self._interfaces(),
         )
         prompt = json.dumps(messages, ensure_ascii=False)
-        payload = json.loads(messages[1]["content"])
 
         self.assertIn("full_skill_md", prompt)
         self.assertIn("skill_interface", prompt)
         self.assertIn("Produce csv.", prompt)
-        for key in ("source_skill", "target_skill"):
-            source = payload[key]["full_skill_md"]
-            self.assertEqual(set(source), {"line_numbered_text"})
-            self.assertTrue(source["line_numbered_text"].startswith("1: "))
 
     def test_compact_prompt_uses_interface_and_candidate_evidence_without_full_skill_md(self) -> None:
         producer = make_skill("skill:producer", "producer", "Produce csv.\nFULL_SOURCE_SHOULD_NOT_APPEAR")
@@ -555,7 +511,7 @@ class ExecutionValidationTests(unittest.TestCase):
         self.assertNotIn("full_skill_md", prompt)
         self.assertNotIn("FULL_SOURCE_SHOULD_NOT_APPEAR", prompt)
         self.assertNotIn("FULL_TARGET_SHOULD_NOT_APPEAR", prompt)
-        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v4")
+        self.assertEqual(payload["prompt_id"], "execution_validation_compact_handoff_v2")
 
     def test_high_confidence_execution_candidate_still_uses_llm_validator(self) -> None:
         calls = self._install_fake_litellm(
@@ -650,20 +606,11 @@ class ExecutionValidationTests(unittest.TestCase):
             self._skills(),
             interfaces=self._interfaces(),
             validator=LiteLLMExecutionFlowValidator(
-                config=LLMConfig(
-                    api_base="https://example.test/api",
-                    api_key="sk-test",
-                    max_tokens=32768,
-                    reasoning_effort="medium",
-                )
+                config=LLMConfig(api_base="https://example.test/api", api_key="sk-test")
             ),
         )
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["max_tokens"], 2048)
-        self.assertEqual(calls[0]["reasoning_effort"], "low")
-        self.assertEqual(calls[1]["max_tokens"], 4096)
-        self.assertEqual(calls[1]["reasoning_effort"], "medium")
         summary = summarize_execution_validation_records(records)
         self.assertEqual(summary["llm_compact"], 1)
         self.assertEqual(summary["llm_full"], 1)

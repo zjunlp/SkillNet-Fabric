@@ -10,7 +10,7 @@ class BuildOptions:
     """Default build behavior for the public package."""
 
     embedding_provider: str = "api"
-    wiki_summary_mode: str = "off"
+    wiki_summary_mode: str = "all"
     llm_concurrency: int = 2
     llm_batch_size: int = 8
 
@@ -23,7 +23,7 @@ class RouterOptions:
     explorer_backend: str = "claude-code"
     max_selected_skills: int = 8
     seed_limit: int = 8
-    expanded_limit: int = 32
+    expanded_limit: int = 100
 
 
 def default_build_options() -> BuildOptions:

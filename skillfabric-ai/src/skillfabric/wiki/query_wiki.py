@@ -86,11 +86,10 @@ def materialize_query_wiki(
     trace_dir: Path,
     bridge_min_confidence: float = 0.95,
     frontier_min_confidence: float = 0.85,
-    max_bridge_skills: int = 4,
+    max_bridge_skills: int = 8,
     max_bridge_workflows: int = 8,
-    max_frontier_skills: int = 4,
+    max_frontier_skills: int = 8,
     frontier_top_k_per_source: int = 2,
-    max_selected_skills: int = 8,
 ) -> QueryWikiBuildResult:
     """Create runs/{trace_id}/query_wiki as the route explorer read root."""
 
@@ -259,10 +258,7 @@ def materialize_query_wiki(
     )
     atomic_write_text(query_root / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     atomic_write_text(query_root / "index.md", _render_index(manifest))
-    atomic_write_text(
-        query_root / "EXPLORER.md",
-        _render_explorer_instructions(max_selected_skills=max_selected_skills),
-    )
+    atomic_write_text(query_root / "EXPLORER.md", _render_explorer_instructions())
     _write_page_index(query_root)
     return QueryWikiBuildResult(root=query_root, manifest=manifest)
 
@@ -276,8 +272,6 @@ def _frontier_edges(
     top_k_per_source: int,
     max_frontier_skills: int,
 ) -> list[Edge]:
-    if max_frontier_skills <= 0 or top_k_per_source <= 0:
-        return []
     by_source: dict[str, list[Edge]] = {}
     for edge in edges:
         if edge.type not in {"depend_on", "compose_with"} or edge.confidence < min_confidence:
@@ -286,26 +280,18 @@ def _frontier_edges(
             by_source.setdefault(edge.source, []).append(edge)
         elif edge.target in source_ids and edge.source not in excluded_ids:
             by_source.setdefault(edge.target, []).append(edge)
-    candidates: list[tuple[str, Edge]] = []
-    for source, source_edges in by_source.items():
-        ranked = sorted(source_edges, key=lambda item: (-item.confidence, item.source, item.target))
-        candidates.extend((source, edge) for edge in ranked[:top_k_per_source])
-
     selected: list[Edge] = []
     frontier_ids: set[str] = set()
-    for source, edge in sorted(
-        candidates,
-        key=lambda item: (-item[1].confidence, item[1].source, item[1].target, item[0]),
-    ):
-        other = edge.target if edge.source == source else edge.source
-        if other in frontier_ids:
-            continue
-        if len(frontier_ids) >= max_frontier_skills:
-            continue
-        selected.append(edge)
-        frontier_ids.add(other)
-        if len(frontier_ids) >= max_frontier_skills:
-            break
+    for source in sorted(by_source):
+        candidates = sorted(by_source[source], key=lambda item: (-item.confidence, item.source, item.target))
+        for edge in candidates[:top_k_per_source]:
+            other = edge.target if edge.source == source else edge.source
+            if other in frontier_ids and len(frontier_ids) >= max_frontier_skills:
+                continue
+            selected.append(edge)
+            frontier_ids.add(other)
+            if len(frontier_ids) >= max_frontier_skills:
+                return selected
     return selected
 
 
@@ -597,16 +583,27 @@ def _render_index(manifest: dict[str, Any]) -> str:
         "Use it to locate candidate skill cards, then open cards for routing decisions, "
         "then open full source only when the card is insufficient.",
         "",
+        f"Query: {manifest['query']}",
+        "",
         "## Skill Cards",
     ]
     for skill in manifest["skills"]:
-        status = "selectable" if skill.get("selectable", True) else "missing"
+        if not skill.get("selectable", True):
+            continue
         lines.extend(
             [
                 f"- {skill['skill_id']} | score={float(skill.get('score', 0.0)):.6f} "
-                f"| sources={_format_card_value(skill.get('sources')) or 'none'} | {status} "
                 f"| card: {skill.get('card_path', '')} | source: {skill.get('source_path', '')}",
             ]
+        )
+    lines.append("")
+    lines.append("## Skills")
+    for skill in manifest["skills"]:
+        status = "selectable" if skill.get("selectable", True) else "missing"
+        lines.append(
+            f"- {skill['skill_id']} | score={float(skill.get('score', 0.0)):.6f} "
+            f"| sources={_format_card_value(skill.get('sources')) or 'none'} | {status} "
+            f"| card={skill.get('card_path', '')} | source={skill.get('source_path', '')}"
         )
     lines.append("")
     lines.append("## Workflows")
@@ -619,8 +616,8 @@ def _render_index(manifest: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_explorer_instructions(*, max_selected_skills: int) -> str:
-    return render_query_wiki_explorer_md(max_selected_skills=max_selected_skills)
+def _render_explorer_instructions() -> str:
+    return render_query_wiki_explorer_md()
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -663,6 +660,59 @@ def _skill_page_header(query_root: Path, page_path: str) -> str:
     return body.strip()
 
 
+def _section(body: str, heading: str) -> str:
+    marker = f"## {heading}"
+    lines = body.splitlines()
+    start: int | None = None
+    for index, line in enumerate(lines):
+        if line.strip() == marker:
+            start = index + 1
+            break
+    if start is None:
+        return ""
+    collected: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        collected.append(line)
+    return "\n".join(collected).strip()
+
+
+def _field_value(section: str, label: str) -> str:
+    prefix = f"{label}:".lower()
+    for line in section.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        if stripped.lower().startswith(prefix):
+            return stripped.split(":", 1)[1].strip()
+    return ""
+
+
+def _first_content_line(section: str) -> str:
+    for line in section.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        if stripped and stripped.lower() != "none":
+            return stripped
+    return ""
+
+
+def _split_field(value: str) -> list[str]:
+    if not value:
+        return []
+    return [_truncate(item.strip().strip("`"), 80) for item in value.split(",") if item.strip()]
+
+
+def _section_items(section: str, *, limit: int) -> list[str]:
+    items: list[str] = []
+    for line in section.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        if not stripped or stripped.lower() == "none":
+            continue
+        items.append(_truncate(stripped, 140))
+        if len(items) >= limit:
+            break
+    return items
+
+
 def _format_card_value(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value if str(item))
@@ -688,6 +738,13 @@ def _format_introduced_by(rows: Any) -> str:
         suffix = f" confidence={float(confidence):.2f}" if isinstance(confidence, int | float) else ""
         values.append(f"{source} {source_skill}->{target_skill}{suffix}".strip())
     return "; ".join(values)
+
+
+def _truncate(value: str, limit: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _rel(root: Path, path: Path) -> str:

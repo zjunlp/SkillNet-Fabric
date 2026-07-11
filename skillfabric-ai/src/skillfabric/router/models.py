@@ -33,7 +33,7 @@ class RouterBundleConfig:
     query: str = ""
     env_file: str | Path | None = ".env"
     seed_limit: int = 8
-    expanded_limit: int = 32
+    expanded_limit: int = 100
     workflow_confidence_threshold: float = 0.95
     max_workflow_hints: int = 12
     graph_expansion_mode: str = "ppr"

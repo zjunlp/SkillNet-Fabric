@@ -15,7 +15,7 @@ class WikiBuildConfig:
 
     workspace: str | Path = ".skillfabric"
     env_file: str | Path = ".env"
-    use_llm_summaries: bool = False
+    use_llm_summaries: bool = True
     max_neighbors_per_section: int = 10
     llm_concurrency: int | None = None
     llm_rate_limit_per_minute: float | None = None

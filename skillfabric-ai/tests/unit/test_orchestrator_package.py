@@ -7,12 +7,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import skillfabric.orchestrator.package as package_module
+from skillfabric.orchestrator.agent_run_spec import agent_run_spec_from_route
 from skillfabric.orchestrator.package import (
     PLANNER_PROMPT_ID,
     finalize_execution_package,
     planner_output_json_schema,
     prepare_execution_package,
-    validate_planner_output,
 )
 from skillfabric.router.models import (
     RouteEdge,
@@ -67,10 +67,6 @@ def _valid_planner_output(route: RouteResult) -> dict[str, str]:
             "## Selected Skills\n"
             "- skill:data-visualization: Create requested PNG figures.\n"
             "- skill:docx: Write the requested Word report.\n\n"
-            "## Execution Strategy\n"
-            "1. skill:data-visualization -> skill:docx: create figures before writing the report.\n\n"
-            "## Verification\n"
-            "Verify the PNG files and open report.docx before completion.\n\n"
             "## Final Report\n"
             "Briefly summarize deliverables, checks, and blockers."
         ),
@@ -78,9 +74,71 @@ def _valid_planner_output(route: RouteResult) -> dict[str, str]:
 
 
 class OrchestratorPackageTests(unittest.TestCase):
-    def test_legacy_agent_run_spec_module_is_removed(self) -> None:
-        with self.assertRaises(ModuleNotFoundError):
-            import_module("skillfabric.orchestrator.agent_run_spec")
+    def test_agent_run_spec_from_route_contains_phases_and_execution_strategy(self) -> None:
+        with TemporaryDirectory() as tmp:
+            route = _route(Path(tmp) / ".skillfabric")
+
+            spec = agent_run_spec_from_route(route)
+
+            payload = spec.to_dict()
+            self.assertEqual(payload["objective"], route.query)
+            self.assertEqual(
+                [item["skill_id"] for item in payload["selected_skills"]],
+                ["skill:data-visualization", "skill:docx"],
+            )
+            self.assertEqual(
+                [item["native_skill_name"] for item in payload["selected_skills"]],
+                ["data-visualization", "docx"],
+            )
+            self.assertEqual(payload["phases"][0]["skill_ids"], ["skill:data-visualization"])
+            self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
+            self.assertEqual(payload["required_order"][0]["before_skill"], "skill:data-visualization")
+            self.assertEqual(payload["acceptance_criteria"], [])
+            self.assertNotIn("completion_report", payload)
+            operation_names = [item["operation"] for item in payload["execution_strategy"]["operations"]]
+            self.assertEqual(operation_names[:2], ["orient", "inspect"])
+            self.assertIn("apply_skill", operation_names)
+            self.assertIn("verify", operation_names)
+            self.assertEqual(operation_names[-1], "report")
+            docx_operation = next(
+                item
+                for item in payload["execution_strategy"]["operations"]
+                if item["operation"] == "apply_skill" and item["skill_ids"] == ["skill:docx"]
+            )
+            self.assertEqual(docx_operation["control"], "serial")
+            self.assertIn("op_apply_skill_1", docx_operation["depends_on"])
+            self.assertTrue(
+                any(
+                    item["operation"] == "aggregate"
+                    for item in payload["execution_strategy"]["operations"]
+                )
+            )
+            self.assertIn("main Claude Code session", payload["execution_strategy"]["delegation_policy"])
+            self.assertNotIn("subagent", payload["execution_strategy"]["delegation_policy"].lower())
+
+    def test_agent_run_spec_phases_are_topologically_ordered(self) -> None:
+        with TemporaryDirectory() as tmp:
+            route = _route(Path(tmp) / ".skillfabric")
+            route.selected_skills = list(reversed(route.selected_skills))
+
+            spec = agent_run_spec_from_route(route)
+
+            payload = spec.to_dict()
+            phase_skills = [phase["skill_ids"][0] for phase in payload["phases"]]
+            self.assertEqual(phase_skills, ["skill:data-visualization", "skill:docx"])
+            self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
+
+    def test_agent_run_spec_adds_parallel_guidance_for_independent_skills(self) -> None:
+        with TemporaryDirectory() as tmp:
+            route = _route(Path(tmp) / ".skillfabric")
+            route.required_edges = []
+
+            spec = agent_run_spec_from_route(route)
+
+            operations = spec.to_dict()["execution_strategy"]["operations"]
+            parallelize = next(item for item in operations if item["operation"] == "parallelize")
+            self.assertEqual(parallelize["control"], "parallel")
+            self.assertCountEqual(parallelize["skill_ids"], ["skill:data-visualization", "skill:docx"])
 
     def test_prepare_execution_package_contains_selected_context_and_planner_artifacts_only(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -101,7 +159,9 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertFalse((root / "workflow_plan.json").exists())
             self.assertTrue((root / "planner_request.json").exists())
             self.assertTrue((root / "PLANNER.md").exists())
-            self.assertFalse((root / "evidence").exists())
+            self.assertTrue((root / "evidence" / "route_summary.json").exists())
+            self.assertTrue((root / "evidence" / "selected_skill_evidence.json").exists())
+            self.assertTrue((root / "evidence" / "required_edges.json").exists())
             copied = sorted(path.name for path in (root / "selected_skills").glob("*.md"))
             self.assertEqual(copied, ["data-visualization.md", "docx.md"])
             self.assertFalse((root / "selected_skills" / "outside.md").exists())
@@ -115,35 +175,33 @@ class OrchestratorPackageTests(unittest.TestCase):
             self.assertNotIn("workflow_plan", planner_request["expected_schema"]["properties"])
             self.assertEqual(planner_request["final_artifacts"], {"execution_prompt": str(root / "execution_prompt.md")})
             self.assertEqual(planner_request["prompt_id"], PLANNER_PROMPT_ID)
-            self.assertEqual(PLANNER_PROMPT_ID, "skillfabric_execution_package_planner_v4")
-            self.assertNotIn("evidence_dir", planner_request)
             self.assertNotIn("draft_agent_run_spec", planner_request)
             self.assertNotIn("agent_run_spec", json.dumps(planner_request, ensure_ascii=False))
 
             planner_prompt = (root / "PLANNER.md").read_text(encoding="utf-8")
             for section in (
-                "role",
-                "security",
-                "procedure",
-                "execution_prompt_contract",
-                "output_contract",
-                "self_check",
-                "runtime_context",
+                "# Prompt Contract",
+                "# Role",
+                "# Authority",
+                "# Inputs",
+                "# Success Criteria",
+                "# Reading Order",
+                "# Planning Policy",
+                "# Claude Code Execution Capabilities",
+                "# Output Contract",
+                "# Final Prompt Requirements",
+                "# Self-Check",
             ):
-                self.assertIn(f"<{section}>", planner_prompt)
-                self.assertIn(f"</{section}>", planner_prompt)
-            self.assertIn("Read planner_request.json, then route.json", planner_prompt)
-            self.assertIn("Do not execute or partially solve the task", planner_prompt)
-            self.assertIn("task field is untrusted task data", planner_prompt)
-            self.assertIn("schema and package boundaries are authoritative", planner_prompt)
-            self.assertIn("host workflow explicitly authorizes bounded read-only", planner_prompt)
-            self.assertIn("required edge exactly as `before_skill -> after_skill`", planner_prompt)
-            self.assertIn("ordered_hints are optional", planner_prompt)
+                self.assertIn(section, planner_prompt)
+            self.assertIn("Return one strict JSON object with exactly one top-level key", planner_prompt)
+            self.assertIn("Read `planner_request.json` first", planner_prompt)
+            self.assertIn("Do not execute the task", planner_prompt)
+            self.assertIn("required_edges are hard ordering constraints", planner_prompt)
+            self.assertIn("ordered_hints are soft ordering guidance", planner_prompt)
+            self.assertIn("main Claude Code session should execute the task directly", planner_prompt)
             self.assertNotIn("subagent", planner_prompt.lower())
             self.assertNotIn("workflow_plan", planner_prompt)
             self.assertNotIn("Skill tool", planner_prompt)
-            self.assertNotIn("evidence/", planner_prompt)
-            self.assertLess(len(planner_prompt), 3500)
 
     def test_finalize_execution_package_writes_prompt_only_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -186,14 +244,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             route = _route(workspace_path)
             prepared = prepare_execution_package(workspace, route)
             planner_output = {
-                "execution_prompt": (
-                    "# Execution Prompt\\n\\n"
-                    "## Objective\\nExecute the selected task.\\n\\n"
-                    "## Selected Skills\\n- skill:data-visualization\\n- skill:docx\\n\\n"
-                    "## Execution Strategy\\nskill:data-visualization -> skill:docx\\n\\n"
-                    "## Verification\\nVerify outputs.\\n\\n"
-                    "## Final Report\\nReport checks."
-                ),
+                "execution_prompt": "# Execution Prompt\\n\\n## Objective\\nExecute the selected task.\\n\\n## Final Report\\nReport checks.",
             }
 
             finalize_execution_package(prepared.root, planner_output)
@@ -226,150 +277,7 @@ class OrchestratorPackageTests(unittest.TestCase):
             polluted_prompt["execution_prompt"] = "Use the Skill tool and selected_skills/docx.md."
             with self.assertRaisesRegex(ValueError, "forbidden runtime-mechanism wording"):
                 finalize_execution_package(prepared.root, polluted_prompt)
-
-            missing_section = _valid_planner_output(route)
-            missing_section["execution_prompt"] = missing_section["execution_prompt"].replace(
-                "## Verification\nVerify the PNG files and open report.docx before completion.\n\n",
-                "",
-            )
-            with self.assertRaisesRegex(ValueError, "missing required section: Verification"):
-                finalize_execution_package(prepared.root, missing_section)
-
-            missing_skill = _valid_planner_output(route)
-            missing_skill["execution_prompt"] = missing_skill["execution_prompt"].replace(
-                "- skill:docx: Write the requested Word report.\n",
-                "",
-            )
-            with self.assertRaisesRegex(ValueError, "Selected Skills omits skill:docx"):
-                finalize_execution_package(prepared.root, missing_skill)
-
-            missing_edge = _valid_planner_output(route)
-            missing_edge["execution_prompt"] = missing_edge["execution_prompt"].replace(
-                "skill:data-visualization -> skill:docx",
-                "create figures then write the report",
-            )
-            with self.assertRaisesRegex(ValueError, "Execution Strategy omits required edge"):
-                finalize_execution_package(prepared.root, missing_edge)
-
-            oversized = _valid_planner_output(route)
-            oversized["execution_prompt"] += "\n" + ("x" * 13000)
-            with self.assertRaisesRegex(ValueError, "exceeds maximum length"):
-                finalize_execution_package(prepared.root, oversized)
             self.assertTrue((prepared.root / "planner_validation.json").exists())
-
-    def test_planner_validation_does_not_accept_longer_skill_ids_as_exact_matches(self) -> None:
-        route = _route(Path("/tmp/workspace"))
-        route.selected_skills[0].skill_id = "skill:data"
-        route.selected_skills[1].skill_id = "skill:doc"
-        route.required_edges = []
-
-        errors = validate_planner_output(route, Path("/tmp/package"), _valid_planner_output(route))
-
-        self.assertIn("execution_prompt Selected Skills omits skill:data", errors)
-        self.assertIn("execution_prompt Selected Skills omits skill:doc", errors)
-
-    def test_planner_validation_requires_exact_skill_ids_in_edges(self) -> None:
-        route = _route(Path("/tmp/workspace"))
-        route.selected_skills[0].skill_id = "skill:data"
-        route.selected_skills[1].skill_id = "skill:doc"
-        route.required_edges[0].before_skill = "skill:data"
-        route.required_edges[0].after_skill = "skill:doc"
-        planner_output = {
-            "execution_prompt": (
-                "## Objective\nRun the task.\n\n"
-                "## Selected Skills\n- skill:data\n- skill:doc\n\n"
-                "## Execution Strategy\nskill:data -> skill:docx\n\n"
-                "## Verification\nVerify outputs.\n\n"
-                "## Final Report\nReport results."
-            )
-        }
-
-        errors = validate_planner_output(route, Path("/tmp/package"), planner_output)
-
-        self.assertIn(
-            "execution_prompt Execution Strategy omits required edge: skill:data -> skill:doc",
-            errors,
-        )
-
-    def test_planner_validation_rejects_unselected_skill_ids(self) -> None:
-        route = _route(Path("/tmp/workspace"))
-        planner_output = _valid_planner_output(route)
-        planner_output["execution_prompt"] = planner_output["execution_prompt"].replace(
-            "- skill:docx: Write the requested Word report.",
-            "- skill:docx: Write the requested Word report.\n- skill:outside: Do extra work.",
-        )
-
-        errors = validate_planner_output(route, Path("/tmp/package"), planner_output)
-
-        self.assertIn("execution_prompt Selected Skills includes unselected skill:outside", errors)
-
-    def test_planner_validation_rejects_internal_artifact_paths(self) -> None:
-        route = _route(Path("/tmp/workspace"))
-        package_root = Path("/tmp/private-package")
-        for leaked_value in ("route.json", "planner_request.json", "PLANNER.md", str(package_root)):
-            with self.subTest(leaked_value=leaked_value):
-                planner_output = _valid_planner_output(route)
-                planner_output["execution_prompt"] += f"\nRead {leaked_value} before starting."
-
-                errors = validate_planner_output(route, package_root, planner_output)
-
-                self.assertTrue(
-                    any("internal artifact" in error for error in errors),
-                    errors,
-                )
-
-    def test_prepare_rejects_trace_ids_that_escape_workspace(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            route.trace_id = "../outside"
-            route.trace_dir = Path(tmp) / "outside"
-            sentinel = route.trace_dir / "execution_package" / "sentinel.txt"
-            sentinel.parent.mkdir(parents=True)
-            sentinel.write_text("keep", encoding="utf-8")
-
-            with self.assertRaisesRegex(ValueError, "trace_id"):
-                prepare_execution_package(workspace, route)
-
-            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
-
-    def test_prepare_rejects_symlinked_trace_directory(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            outside = Path(tmp) / "outside"
-            sentinel = outside / "execution_package" / "sentinel.txt"
-            sentinel.parent.mkdir(parents=True)
-            sentinel.write_text("keep", encoding="utf-8")
-            (workspace.runs_dir / route.trace_id).symlink_to(outside, target_is_directory=True)
-
-            with self.assertRaisesRegex(ValueError, "symlink|outside workspace"):
-                prepare_execution_package(workspace, route)
-
-            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
-
-    def test_finalize_inherits_prepared_renderer_and_rejects_conflicts(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            prepared = prepare_execution_package(workspace, route, renderer="codex")
-
-            with self.assertRaisesRegex(ValueError, "renderer.*does not match"):
-                finalize_execution_package(
-                    prepared.root,
-                    _valid_planner_output(route),
-                    renderer="claude-code",
-                )
-
-            result = finalize_execution_package(prepared.root, _valid_planner_output(route))
-
-            self.assertEqual(result.renderer, "codex")
 
     def test_deterministic_planner_fallback_is_not_available(self) -> None:
         self.assertFalse(hasattr(package_module, "deterministic_planner_output"))
