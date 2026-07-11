@@ -23,7 +23,7 @@ def _expand_seed_skills(
             _add_graph_expansion(selected, seeds, skills[edge.target], selected[edge.source], edge)
         if edge.target in seed_ids and edge.source in skills:
             _add_graph_expansion(selected, seeds, skills[edge.source], selected[edge.target], edge)
-    return _limit_candidates(selected, expanded_limit)
+    return _limit_candidates(selected, expanded_limit, priority_ids=seed_ids)
 
 
 def _add_graph_expansion(
@@ -131,12 +131,17 @@ def _expand_seed_skills_ppr(
         else:
             candidate.reason = "seed + ppr support"
             candidate.ppr_score = ppr_score
-        candidate.score = max(candidate.score, candidate.seed_score + (0.75 * ppr_score))
-        candidate.score_breakdown["ppr"] = max(candidate.score_breakdown.get("ppr", 0.0), 0.75 * ppr_score)
+        if skill_id not in seed_ids:
+            ppr_contribution = 0.75 * ppr_score
+            candidate.score = max(candidate.score, candidate.seed_score + ppr_contribution)
+            candidate.score_breakdown["ppr"] = max(
+                candidate.score_breakdown.get("ppr", 0.0),
+                ppr_contribution,
+            )
         candidate.graph_depth = min(candidate.graph_depth, depths.get(skill_id, candidate.graph_depth))
         for source in support_sources.get(skill_id, []):
             candidate.sources.append(source)
-    return _limit_candidates(candidates, expanded_limit)
+    return _limit_candidates(candidates, expanded_limit, priority_ids=seed_ids)
 
 
 def _ranked_seeds(
@@ -150,9 +155,16 @@ def _ranked_seeds(
 def _limit_candidates(
     candidates: dict[str, RouterSkillCandidate],
     expanded_limit: int,
+    *,
+    priority_ids: set[str] | None = None,
 ) -> list[RouterSkillCandidate]:
     ranked = sorted(candidates.values(), key=lambda item: (-item.score, item.graph_depth, item.skill_id))
-    return ranked[: max(expanded_limit, 0)]
+    limit = max(expanded_limit, 0)
+    if not priority_ids:
+        return ranked[:limit]
+    priority = [item for item in ranked if item.skill_id in priority_ids]
+    expanded = [item for item in ranked if item.skill_id not in priority_ids]
+    return [*priority, *expanded][:limit]
 
 
 def _ppr_adjacency(edges: list[Edge], skills: dict[str, SkillNode]) -> dict[str, dict[str, float]]:

@@ -5,8 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.router.models import RouterBundle, RouterSkillCandidate
 from skillfabric.storage import Workspace
-from skillfabric.wiki.explorer.skill_package import SkillPackage
+from skillfabric.wiki.explorer.skill_package import SkillPackage, validate_skill_package_payload
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
@@ -15,6 +16,81 @@ from tests.unit.wiki_helpers import build_fixture_workspace
 
 
 class SkillPackageTests(unittest.TestCase):
+    def test_payload_schema_rejects_extra_fields_and_unknown_relations(self) -> None:
+        errors = validate_skill_package_payload(
+            {
+                "selected_skills": [],
+                "required_edges": [
+                    {
+                        "before": "skill:a",
+                        "after": "skill:b",
+                        "relation_type": "invented_relation",
+                        "evidence_path": "edges/frontier_edges.jsonl",
+                        "reason": "unsupported",
+                    }
+                ],
+                "ordered_hints": [],
+                "near_misses": [],
+                "coverage_notes": [],
+                "rationale": "invalid fixture",
+                "unexpected": True,
+            }
+        )
+
+        self.assertTrue(any("unexpected" in error for error in errors), errors)
+        self.assertTrue(any("invented_relation" in error for error in errors), errors)
+
+    def test_route_truncation_drops_edges_to_removed_skills(self) -> None:
+        bundle = RouterBundle(
+            query="test",
+            selected_skills=[
+                RouterSkillCandidate("skill:a", "a", 1.0),
+                RouterSkillCandidate("skill:b", "b", 0.9),
+            ],
+            workflow_hints=[],
+            wiki_pages=[],
+        )
+        package = SkillPackage.from_dict(
+            {
+                "selected_skills": [
+                    {
+                        "skill_id": "skill:a",
+                        "role": "primary",
+                        "evidence": [{"path": "skills/cards/a.md", "reason": "fit"}],
+                    },
+                    {
+                        "skill_id": "skill:b",
+                        "role": "secondary",
+                        "evidence": [{"path": "skills/cards/b.md", "reason": "fit"}],
+                    },
+                ],
+                "required_edges": [
+                    {
+                        "before": "skill:a",
+                        "after": "skill:b",
+                        "relation_type": "depend_on",
+                        "evidence_path": "edges/frontier_edges.jsonl",
+                        "reason": "a before b",
+                    }
+                ],
+            }
+        )
+        warnings: list[str] = []
+
+        route = route_from_skill_package(
+            package,
+            bundle,
+            query="test",
+            trace_id="limit",
+            trace_dir=Path("runs/limit"),
+            warnings=warnings,
+            max_selected_skills=1,
+        )
+
+        self.assertEqual(route.selected_skill_ids, ["skill:a"])
+        self.assertEqual(route.required_edges, [])
+        self.assertTrue(any("selection limit" in warning for warning in warnings), warnings)
+
     def test_valid_package_converts_to_route_result(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace_path = Path(tmp) / ".skillfabric"

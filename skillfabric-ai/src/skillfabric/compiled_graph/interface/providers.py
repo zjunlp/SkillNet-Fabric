@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -11,7 +10,10 @@ from typing import Any, Protocol
 from skillfabric.compiled_graph.interface.fallback import _fallback_interface
 from skillfabric.compiled_graph.interface.prompts import build_interface_extraction_messages
 from skillfabric.registry.models import SkillNode
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
+from skillfabric.runtime.json_utils import parse_json_response
+from skillfabric.runtime.llm import LLMConfig, litellm_completion
+
+INTERFACE_MAX_TOKENS = 6144
 
 
 class InterfaceSchemaError(ValueError):
@@ -56,49 +58,14 @@ class LiteLLMInterfaceExtractor:
         response = litellm_completion(
             messages=messages,
             config=self.config,
+            max_tokens=INTERFACE_MAX_TOKENS,
+            reasoning_effort="low",
             usage_operation="kg_build.interface_extraction",
             usage_metadata={"skill_id": skill.id},
         )
-        response_text = _extract_response_text(response)
-        return _parse_json_response(response_text)
-
-
-def _extract_response_text(response: Any) -> str:
-    payload = response_to_jsonable(response)
-    if isinstance(payload, dict):
-        choices = payload.get("choices")
-        if isinstance(choices, list) and choices:
-            first = choices[0]
-            if isinstance(first, dict):
-                message = first.get("message")
-                if isinstance(message, dict) and message.get("content") is not None:
-                    return str(message["content"])
-                if first.get("text") is not None:
-                    return str(first["text"])
-        if payload.get("output_text") is not None:
-            return str(payload["output_text"])
-        output = payload.get("output")
-        if isinstance(output, list):
-            parts: list[str] = []
-            for item in output:
-                if not isinstance(item, dict):
-                    continue
-                content = item.get("content")
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("text") is not None:
-                            parts.append(str(part["text"]))
-            if parts:
-                return "\n".join(parts)
-    return str(payload)
-
-
-def _parse_json_response(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.DOTALL | re.IGNORECASE)
-    if fenced:
-        stripped = fenced.group(1).strip()
-    payload = json.loads(stripped)
-    if not isinstance(payload, dict):
-        raise InterfaceSchemaError("interface JSON root must be an object")
-    return payload
+        try:
+            return parse_json_response(response)
+        except json.JSONDecodeError:
+            raise
+        except ValueError as exc:
+            raise InterfaceSchemaError(str(exc)) from exc

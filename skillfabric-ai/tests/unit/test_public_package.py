@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
+from tests.unit.planner_helpers import valid_planner_output
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
@@ -109,7 +110,7 @@ class PublicPackageTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
         self.assertEqual(manifest["name"], "skillfabric")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.2.0")
         self.assertEqual(manifest["license"], "MIT")
         self.assertLessEqual(
             set(manifest),
@@ -437,6 +438,33 @@ class PublicPackageTests(unittest.TestCase):
                 with self.subTest(path=path, marker=marker):
                     self.assertNotIn(marker, text)
 
+    def test_root_readme_uses_the_current_agent_planning_contract(self) -> None:
+        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("--agent-mode prepare", readme)
+        self.assertIn("prepared.planner_prompt_path", readme)
+        self.assertNotIn('planner_output={"execution_prompt":', readme)
+
+    def test_package_and_plugin_versions_are_coordinated(self) -> None:
+        pyproject = (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        package_init = (PACKAGE_ROOT / "src" / "skillfabric" / "__init__.py").read_text(
+            encoding="utf-8"
+        )
+        manifest = json.loads(
+            (
+                PUBLIC_ROOT
+                / "plugins"
+                / "claude-code"
+                / "skillfabric"
+                / ".claude-plugin"
+                / "plugin.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertIn('version = "0.2.0"', pyproject)
+        self.assertIn('__version__ = "0.2.0"', package_init)
+        self.assertEqual(manifest["version"], "0.2.0")
+
     def test_python_facade_plan_requires_agent_planner(self) -> None:
         from skillfabric import SkillFabric
 
@@ -476,7 +504,7 @@ class PublicPackageTests(unittest.TestCase):
 
             result = client.finalize_plan(
                 prepared.root,
-                {"execution_prompt": "# Prompt\n\nExtract the KPIs and verify the deliverable."},
+                valid_planner_output(prepared.root),
                 renderer="codex",
             )
 

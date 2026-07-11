@@ -18,7 +18,7 @@ Current unit tests focus on:
 - Community assignment repair, semantic relocation, rebalance, and graph health.
 - Router coverage diagnostics, query_wiki assembly, SkillPackage validation,
   and Claude SDK prompt contracts.
-- AgentRunSpec, execution prompt package generation, and public facade behavior
+- execution prompt package generation and public facade behavior
   across build, wiki, route, and plan workflows.
 
 Common local checks:

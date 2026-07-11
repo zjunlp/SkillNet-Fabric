@@ -171,6 +171,7 @@ def litellm_completion(
     env_path: str | Path | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
     usage_operation: str | None = None,
     usage_metadata: dict[str, Any] | None = None,
     **kwargs: Any,
@@ -185,15 +186,16 @@ def litellm_completion(
         **kwargs,
         "model": resolved_model,
         "messages": provider_messages,
-        "max_tokens": max_tokens or resolved.max_tokens,
+        "max_tokens": resolved.max_tokens if max_tokens is None else max_tokens,
         "api_base": resolved.api_base,
         "api_key": _provider_api_key(resolved, resolved_model),
         "timeout": resolved.timeout,
         "request_timeout": resolved.timeout,
         "force_timeout": resolved.timeout,
     }
-    if resolved.reasoning_effort:
-        call_kwargs["reasoning_effort"] = resolved.reasoning_effort
+    resolved_reasoning_effort = resolved.reasoning_effort if reasoning_effort is None else reasoning_effort
+    if resolved_reasoning_effort:
+        call_kwargs["reasoning_effort"] = resolved_reasoning_effort
     usage_context = _current_usage_context()
     operation = usage_operation or usage_context.operation or resolved.usage_operation
     metadata = {**resolved.usage_metadata, **usage_context.metadata, **(usage_metadata or {})}

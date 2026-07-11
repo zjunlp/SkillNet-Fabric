@@ -112,7 +112,7 @@ def candidate_groups_from_terms(
     residual_terms = [term for term in terms if term.key not in grouped_keys]
     output: list[CanonicalizationCluster] = []
     seen: set[tuple[str, ...]] = set()
-    for group in [*groups, residual_terms]:
+    for group in [*groups, *([term] for term in residual_terms)]:
         if not group:
             continue
         for chunk in _chunk_terms(sorted(group, key=lambda item: item.key), max_group_size):
@@ -142,19 +142,25 @@ def generate_semantic_candidate_pairs(
         term.key: _embedding_text_cache_key(embedder.model_id, texts_by_key[term.key])
         for term in terms
     }
-    vectors_by_key: dict[str, list[float]] = {}
-    for term in terms:
-        cached_vector = cached.get(cache_key_by_term[term.key])
-        if cached_vector is not None:
-            vectors_by_key[term.key] = cached_vector
-    missing_terms = [term for term in terms if term.key not in vectors_by_key]
-    if missing_terms:
-        vectors = embedder.embed_texts([texts_by_key[term.key] for term in missing_terms])
-        for term, vector in zip(missing_terms, vectors, strict=False):
+    texts_by_cache_key = {
+        cache_key_by_term[term.key]: texts_by_key[term.key]
+        for term in terms
+    }
+    missing_keys = [key for key in texts_by_cache_key if key not in cached]
+    if missing_keys:
+        vectors = embedder.embed_texts([texts_by_cache_key[key] for key in missing_keys])
+        if len(vectors) != len(missing_keys):
+            raise ValueError(
+                f"embedding provider returned {len(vectors)} vectors for {len(missing_keys)} texts"
+            )
+        for cache_key, vector in zip(missing_keys, vectors, strict=True):
             normalized = _normalize_vector(vector)
-            vectors_by_key[term.key] = normalized
-            cached[cache_key_by_term[term.key]] = normalized
+            cached[cache_key] = normalized
         _write_embedding_cache(cache_path, embedder.model_id, cached)
+    vectors_by_key = {
+        term.key: cached[cache_key_by_term[term.key]]
+        for term in terms
+    }
 
     pairs: dict[tuple[str, str], SemanticCandidatePair] = {}
     for left in terms:

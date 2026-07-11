@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from skillfabric.runtime.json_utils import extract_response_text
+
 _PATH_LOCKS: dict[Path, threading.Lock] = {}
 _PATH_LOCKS_GUARD = threading.Lock()
 
@@ -177,7 +179,7 @@ class LLMUsageTracker:
         usage = _extract_usage(payload)
         if usage is None:
             prompt_tokens = _count_messages(model, messages)
-            completion_tokens = 0 if status == "failed" else _count_text(model, _extract_response_text(payload))
+            completion_tokens = 0 if status == "failed" else _count_text(model, extract_response_text(payload))
             total_tokens = prompt_tokens + completion_tokens
             cached_prompt_tokens = 0
             estimated = True
@@ -327,46 +329,6 @@ def _extract_usage(payload: Any) -> dict[str, int] | None:
         "total_tokens": total_tokens or prompt_tokens + completion_tokens,
         "cached_prompt_tokens": min(prompt_tokens, cached_prompt_tokens),
     }
-
-
-def _extract_response_text(payload: Any) -> str:
-    if payload is None:
-        return ""
-    if isinstance(payload, str):
-        return payload
-    if not isinstance(payload, dict):
-        return str(payload)
-    choices = payload.get("choices")
-    if isinstance(choices, list):
-        parts: list[str] = []
-        for choice in choices:
-            if not isinstance(choice, dict):
-                continue
-            message = choice.get("message")
-            if isinstance(message, dict) and message.get("content") is not None:
-                parts.append(_content_to_text(message["content"]))
-            elif choice.get("text") is not None:
-                parts.append(str(choice["text"]))
-        if parts:
-            return "\n".join(parts)
-    if payload.get("output_text") is not None:
-        return str(payload["output_text"])
-    output = payload.get("output")
-    if isinstance(output, list):
-        parts = []
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            content = item.get("content")
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("text") is not None:
-                        parts.append(str(part["text"]))
-            elif isinstance(content, str):
-                parts.append(content)
-        if parts:
-            return "\n".join(parts)
-    return ""
 
 
 def _count_messages(model: str, messages: list[dict[str, Any]]) -> int:

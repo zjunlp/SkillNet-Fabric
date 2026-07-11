@@ -29,13 +29,15 @@ skillfabric route \
 skillfabric plan \
   "summarize this repository and identify release risks" \
   --workspace .skillfabric \
-  --env-file .env
+  --env-file .env \
+  --agent-mode prepare
 ```
 
-The public defaults keep LLM-backed skill contracts, canonicalization,
-execution validation, and wiki summaries. Plain route/plan uses the Claude Code explorer by default;
-pass `--skip-llm-router --explorer-backend fallback` only for deterministic
-local smoke checks.
+The public defaults keep LLM-backed skill contracts, selective canonicalization,
+and execution validation. Wiki cards reuse those extracted contracts without a
+second LLM pass; use `--wiki-summary-mode all` only when an additional generated
+summary is useful. Plain route/plan uses the Claude Code explorer by default;
+pass `--skip-llm-router --explorer-backend fallback` for deterministic local checks.
 
 ```bash
 skillfabric build --skill-root /path/to/skills --env-file .env --embedding-provider disabled --wiki-summary-mode off
@@ -49,13 +51,12 @@ from skillfabric import SkillFabric
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
 sf.build("/path/to/skills")
 route = sf.route("summarize this repository and identify release risks")
-package = sf.prepare_plan(route=route)
-plan = sf.finalize_plan(
-    package_root=package.root,
-    planner_output={"execution_prompt": "Summarize the repository and verify the result."},
-)
-print(plan.prompt_path)
+prepared = sf.prepare_plan(route=route)
+print(prepared.planner_prompt_path)
 ```
+
+An agent planner must return the strict `execution_prompt` JSON described by
+`planner_request.json`; pass that validated payload to `sf.finalize_plan(...)`.
 
 ## Claude Code Plugin
 

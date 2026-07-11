@@ -209,16 +209,29 @@ def skill_package_json_schema() -> dict[str, Any]:
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "skill_id": {"type": "string"},
-                        "role": {"type": "string"},
+                        "skill_id": {
+                            "type": "string",
+                            "description": "Manifest skill_id selected from query_wiki.",
+                        },
+                        "role": {
+                            "type": "string",
+                            "description": "Short evidence-grounded reason for selecting this skill.",
+                        },
                         "evidence": {
                             "type": "array",
+                            "description": "Files under query_wiki that justify selecting this skill.",
                             "items": {
                                 "type": "object",
                                 "additionalProperties": False,
                                 "properties": {
-                                    "path": {"type": "string"},
-                                    "reason": {"type": "string"},
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Relative query_wiki evidence path.",
+                                    },
+                                    "reason": {
+                                        "type": "string",
+                                        "description": "Why this file supports the selection.",
+                                    },
                                 },
                                 "required": ["path", "reason"],
                             },
@@ -233,14 +246,27 @@ def skill_package_json_schema() -> dict[str, Any]:
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "before": {"type": "string"},
-                        "after": {"type": "string"},
+                        "before": {
+                            "type": "string",
+                            "description": "Skill id that must run before the after skill.",
+                        },
+                        "after": {
+                            "type": "string",
+                            "description": "Skill id that consumes context, artifacts, or state.",
+                        },
                         "relation_type": {
                             "type": "string",
                             "enum": ["depend_on", "compose_with", "artifact_compatibility", "state_compatibility"],
+                            "description": "Dependency type for the before -> after edge.",
                         },
-                        "evidence_path": {"type": "string"},
-                        "reason": {"type": "string"},
+                        "evidence_path": {
+                            "type": "string",
+                            "description": "Relative query_wiki evidence path for the edge.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why the edge direction is before -> after.",
+                        },
                     },
                     "required": ["before", "after", "relation_type", "evidence_path", "reason"],
                 },
@@ -281,3 +307,61 @@ def skill_package_json_schema() -> dict[str, Any]:
         },
         "required": ["selected_skills", "required_edges", "ordered_hints", "near_misses", "coverage_notes", "rationale"],
     }
+
+
+def validate_skill_package_payload(payload: Any) -> list[str]:
+    """Validate raw explorer JSON before tolerant model conversion."""
+
+    errors: list[str] = []
+    _validate_schema_value(payload, skill_package_json_schema(), path="$", errors=errors)
+    return errors
+
+
+def _validate_schema_value(
+    value: Any,
+    schema: dict[str, Any],
+    *,
+    path: str,
+    errors: list[str],
+) -> None:
+    expected_type = schema.get("type")
+    if expected_type == "object":
+        if not isinstance(value, dict):
+            errors.append(f"{path}: expected object")
+            return
+        properties = dict(schema.get("properties", {}))
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{path}.{key}: required property is missing")
+        if schema.get("additionalProperties") is False:
+            for key in sorted(set(value) - set(properties)):
+                errors.append(f"{path}.{key}: additional property is not allowed")
+        for key, child_schema in properties.items():
+            if key in value:
+                _validate_schema_value(
+                    value[key],
+                    child_schema,
+                    path=f"{path}.{key}",
+                    errors=errors,
+                )
+        return
+    if expected_type == "array":
+        if not isinstance(value, list):
+            errors.append(f"{path}: expected array")
+            return
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                _validate_schema_value(
+                    item,
+                    item_schema,
+                    path=f"{path}[{index}]",
+                    errors=errors,
+                )
+        return
+    if expected_type == "string" and not isinstance(value, str):
+        errors.append(f"{path}: expected string")
+        return
+    allowed = schema.get("enum")
+    if isinstance(allowed, list) and value not in allowed:
+        errors.append(f"{path}: unsupported value {value!r}; expected one of {allowed}")

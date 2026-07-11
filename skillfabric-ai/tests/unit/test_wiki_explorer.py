@@ -15,6 +15,7 @@ from skillfabric.router.routing import RouterConfig, route_task
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
 from skillfabric.wiki.explorer.prompting import EXPLORER_PROMPT_ID
 from skillfabric.wiki.explorer.search_index import load_page_index
+from skillfabric.wiki.explorer.skill_package import skill_package_json_schema
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
@@ -152,6 +153,7 @@ class WikiExplorerTests(unittest.TestCase):
             self.assertIn("Write", runtime.options.disallowed_tools)
             self.assertIn("json_schema", runtime.options.output_format["type"])
             schema = runtime.options.output_format["schema"]
+            self.assertEqual(schema, skill_package_json_schema())
             selected_item_schema = schema["properties"]["selected_skills"]["items"]
             self.assertFalse(selected_item_schema["additionalProperties"])
             self.assertNotIn("scope", selected_item_schema["required"])

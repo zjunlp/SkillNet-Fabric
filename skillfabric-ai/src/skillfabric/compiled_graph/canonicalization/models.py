@@ -144,6 +144,7 @@ class CanonicalizationBuild:
     warnings: list[str] = field(default_factory=list)
     model_id: str = ""
     cluster_count: int = 0
+    deterministic_count: int = 0
     llm_call_count: int = 0
     cache_hit_count: int = 0
     omitted_term_count: int = 0

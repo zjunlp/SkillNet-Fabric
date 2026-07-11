@@ -262,6 +262,38 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(calls[0]["force_timeout"], 15.0)
         self.assertEqual(fake_litellm.request_timeout, 15.0)
 
+    def test_litellm_completion_accepts_per_call_output_and_reasoning_budgets(self) -> None:
+        calls: list[dict[str, object]] = []
+        fake_litellm = types.SimpleNamespace()
+
+        def fake_completion(**kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        fake_litellm.completion = fake_completion
+        original = sys.modules.get("litellm")
+        sys.modules["litellm"] = fake_litellm
+        try:
+            litellm_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                config=LLMConfig(
+                    api_base="https://example.test/api",
+                    api_key="sk-test",
+                    max_tokens=32768,
+                    reasoning_effort="medium",
+                ),
+                max_tokens=2048,
+                reasoning_effort="low",
+            )
+        finally:
+            if original is None:
+                sys.modules.pop("litellm", None)
+            else:
+                sys.modules["litellm"] = original
+
+        self.assertEqual(calls[0]["max_tokens"], 2048)
+        self.assertEqual(calls[0]["reasoning_effort"], "low")
+
     def test_skillfabric_llm_env_names_are_primary_for_public_config(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"

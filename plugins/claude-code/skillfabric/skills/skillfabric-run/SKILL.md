@@ -87,7 +87,7 @@ Preparation path:
    `agent_route_request`, and `skill_package_file`.
 8. In the main Claude Code session, read `agent_route_request.json`,
    `query_wiki/EXPLORER.md`, and `query_wiki/index.md`; then read only the
-   query-wiki skill, community, workflow, or edge pages needed to select an
+   query-wiki skill, workflow, or edge pages needed to select an
    evidence-backed SkillPackage. Do not inspect the active project workspace
    during this route-selection step. Route selection is about choosing skills
    from the query wiki, not solving the user's task.
@@ -103,9 +103,9 @@ Preparation path:
 12. Read the returned JSON fields: `root`, `planner_request_path`,
     `planner_prompt_path`, and `planner_output_path`.
 13. In the main Claude Code session, read `planner_request.json`, `PLANNER.md`,
-    `route.json`, `evidence/required_edges.json`,
-    `evidence/selected_skill_evidence.json`, `evidence/route_summary.json`,
-    and only the selected skill pages needed to understand capability boundaries.
+    `route.json`, and only the selected skill pages needed to understand capability
+    boundaries. `route.json` is the single source for selected skills, required
+    edges, ordered hints, near misses, rationale, and warnings.
 14. Optionally perform bounded active-workspace inspection when it improves task
     execution: read non-secret README/project metadata, file maps, git status,
     relevant source or tests, and obvious verification commands. Do not read

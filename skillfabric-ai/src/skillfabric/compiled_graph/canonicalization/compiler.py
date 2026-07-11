@@ -10,6 +10,7 @@ from typing import Any
 
 from skillfabric.compiled_graph.canonicalization.candidates import (
     CanonicalSemanticEmbedder,
+    HashingCanonicalEmbedder,
     candidate_groups_from_terms,
     contract_object_type,
     normalized_candidate_text,
@@ -28,9 +29,39 @@ from skillfabric.compiled_graph.canonicalization.prompts import (
 )
 from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
+from skillfabric.runtime.json_utils import parse_json_response
+from skillfabric.runtime.llm import LLMConfig, litellm_completion
 
 CANONICALIZATION_CACHE_ID = CANONICALIZATION_PROMPT_ID
+CANONICALIZATION_MAX_TOKENS = 4096
+_GENERIC_CANONICAL_NAMES = {
+    "artifact",
+    "artifacts",
+    "command",
+    "commands",
+    "content",
+    "data",
+    "document",
+    "documents",
+    "file",
+    "files",
+    "input",
+    "inputs",
+    "object",
+    "objects",
+    "observation",
+    "observations",
+    "output",
+    "outputs",
+    "report",
+    "response",
+    "result",
+    "results",
+    "state",
+    "text",
+    "value",
+    "values",
+}
 
 
 class LiteLLMCanonicalizationProvider:
@@ -51,13 +82,12 @@ class LiteLLMCanonicalizationProvider:
         response = litellm_completion(
             messages=build_canonicalization_messages(cluster),
             config=self.config,
+            max_tokens=CANONICALIZATION_MAX_TOKENS,
+            reasoning_effort="low",
             usage_operation="kg_build.canonicalization",
             usage_metadata={"cluster_id": cluster.cluster_id},
         )
-        text = _extract_response_text(response)
-        parsed = json.loads(_strip_fence(text))
-        if not isinstance(parsed, dict):
-            raise ValueError("canonicalization response must be a JSON object")
+        parsed = parse_json_response(response)
         _validate_provider_payload(parsed)
         return parsed
 
@@ -75,17 +105,34 @@ def canonicalize_contract_objects(
     if provider is None:
         raise ValueError("canonicalization provider is required")
     raw_terms = _collect_raw_terms(interfaces)
-    clusters = candidate_groups_from_terms(
-        raw_terms,
-        semantic_embedder=semantic_embedder,
-        embedding_cache_path=_embedding_cache_path(cache_path),
-    )
+    warnings: list[str] = []
+    try:
+        clusters = candidate_groups_from_terms(
+            raw_terms,
+            semantic_embedder=semantic_embedder,
+            embedding_cache_path=_embedding_cache_path(cache_path),
+        )
+    except Exception as exc:  # noqa: BLE001 - local fallback keeps builds usable after provider failure.
+        warnings.append(
+            "semantic term embeddings failed; deterministic hashing fallback used "
+            f"({type(exc).__name__})"
+        )
+        clusters = candidate_groups_from_terms(
+            raw_terms,
+            semantic_embedder=HashingCanonicalEmbedder(),
+        )
     cache = _load_cache(cache_path)
     results: dict[str, dict[str, Any]] = {}
     pending: list[CanonicalizationCluster] = []
     cache_hits = 0
+    deterministic_count = 0
 
     for cluster in clusters:
+        deterministic = _deterministic_cluster_payload(cluster)
+        if deterministic is not None:
+            deterministic_count += 1
+            results[cluster.cluster_id] = deterministic
+            continue
         cached = cache.get(_cache_key(cluster, provider.model_id))
         if isinstance(cached, dict):
             cache_hits += 1
@@ -133,6 +180,8 @@ def canonicalize_contract_objects(
         clusters,
         results,
         model_id=provider.model_id,
+        warnings=warnings,
+        deterministic_count=deterministic_count,
         llm_call_count=len(pending),
         cache_hit_count=cache_hits,
     )
@@ -172,6 +221,8 @@ def _build_from_results(
     results: dict[str, dict[str, Any]],
     *,
     model_id: str,
+    warnings: list[str] | None = None,
+    deterministic_count: int = 0,
     llm_call_count: int = 0,
     cache_hit_count: int = 0,
 ) -> CanonicalizationBuild:
@@ -238,13 +289,48 @@ def _build_from_results(
         objects=sorted(objects.values(), key=lambda item: item.canonical_id),
         assignments=sorted(assignments.values(), key=lambda item: item.raw_key),
         raw_terms=raw_terms,
-        warnings=[],
+        warnings=list(warnings or []),
         model_id=model_id,
         cluster_count=len(clusters),
+        deterministic_count=deterministic_count,
         llm_call_count=llm_call_count,
         cache_hit_count=cache_hit_count,
         omitted_term_count=_omitted_term_count(raw_terms, assignments),
     )
+
+
+def _deterministic_cluster_payload(cluster: CanonicalizationCluster) -> dict[str, Any] | None:
+    """Resolve unambiguous singleton or exact-name clusters without an LLM call."""
+
+    normalized_names = {normalized_candidate_text(term.name) for term in cluster.terms}
+    object_types = {contract_object_type(term.kind) for term in cluster.terms}
+    if not cluster.terms or "" in normalized_names:
+        return None
+    if len(cluster.terms) > 1 and (len(normalized_names) != 1 or len(object_types) != 1):
+        return None
+    name = _canonical_output_name(next(iter(normalized_names)))
+    if not name:
+        return None
+    if name in _GENERIC_CANONICAL_NAMES:
+        if len(cluster.terms) > 1:
+            return None
+        return {
+            "_provenance": "deterministic_generic_omission",
+            "canonical_objects": [],
+            "omitted_term_ids": [cluster.terms[0].term_id],
+        }
+    return {
+        "_provenance": "deterministic_normalization",
+        "canonical_objects": [
+            {
+                "name": name,
+                "type": next(iter(object_types)),
+                "term_ids": [term.term_id for term in cluster.terms],
+                "confidence": min(float(term.confidence) for term in cluster.terms),
+            }
+        ],
+        "omitted_term_ids": [],
+    }
 
 
 def _validate_provider_payload(raw: dict[str, Any]) -> None:
@@ -318,45 +404,3 @@ def _write_cache(path: str | Path | None, payload: dict[str, dict[str, Any]]) ->
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _extract_response_text(response: Any) -> str:
-    payload = response_to_jsonable(response)
-    if isinstance(payload, dict):
-        choices = payload.get("choices")
-        if isinstance(choices, list) and choices:
-            first = choices[0]
-            if isinstance(first, dict):
-                message = first.get("message")
-                if isinstance(message, dict) and message.get("content") is not None:
-                    return str(message["content"])
-                if first.get("text") is not None:
-                    return str(first["text"])
-        if payload.get("output_text") is not None:
-            return str(payload["output_text"])
-        output = payload.get("output")
-        if isinstance(output, list):
-            parts: list[str] = []
-            for item in output:
-                if not isinstance(item, dict):
-                    continue
-                content = item.get("content")
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("text") is not None:
-                            parts.append(str(part["text"]))
-            if parts:
-                return "\n".join(parts)
-    return str(payload)
-
-
-def _strip_fence(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        return "\n".join(lines).strip()
-    return stripped

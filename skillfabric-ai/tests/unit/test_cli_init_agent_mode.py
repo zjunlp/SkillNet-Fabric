@@ -13,6 +13,7 @@ from unittest.mock import patch
 from skillfabric.cli import main as cli_main
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
+from tests.unit.planner_helpers import valid_planner_output
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
@@ -162,6 +163,8 @@ class InitAndAgentModeCliTests(unittest.TestCase):
                         "agent-route",
                         "--agent-mode",
                         "prepare",
+                        "--max-selected-skills",
+                        "1",
                     ]
                 )
 
@@ -173,29 +176,31 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertTrue((trace_dir / "router_bundle.json").exists())
             self.assertTrue((trace_dir / "agent_route_request.json").exists())
             self.assertIn("selected_skills", prepared["expected_schema"]["properties"])
+            request = json.loads((trace_dir / "agent_route_request.json").read_text(encoding="utf-8"))
+            self.assertEqual(request["max_selected_skills"], 1)
+            self.assertIn('"max_selected_skills":1', (query_wiki_root / "EXPLORER.md").read_text(encoding="utf-8"))
 
             manifest = json.loads((query_wiki_root / "manifest.json").read_text(encoding="utf-8"))
-            selected = next(item for item in manifest["skills"] if item["selectable"])
+            selectable = [item for item in manifest["skills"] if item["selectable"]]
+            self.assertGreaterEqual(len(selectable), 2)
             skill_package_file = trace_dir / "agent_skill_package.json"
-            skill_package_file.write_text(
-                json.dumps(
+            skill_package_payload = {
+                "selected_skills": [
                     {
-                        "selected_skills": [
-                            {
-                                "skill_id": selected["skill_id"],
-                                "role": "Use this skill for the main task capability.",
-                                "evidence": [{"path": selected["card_path"], "reason": "Selected from query wiki."}],
-                            }
-                        ],
-                        "required_edges": [],
-                        "ordered_hints": [],
-                        "near_misses": [],
-                        "coverage_notes": [],
-                        "rationale": "Single evidence-backed skill selection.",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n",
+                        "skill_id": item["skill_id"],
+                        "role": "Use this skill for a task capability.",
+                        "evidence": [{"path": item["card_path"], "reason": "Selected from query wiki."}],
+                    }
+                    for item in selectable[:2]
+                ],
+                "required_edges": [],
+                "ordered_hints": [],
+                "near_misses": [],
+                "coverage_notes": [],
+                "rationale": "Evidence-backed skill selection.",
+            }
+            skill_package_file.write_text(
+                json.dumps(skill_package_payload, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
 
@@ -218,9 +223,45 @@ class InitAndAgentModeCliTests(unittest.TestCase):
 
             route = json.loads(finalize_output.getvalue())
             self.assertEqual(route["trace_id"], "agent-route")
-            self.assertEqual(route["selected_skills"][0]["skill_id"], selected["skill_id"])
+            self.assertEqual([item["skill_id"] for item in route["selected_skills"]], [selectable[0]["skill_id"]])
             self.assertTrue((trace_dir / "route.json").exists())
             self.assertTrue((trace_dir / "agent_route_validation.json").exists())
+
+            with self.assertRaises(SystemExit) as raised:
+                cli_main(
+                    [
+                        "route",
+                        "a different task",
+                        "--workspace",
+                        str(workspace),
+                        "--trace-id",
+                        "agent-route",
+                        "--agent-mode",
+                        "finalize",
+                        "--skill-package-file",
+                        str(skill_package_file),
+                    ]
+                )
+            self.assertIn("does not match the prepare phase", str(raised.exception))
+
+            invalid_payload = {**skill_package_payload, "unexpected": True}
+            with patch("sys.stdin", io.StringIO(json.dumps(invalid_payload))):
+                with self.assertRaises(SystemExit) as raised:
+                    cli_main(
+                        [
+                            "route",
+                            "extract financial KPIs from a PDF report",
+                            "--workspace",
+                            str(workspace),
+                            "--trace-id",
+                            "agent-route",
+                            "--agent-mode",
+                            "finalize",
+                            "--skill-package-file",
+                            "-",
+                        ]
+                    )
+            self.assertIn("unexpected", str(raised.exception))
 
     def test_query_wiki_card_cli_outputs_header_without_raw_source(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -537,9 +578,7 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertTrue((package_root / "PLANNER.md").exists())
             self.assertFalse((package_root / "execution_prompt.md").exists())
             self.assertNotIn("draft_agent_run_spec", prepared)
-            planner_output = {
-                "execution_prompt": "# Fixture Planner Prompt\n\nExecute the task with selected skills.",
-            }
+            planner_output = valid_planner_output(package_root)
 
             finalize_output = io.StringIO()
             with patch("sys.stdin", io.StringIO("```json\n" + json.dumps(planner_output) + "\n```")):
@@ -562,7 +601,7 @@ class InitAndAgentModeCliTests(unittest.TestCase):
             self.assertEqual(Path(finalized["prompt_path"]), package_root / "execution_prompt.md")
             self.assertEqual(
                 (package_root / "execution_prompt.md").read_text(encoding="utf-8"),
-                "# Fixture Planner Prompt\n\nExecute the task with selected skills.\n",
+                planner_output["execution_prompt"] + "\n",
             )
             self.assertFalse((package_root / "workflow_plan.json").exists())
             self.assertFalse((package_root / "agent_run_spec.json").exists())

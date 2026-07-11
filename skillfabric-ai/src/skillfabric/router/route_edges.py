@@ -7,43 +7,6 @@ from typing import Any
 from skillfabric.router.models import RouteEdge, RouterBundle
 
 
-def _edges_from_payload(
-    payload: Any,
-    selected_ids: set[str],
-    *,
-    source: str,
-    warnings: list[str],
-    allow_sequence: bool = False,
-    default_edge_type: str = "depend_on",
-) -> list[RouteEdge]:
-    if not isinstance(payload, list):
-        return []
-    edges: list[RouteEdge] = []
-    if allow_sequence:
-        edges.extend(_edges_from_ordered_sequence(payload, selected_ids, source=source, warnings=warnings))
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        before = str(item.get("before_skill", ""))
-        after = str(item.get("after_skill", ""))
-        if not before and not after:
-            continue
-        if before not in selected_ids or after not in selected_ids:
-            warnings.append(f"dropped invalid route edge: {before} -> {after}")
-            continue
-        edges.append(
-            RouteEdge(
-                before_skill=before,
-                after_skill=after,
-                edge_type=str(item.get("edge_type", default_edge_type) or default_edge_type),
-                confidence=_safe_float(item.get("confidence"), 0.0),
-                reason=str(item.get("reason", "")),
-                source=str(item.get("source", source) or source),
-            )
-        )
-    return edges
-
-
 def _edges_from_ordered_sequence(
     payload: list[Any],
     selected_ids: set[str],
@@ -192,34 +155,3 @@ def _merge_edges(edges: list[RouteEdge]) -> list[RouteEdge]:
         if existing is None or edge.confidence > existing.confidence:
             by_key[edge.key] = edge
     return sorted(by_key.values(), key=lambda item: (-item.confidence, item.before_skill, item.after_skill))
-
-
-def _near_misses_from_payload(payload: Any, candidates: dict[str, Any], selected_ids: set[str]) -> list[dict[str, str]]:
-    if not isinstance(payload, list):
-        return []
-    output: list[dict[str, str]] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        skill_id = str(item.get("skill_id", ""))
-        if skill_id not in candidates or skill_id in selected_ids:
-            continue
-        output.append({"skill_id": skill_id, "reason": str(item.get("reason", ""))})
-    return output
-
-
-def _safe_float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value] if value else []
-    if isinstance(value, list):
-        return [str(item) for item in value if str(item)]
-    return [str(value)] if str(value) else []

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -24,10 +23,13 @@ from skillfabric.compiled_graph.execution.prompts import (
 from skillfabric.compiled_graph.interface.models import SkillInterface
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, response_to_jsonable
+from skillfabric.runtime.json_utils import extract_response_text, parse_json_response
+from skillfabric.runtime.llm import LLMConfig, litellm_completion
 
 EXECUTION_POLICY_VERSION = "execution_validation_policy_v3"
 EXECUTION_POLICY_DIGEST = EXECUTION_POLICY_VERSION
+COMPACT_EXECUTION_MAX_TOKENS = 2048
+FULL_EXECUTION_MAX_TOKENS = 4096
 
 
 class ExecutionFlowValidator(Protocol):
@@ -108,18 +110,27 @@ class LiteLLMExecutionFlowValidator:
         *,
         usage_metadata: dict[str, str],
     ) -> dict[str, Any]:
+        prompt_tier = str(usage_metadata.get("prompt_tier", ""))
+        completion_options: dict[str, Any] = {
+            "max_tokens": COMPACT_EXECUTION_MAX_TOKENS
+            if prompt_tier == "compact"
+            else FULL_EXECUTION_MAX_TOKENS,
+        }
+        if prompt_tier == "compact":
+            completion_options["reasoning_effort"] = "low"
         try:
             response = litellm_completion(
                 messages=messages,
                 config=self.config,
                 usage_operation="kg_build.execution_validation",
                 usage_metadata=usage_metadata,
+                **completion_options,
             )
-            response_text = _extract_response_text(response)
+            response_text = extract_response_text(response)
             return _with_validation_meta(
-                _parse_validation_json(response_text),
+                parse_json_response(response_text),
                 source="llm",
-                prompt_tier=str(usage_metadata.get("prompt_tier", "")),
+                prompt_tier=prompt_tier,
                 model_id=self.model_id,
                 cache_hit=False,
             )
@@ -131,7 +142,19 @@ class LiteLLMExecutionFlowValidator:
                     raw_response=locals().get("response_text", ""),
                 ),
                 source="llm",
-                prompt_tier=str(usage_metadata.get("prompt_tier", "")),
+                prompt_tier=prompt_tier,
+                model_id=self.model_id,
+                cache_hit=False,
+            )
+        except ValueError as exc:
+            return _with_validation_meta(
+                _error_payload(
+                    "schema_error",
+                    f"invalid execution JSON schema: {exc}",
+                    raw_response=locals().get("response_text", ""),
+                ),
+                source="llm",
+                prompt_tier=prompt_tier,
                 model_id=self.model_id,
                 cache_hit=False,
             )
@@ -139,7 +162,7 @@ class LiteLLMExecutionFlowValidator:
             return _with_validation_meta(
                 _error_payload("api_error", f"{type(exc).__name__}: {exc}"),
                 source="llm",
-                prompt_tier=str(usage_metadata.get("prompt_tier", "")),
+                prompt_tier=prompt_tier,
                 model_id=self.model_id,
                 cache_hit=False,
             )
@@ -431,47 +454,6 @@ def _none_normalized() -> dict[str, Any]:
         "evidence": [],
         "needs_full_context": False,
     }
-
-
-def _extract_response_text(response: Any) -> str:
-    payload = response_to_jsonable(response)
-    if isinstance(payload, dict):
-        choices = payload.get("choices")
-        if isinstance(choices, list) and choices:
-            first = choices[0]
-            if isinstance(first, dict):
-                message = first.get("message")
-                if isinstance(message, dict) and message.get("content") is not None:
-                    return str(message["content"])
-                if first.get("text") is not None:
-                    return str(first["text"])
-        if payload.get("output_text") is not None:
-            return str(payload["output_text"])
-        output = payload.get("output")
-        if isinstance(output, list):
-            parts: list[str] = []
-            for item in output:
-                if not isinstance(item, dict):
-                    continue
-                content = item.get("content")
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("text") is not None:
-                            parts.append(str(part["text"]))
-            if parts:
-                return "\n".join(parts)
-    return str(payload)
-
-
-def _parse_validation_json(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.DOTALL | re.IGNORECASE)
-    if fenced:
-        stripped = fenced.group(1).strip()
-    payload = json.loads(stripped)
-    if not isinstance(payload, dict):
-        return _error_payload("schema_error", "execution JSON root must be an object", raw_response=text)
-    return payload
 
 
 def _error_payload(error_type: str, message: str, *, raw_response: str = "") -> dict[str, Any]:

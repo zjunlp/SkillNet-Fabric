@@ -22,7 +22,7 @@ class RuntimeControlsTests(unittest.TestCase):
         router = default_router_options()
 
         self.assertEqual(build.embedding_provider, "api")
-        self.assertEqual(build.wiki_summary_mode, "all")
+        self.assertEqual(build.wiki_summary_mode, "off")
         self.assertTrue(router.use_llm_router)
         self.assertEqual(router.explorer_backend, "claude-code")
 

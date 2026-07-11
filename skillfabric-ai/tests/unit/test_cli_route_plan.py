@@ -13,6 +13,7 @@ from skillfabric.router.models import RouteResult
 from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
+from tests.unit.planner_helpers import valid_planner_output
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
@@ -153,7 +154,7 @@ class RoutePlanCliTests(unittest.TestCase):
             self.assertFalse((package_root / "execution_prompt.md").exists())
             self.assertFalse((package_root / "agent_run_spec_draft.json").exists())
 
-            planner_output = {"execution_prompt": "# Prompt\n\nExecute the task."}
+            planner_output = valid_planner_output(package_root)
             finalize_output = io.StringIO()
             with patch("sys.stdin", io.StringIO(json.dumps(planner_output))):
                 with contextlib.redirect_stdout(finalize_output):
@@ -370,7 +371,7 @@ class RoutePlanCliTests(unittest.TestCase):
             prepared = json.loads(prepare_output.getvalue())
             package_root = Path(prepared["root"])
 
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
+            with patch("sys.stdin", io.StringIO(json.dumps(valid_planner_output(package_root)))):
                 with contextlib.redirect_stdout(io.StringIO()):
                     cli_main(
                         [
@@ -447,7 +448,7 @@ class RoutePlanCliTests(unittest.TestCase):
             prepared = json.loads(prepare_output.getvalue())
             package_root = Path(prepared["root"])
 
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
+            with patch("sys.stdin", io.StringIO(json.dumps(valid_planner_output(package_root)))):
                 with contextlib.redirect_stdout(io.StringIO()):
                     cli_main(
                         [
@@ -514,8 +515,9 @@ class RoutePlanCliTests(unittest.TestCase):
                     ]
                 )
             prepared = json.loads(prepare_output.getvalue())
+            package_root = Path(prepared["root"])
 
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
+            with patch("sys.stdin", io.StringIO(json.dumps(valid_planner_output(package_root)))):
                 with contextlib.redirect_stdout(io.StringIO()):
                     cli_main(
                         [

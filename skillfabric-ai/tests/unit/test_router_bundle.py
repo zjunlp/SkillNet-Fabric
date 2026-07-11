@@ -11,6 +11,9 @@ from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import build_embedding_store
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.router.expansion import _expand_seed_skills, _expand_seed_skills_ppr
+from skillfabric.router.models import RouterSkillCandidate
+from skillfabric.router.retrieval import _tokens
 from skillfabric.storage import Workspace
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 
@@ -47,8 +50,100 @@ def _interface(
 
 
 class RouterBundleTests(unittest.TestCase):
-    def test_router_bundle_defaults_to_top_100_candidates(self) -> None:
-        self.assertEqual(RouterBundleConfig().expanded_limit, 100)
+    def test_router_bundle_defaults_to_bounded_candidate_pool(self) -> None:
+        self.assertEqual(RouterBundleConfig().expanded_limit, 32)
+
+    def test_ppr_support_does_not_rerank_existing_query_seeds(self) -> None:
+        skills = {
+            skill.id: skill
+            for skill in (
+                _skill("skill:exact", "exact", "Exact query match.", "exact"),
+                _skill("skill:central", "central", "Graph hub.", "central"),
+                _skill("skill:left", "left", "Left neighbor.", "left"),
+                _skill("skill:right", "right", "Right neighbor.", "right"),
+            )
+        }
+        seeds = {
+            "skill:exact": RouterSkillCandidate("skill:exact", "exact", 1.0, seed_score=1.0),
+            "skill:central": RouterSkillCandidate("skill:central", "central", 0.9, seed_score=0.9),
+            "skill:left": RouterSkillCandidate("skill:left", "left", 0.1, seed_score=0.1),
+            "skill:right": RouterSkillCandidate("skill:right", "right", 0.1, seed_score=0.1),
+        }
+        edges = [
+            Edge("skill:central", "skill:left", "similar_to", confidence=1.0),
+            Edge("skill:central", "skill:right", "similar_to", confidence=1.0),
+        ]
+
+        selected = _expand_seed_skills_ppr(
+            edges,
+            skills,
+            seeds,
+            seed_limit=4,
+            expanded_limit=4,
+            alpha=0.85,
+            max_iter=50,
+            tol=1e-8,
+        )
+
+        self.assertEqual(selected[0].skill_id, "skill:exact")
+        self.assertGreater(
+            next(item for item in selected if item.skill_id == "skill:central").ppr_score,
+            next(item for item in selected if item.skill_id == "skill:exact").ppr_score,
+        )
+
+    def test_graph_expansion_limit_preserves_query_seeds(self) -> None:
+        skills = {
+            skill.id: skill
+            for skill in (
+                _skill("skill:strong", "strong", "Strong query match.", "strong"),
+                _skill("skill:weak", "weak", "Weak query match.", "weak"),
+                _skill("skill:neighbor", "neighbor", "Graph neighbor.", "neighbor"),
+            )
+        }
+        seeds = {
+            "skill:strong": RouterSkillCandidate("skill:strong", "strong", 1.0, seed_score=1.0),
+            "skill:weak": RouterSkillCandidate("skill:weak", "weak", 0.1, seed_score=0.1),
+        }
+
+        selected = _expand_seed_skills(
+            [Edge("skill:strong", "skill:neighbor", "depend_on", confidence=1.0)],
+            skills,
+            seeds,
+            seed_limit=2,
+            expanded_limit=2,
+        )
+
+        self.assertEqual({item.skill_id for item in selected}, set(seeds))
+
+    def test_ppr_expansion_limit_preserves_query_seeds(self) -> None:
+        skills = {
+            skill.id: skill
+            for skill in (
+                _skill("skill:strong", "strong", "Strong query match.", "strong"),
+                _skill("skill:weak", "weak", "Weak query match.", "weak"),
+                _skill("skill:neighbor", "neighbor", "Graph neighbor.", "neighbor"),
+            )
+        }
+        seeds = {
+            "skill:strong": RouterSkillCandidate("skill:strong", "strong", 1.0, seed_score=1.0),
+            "skill:weak": RouterSkillCandidate("skill:weak", "weak", 0.01, seed_score=0.01),
+        }
+
+        selected = _expand_seed_skills_ppr(
+            [Edge("skill:strong", "skill:neighbor", "compose_with", confidence=1.0)],
+            skills,
+            seeds,
+            seed_limit=2,
+            expanded_limit=2,
+            alpha=0.85,
+            max_iter=50,
+            tol=1e-8,
+        )
+
+        self.assertEqual({item.skill_id for item in selected}, set(seeds))
+
+    def test_router_tokens_normalize_common_adverbs(self) -> None:
+        self.assertEqual(_tokens("quickly searched papers"), ["quick", "search", "paper"])
 
     def test_object_and_interface_scores_softly_recall_deliverable_skills(self) -> None:
         with TemporaryDirectory() as tmp:
