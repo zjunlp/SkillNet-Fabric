@@ -18,8 +18,7 @@ from skillfabric.compiled_graph.contracts.extraction import (
 from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.compiled_graph.semantic.candidates import (
-    DEFAULT_HANDOFF_TOP_K,
-    DEFAULT_SIMILARITY_TOP_K,
+    DEFAULT_CANDIDATE_TOP_K,
     retrieve_candidate_pairs,
 )
 from skillfabric.compiled_graph.semantic.models import RelationDecision
@@ -165,9 +164,9 @@ def build_graph(
                 contracts,
                 skills,
                 provider=embedding_provider,
+                bm25_path=workspace.graph_dir / "bm25.sqlite",
                 store_path=workspace.graph_dir / "embeddings.json",
-                handoff_top_k=DEFAULT_HANDOFF_TOP_K,
-                similarity_top_k=DEFAULT_SIMILARITY_TOP_K,
+                candidate_top_k=DEFAULT_CANDIDATE_TOP_K,
             )
             timer.mark(stage)
 

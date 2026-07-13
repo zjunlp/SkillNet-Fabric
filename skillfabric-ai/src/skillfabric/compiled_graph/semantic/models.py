@@ -7,10 +7,10 @@ from typing import Any, Literal
 
 from skillfabric.compiled_graph.models import Edge, EvidenceRef
 
-CandidateChannel = Literal["handoff", "explicit_reference", "similarity"]
+CandidateChannel = Literal["handoff", "explicit_reference", "similarity", "lexical"]
 EmbeddingKind = Literal["skill", "requires", "produces"]
 RelationType = Literal["depend_on", "compose_with", "similar_to", "none"]
-_CHANNEL_ORDER = {"handoff": 0, "explicit_reference": 1, "similarity": 2}
+_CHANNEL_ORDER = {"handoff": 0, "explicit_reference": 1, "similarity": 2, "lexical": 3}
 
 
 @dataclass(frozen=True, slots=True)

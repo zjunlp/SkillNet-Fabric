@@ -20,13 +20,14 @@ from skillfabric.compiled_graph.semantic.models import (
     EmbeddingKind,
     EmbeddingRecord,
 )
-from skillfabric.indexing.canonical import contract_skill_text
+from skillfabric.indexing.bm25 import search_bm25
+from skillfabric.indexing.canonical import compact_contract_text, contract_skill_text
 from skillfabric.indexing.embeddings import EmbeddingProvider
+from skillfabric.indexing.ranking import reciprocal_rank_fusion
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import atomic_write_text
 
-DEFAULT_HANDOFF_TOP_K = 4
-DEFAULT_SIMILARITY_TOP_K = 4
+DEFAULT_CANDIDATE_TOP_K = 8
 _EMBEDDING_SCHEMA_VERSION = "2.0"
 _EMBEDDING_STORE_KEYS = {"schema_version", "model_id", "dimension", "records"}
 _EMBEDDING_RECORD_KEYS = {
@@ -67,14 +68,13 @@ def retrieve_candidate_pairs(
     skills: list[SkillNode],
     *,
     provider: EmbeddingProvider,
+    bm25_path: str | Path,
     store_path: str | Path | None = None,
-    handoff_top_k: int = DEFAULT_HANDOFF_TOP_K,
-    similarity_top_k: int = DEFAULT_SIMILARITY_TOP_K,
+    candidate_top_k: int = DEFAULT_CANDIDATE_TOP_K,
 ) -> CandidateRetrievalResult:
     """Retrieve bounded review candidates without assigning graph semantics."""
 
-    _validate_top_k(handoff_top_k, name="handoff_top_k")
-    _validate_top_k(similarity_top_k, name="similarity_top_k")
+    _validate_top_k(candidate_top_k, name="candidate_top_k")
     ordered_skills = sorted(skills, key=lambda skill: skill.id)
     skill_ids = [skill.id for skill in ordered_skills]
     if len(skill_ids) != len(set(skill_ids)):
@@ -102,20 +102,32 @@ def retrieve_candidate_pairs(
         hits,
         specs,
         records_by_key,
-        top_k=handoff_top_k,
+        top_k=candidate_top_k,
     )
     _add_similarity_hits(
         hits,
         specs,
         records_by_key,
-        top_k=similarity_top_k,
+        top_k=candidate_top_k,
+    )
+    _add_lexical_hits(
+        hits,
+        contracts,
+        ordered_skills,
+        bm25_path=Path(bm25_path),
+        top_k=candidate_top_k,
     )
     _add_explicit_reference_hits(hits, ordered_skills)
 
-    pairs = tuple(_candidate_pairs(hits))
+    selected_hits = _select_candidate_hits(
+        hits,
+        skill_ids=skill_ids,
+        top_k=candidate_top_k,
+    )
+    pairs = tuple(_candidate_pairs(selected_hits))
     channel_counts = {
         channel: sum(1 for pair in pairs if channel in pair.channels)
-        for channel in ("handoff", "explicit_reference", "similarity")
+        for channel in ("handoff", "explicit_reference", "similarity", "lexical")
     }
     dimension = len(records[0].vector) if records else 0
     metrics: dict[str, int | float | str] = {
@@ -128,6 +140,7 @@ def retrieve_candidate_pairs(
         "handoff_pair_count": channel_counts["handoff"],
         "explicit_reference_pair_count": channel_counts["explicit_reference"],
         "similarity_pair_count": channel_counts["similarity"],
+        "lexical_pair_count": channel_counts["lexical"],
     }
     return CandidateRetrievalResult(pairs=pairs, metrics=metrics)
 
@@ -360,6 +373,39 @@ def _add_similarity_hits(
                 break
 
 
+def _add_lexical_hits(
+    hits: dict[tuple[str, str], list[CandidateHit]],
+    contracts: dict[str, SkillContract],
+    skills: list[SkillNode],
+    *,
+    bm25_path: Path,
+    top_k: int,
+) -> None:
+    if top_k <= 0:
+        return
+    search_limit = min(len(skills), top_k + 1)
+    for skill in skills:
+        rank = 0
+        query = compact_contract_text(skill, contracts[skill.id])
+        for result in search_bm25(bm25_path, query, limit=search_limit):
+            if result.skill_id == skill.id:
+                continue
+            rank += 1
+            _append_hit(
+                hits,
+                CandidateHit(
+                    channel="lexical",
+                    query_skill=skill.id,
+                    matched_skill=result.skill_id,
+                    rank=rank,
+                    evidence=contracts[skill.id].evidence
+                    + contracts[result.skill_id].evidence,
+                ),
+            )
+            if rank >= top_k:
+                break
+
+
 def _add_explicit_reference_hits(
     hits: dict[tuple[str, str], list[CandidateHit]],
     skills: list[SkillNode],
@@ -411,11 +457,43 @@ def _append_hit(
     hits[key].append(hit)
 
 
+def _select_candidate_hits(
+    hits: dict[tuple[str, str], list[CandidateHit]],
+    *,
+    skill_ids: list[str],
+    top_k: int,
+) -> dict[tuple[str, str], list[CandidateHit]]:
+    selected = {
+        key
+        for key, pair_hits in hits.items()
+        if any(hit.channel == "explicit_reference" for hit in pair_hits)
+    }
+    hits_by_query: dict[str, dict[str, list[CandidateHit]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for pair_hits in hits.values():
+        for hit in pair_hits:
+            if hit.channel != "explicit_reference":
+                hits_by_query[hit.query_skill][hit.channel].append(hit)
+
+    for skill_id in skill_ids:
+        channels: dict[str, list[str]] = {}
+        for channel, channel_hits in hits_by_query.get(skill_id, {}).items():
+            ordered = sorted(
+                channel_hits,
+                key=lambda hit: (hit.rank, hit.matched_skill, hit.query_field, hit.matched_field),
+            )
+            channels[channel] = list(dict.fromkeys(hit.matched_skill for hit in ordered))
+        for fused in reciprocal_rank_fusion(channels)[:top_k]:
+            selected.add(tuple(sorted((skill_id, fused.skill_id))))
+    return {key: hits[key] for key in sorted(selected)}
+
+
 def _candidate_pairs(
     hits: dict[tuple[str, str], list[CandidateHit]],
 ) -> list[CandidatePair]:
     pairs: list[CandidatePair] = []
-    channel_order = {"handoff": 0, "explicit_reference": 1, "similarity": 2}
+    channel_order = {"handoff": 0, "explicit_reference": 1, "similarity": 2, "lexical": 3}
     for (skill_a, skill_b), pair_hits in hits.items():
         unique: dict[tuple[Any, ...], CandidateHit] = {}
         for hit in pair_hits:
