@@ -44,12 +44,86 @@ LLM_ENV_KEYS = (
 
 
 def _cleared_llm_env(**overrides: str) -> dict[str, str]:
-    values = {key: "" for key in LLM_ENV_KEYS}
+    values = dict.fromkeys(LLM_ENV_KEYS, "")
     values.update(overrides)
     return values
 
 
 class LLMConfigTests(unittest.TestCase):
+    def test_llm_config_rejects_invalid_runtime_values(self) -> None:
+        invalid_overrides = [
+            {"api_base": ""},
+            {"api_key": ""},
+            {"model": ""},
+            {"max_tokens": 0},
+            {"max_tokens": True},
+            {"timeout": 0},
+            {"timeout": float("nan")},
+            {"usage_enabled": "yes"},
+            {"usage_operation": ""},
+            {"usage_metadata": []},
+        ]
+
+        for overrides in invalid_overrides:
+            values = {
+                "api_base": "https://example.test/v1",
+                "api_key": "sk-test",
+                "model": "openai/test-model",
+                **overrides,
+            }
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                LLMConfig(**values)
+
+    def test_llm_config_rejects_invalid_usage_env_values(self) -> None:
+        invalid_lines = [
+            "USAGE_ENABLED=perhaps",
+            "USAGE_METADATA=not-json",
+            "USAGE_METADATA=[]",
+        ]
+
+        for invalid_line in invalid_lines:
+            with self.subTest(invalid_line=invalid_line), TemporaryDirectory() as tmp:
+                env_path = Path(tmp) / ".env"
+                env_path.write_text(
+                    "API_KEY=sk-test\n"
+                    "BASE_URL=https://example.test/v1\n"
+                    "MODEL=openai/test-model\n"
+                    f"{invalid_line}\n",
+                    encoding="utf-8",
+                )
+                with (
+                    patch.dict(os.environ, _cleared_llm_env(), clear=False),
+                    self.assertRaises(ValueError),
+                ):
+                    LLMConfig.from_env(env_path=env_path)
+
+    def test_completion_rejects_invalid_explicit_overrides_before_calling_provider(self) -> None:
+        calls: list[dict[str, object]] = []
+        fake_litellm = types.SimpleNamespace(
+            completion=lambda **kwargs: calls.append(kwargs),
+        )
+        config = LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="sk-test",
+            model="openai/test-model",
+        )
+
+        with patch.dict(sys.modules, {"litellm": fake_litellm}):
+            with self.assertRaisesRegex(ValueError, "max_tokens"):
+                litellm_completion(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    config=config,
+                    max_tokens=0,
+                )
+            with self.assertRaisesRegex(ValueError, "model"):
+                litellm_completion(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    config=config,
+                    model="",
+                )
+
+        self.assertEqual(calls, [])
+
     def test_loads_litellm_settings_from_env_file(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
@@ -217,9 +291,29 @@ class LLMConfigTests(unittest.TestCase):
             env_path = Path(tmp) / ".env"
             env_path.write_text("", encoding="utf-8")
 
-            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
-                with self.assertRaisesRegex(ValueError, "skillfabric help config"):
-                    LLMConfig.from_env(env_path=env_path)
+            with (
+                patch.dict(os.environ, _cleared_llm_env(), clear=False),
+                self.assertRaisesRegex(ValueError, "skillfabric help config"),
+            ):
+                LLMConfig.from_env(env_path=env_path)
+
+    def test_none_env_path_does_not_read_the_current_directory_env_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text(
+                "API_KEY=sk-file\nBASE_URL=https://file.example/v1\nMODEL=openai/file-model\n",
+                encoding="utf-8",
+            )
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with (
+                    patch.dict(os.environ, _cleared_llm_env(), clear=False),
+                    self.assertRaisesRegex(ValueError, "missing API key"),
+                ):
+                    LLMConfig.from_env(env_path=None)
+            finally:
+                os.chdir(previous)
 
     def test_litellm_completion_passes_project_api_config(self) -> None:
         calls: list[dict[str, object]] = []
@@ -384,7 +478,9 @@ class LLMConfigTests(unittest.TestCase):
                         usage_operation="route",
                     ),
                 )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)
@@ -424,7 +520,9 @@ class LLMConfigTests(unittest.TestCase):
                     ),
                     usage_metadata={"skill_id": "skill:docx"},
                 )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)
@@ -466,7 +564,9 @@ class LLMConfigTests(unittest.TestCase):
                             usage_metadata={"experiment_run_id": "run_1"},
                         ),
                     )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)
@@ -475,7 +575,9 @@ class LLMConfigTests(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["operation"], "route")
-        self.assertEqual(records[0]["metadata"], {"experiment_run_id": "run_1", "task_id": "task_a"})
+        self.assertEqual(
+            records[0]["metadata"], {"experiment_run_id": "run_1", "task_id": "task_a"}
+        )
 
     def test_litellm_usage_context_propagates_through_llm_job_threads(self) -> None:
         fake_litellm = types.SimpleNamespace()
@@ -515,7 +617,9 @@ class LLMConfigTests(unittest.TestCase):
                         worker,
                         options=LLMJobOptions(concurrency=2, progress_every=0),
                     )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)
@@ -585,7 +689,9 @@ class LLMConfigTests(unittest.TestCase):
             worker.start()
             worker.join(timeout=10)
 
-            records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+            records = [
+                json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+            ]
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(len(errors), 1)
@@ -668,7 +774,9 @@ class LLMConfigTests(unittest.TestCase):
                     messages=[{"role": "user", "content": "Hello"}],
                     env_path=env_path,
                 )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)
@@ -695,7 +803,9 @@ class LLMConfigTests(unittest.TestCase):
 
         fake_litellm.completion = fake_completion
         fake_litellm.token_counter = lambda **kwargs: 10 if kwargs.get("messages") else 2
-        fake_litellm.cost_per_token = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unknown"))
+        fake_litellm.cost_per_token = lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("unknown")
+        )
         original = sys.modules.get("litellm")
         sys.modules["litellm"] = fake_litellm
         try:
@@ -719,7 +829,9 @@ class LLMConfigTests(unittest.TestCase):
                     env_path=env_path,
                     usage_operation="llm_smoke",
                 )
-                records = [json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()]
+                records = [
+                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
+                ]
         finally:
             if original is None:
                 sys.modules.pop("litellm", None)

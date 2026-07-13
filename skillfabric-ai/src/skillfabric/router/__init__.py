@@ -1,16 +1,19 @@
 """Router package for selecting skill packages from tasks."""
 
 from skillfabric.router.bundle import RouterBundle, RouterBundleConfig, build_router_bundle
-from skillfabric.router.models import RouteEdge, RouteResult, RouterQuery, RouteSelectedSkill
+from skillfabric.router.models import (
+    RouteRelationEvidence,
+    RouteResult,
+    RouteSelectedSkill,
+)
 
 __all__ = [
-    "RouteEdge",
+    "RouteRelationEvidence",
     "RouteResult",
     "RouteSelectedSkill",
     "RouterBundle",
     "RouterBundleConfig",
     "RouterConfig",
-    "RouterQuery",
     "build_router_bundle",
     "route_task",
 ]

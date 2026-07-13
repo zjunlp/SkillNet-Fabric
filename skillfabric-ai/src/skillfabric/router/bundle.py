@@ -1,96 +1,56 @@
-"""Build query-local skill bundles for router and execution-package context."""
+"""Build bounded query-local evidence bundles for the explorer."""
 
 from __future__ import annotations
 
-from skillfabric.router.assembly import (
-    _load_graph,
-    _load_registry_skills,
-    _wiki_pages,
-    _workflow_hints,
-)
-from skillfabric.router.expansion import _expand_seed_skills, _expand_seed_skills_ppr
-from skillfabric.router.models import (
-    RouterBundle,
-    RouterBundleConfig,
-    RouterSkillCandidate,
-    RouterWorkflowHint,
-)
-from skillfabric.router.retrieval import _seed_scores, apply_graph_grounded_scores
-from skillfabric.router.sidecars import load_execution_index, load_interfaces
+from skillfabric.indexing.embeddings import EmbeddingProvider
+from skillfabric.router.expansion import expand_semantic_candidates
+from skillfabric.router.models import RouterBundle, RouterBundleConfig, RouterSkillCandidate
+from skillfabric.router.retrieval import retrieve_seed_candidates
 from skillfabric.storage import Workspace
+from skillfabric.wiki.loader import load_wiki_source
 
 
-def build_router_bundle(config: RouterBundleConfig) -> RouterBundle:
-    """Build a compact, query-local context bundle from compiled SkillFabric artifacts."""
+def build_router_bundle(
+    config: RouterBundleConfig,
+    *,
+    embedding_provider: EmbeddingProvider | None = None,
+) -> RouterBundle:
+    """Retrieve seeds and add bounded operational graph context."""
 
     workspace = Workspace(config.workspace)
-    graph = _load_graph(workspace)
-    skills = _load_registry_skills(workspace)
-    warnings: list[str] = []
-    if not skills:
-        warnings.append(f"registry skills not found: {workspace.graph_dir / 'registry.jsonl'}")
-    interfaces = load_interfaces(workspace)
-    execution_index = load_execution_index(workspace)
-    seed_scores = _seed_scores(
+    source = load_wiki_source(workspace)
+    seeds = retrieve_seed_candidates(
         workspace,
         config.query,
-        skills,
-        warnings=warnings,
+        source.skills,
+        limit=config.seed_limit,
         env_file=config.env_file,
+        embedding_provider=embedding_provider,
     )
-    apply_graph_grounded_scores(
-        workspace,
-        config.query,
-        skills,
-        seed_scores,
-        interfaces=interfaces,
-        execution_index=execution_index,
+    expanded = expand_semantic_candidates(
+        seeds,
+        source.core_edges,
+        source.skills,
+        max_depth=config.max_depth,
+        limit=config.expanded_limit,
     )
-    if config.graph_expansion_mode == "one_hop":
-        selected = _expand_seed_skills(
-            graph.edges,
-            skills,
-            seed_scores,
-            seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
+    context_ids = {candidate.skill_id for candidate in expanded.candidates}
+    context_ids.update(alternative.skill_id for alternative in expanded.alternatives)
+    graph_edges = tuple(
+        sorted(
+            (
+                edge
+                for edge in source.operational_edges
+                if edge.source in context_ids and edge.target in context_ids
+            ),
+            key=lambda edge: (edge.type, edge.source, edge.target),
         )
-    elif config.graph_expansion_mode == "ppr":
-        selected = _expand_seed_skills_ppr(
-            graph.edges,
-            skills,
-            seed_scores,
-            seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
-            alpha=config.ppr_alpha,
-            max_iter=max(config.ppr_max_iter, 1),
-            tol=max(config.ppr_tol, 0.0),
-        )
-    else:
-        warnings.append(f"unknown graph expansion mode {config.graph_expansion_mode!r}; using ppr")
-        selected = _expand_seed_skills_ppr(
-            graph.edges,
-            skills,
-            seed_scores,
-            seed_limit=max(config.seed_limit, 0),
-            expanded_limit=max(config.expanded_limit, 0),
-            alpha=config.ppr_alpha,
-            max_iter=max(config.ppr_max_iter, 1),
-            tol=max(config.ppr_tol, 0.0),
-        )
-    selected_ids = {item.skill_id for item in selected}
-    workflow_hints = _workflow_hints(
-        workspace,
-        selected_ids,
-        confidence_threshold=config.workflow_confidence_threshold,
-        limit=max(config.max_workflow_hints, 0),
     )
-    wiki_pages = _wiki_pages(workspace, selected_ids)
     return RouterBundle(
         query=config.query,
-        selected_skills=selected,
-        workflow_hints=workflow_hints,
-        wiki_pages=wiki_pages,
-        warnings=warnings,
+        selected_skills=expanded.candidates,
+        graph_edges=graph_edges,
+        alternatives=expanded.alternatives,
     )
 
 
@@ -98,6 +58,5 @@ __all__ = [
     "RouterBundle",
     "RouterBundleConfig",
     "RouterSkillCandidate",
-    "RouterWorkflowHint",
     "build_router_bundle",
 ]

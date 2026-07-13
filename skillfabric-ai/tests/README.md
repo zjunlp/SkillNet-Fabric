@@ -1,25 +1,23 @@
 # Tests
 
-This directory covers offline unit tests, fixture skill pools, and gated
-integration checks for the public package and Claude Code plugin surface.
+The suite covers offline fixture builds and opt-in real integration checks.
 
 ```text
 tests/
-├── unit/         # unit tests
-├── integration/  # gated integration tests
-└── fixtures/     # test skills, tasks, and graph fixtures
+├── unit/         # deterministic contracts, graph, routing, planner, CLI, package
+├── integration/  # explicitly gated real SDK/API checks
+└── fixtures/     # small native skill corpus
 ```
 
-Current unit tests focus on:
+Unit coverage includes:
 
-- Task understanding and deliverable coverage.
-- Artifact ontology constraints.
-- Interface extraction, canonicalization, and execution compatibility.
-- Community assignment repair, semantic relocation, rebalance, and graph health.
-- Router coverage diagnostics, query_wiki assembly, SkillPackage validation,
-  and Claude SDK prompt contracts.
-- AgentRunSpec, execution prompt package generation, and public facade behavior
-  across build, wiki, route, and plan workflows.
+- Native skill parsing and strict contract extraction.
+- Contract-aware candidate retrieval and semantic pair validation.
+- Relation projection, dependency cycles, and schema-v2 artifacts.
+- BM25/dense rank fusion and bounded operational-edge expansion.
+- Query-wiki generation, explorer SkillPackage validation, and route artifacts.
+- Planner schema, dependency preservation, and prompt-package finalization.
+- CLI, Python facade, Claude Code plugin, caching, usage, and secret handling.
 
 Common local checks:
 
@@ -30,5 +28,7 @@ cd "$HOME/Documents/SkillFabric/skillfabric-public/skillfabric-ai"
 
 python -m compileall -q src tests
 python -m pytest tests/unit -q
-python -m ruff check .
 ```
+
+Use an existing environment that includes Ruff for linting; do not install or
+modify environments solely for a test run.

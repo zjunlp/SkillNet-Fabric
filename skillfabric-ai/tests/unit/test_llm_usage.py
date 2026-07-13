@@ -167,7 +167,28 @@ class LLMUsageTests(unittest.TestCase):
             self.assertGreater(totals.cost_usd or 0.0, 0.0)
             self.assertEqual(totals.pricing_unknown_calls, 1)
 
-    def test_jsonl_loads_legacy_records_without_new_pricing_fields(self) -> None:
+    def test_usage_summary_can_be_scoped_to_one_build(self) -> None:
+        tracker = LLMUsageTracker()
+        for build_id in ("build-old", "build-current"):
+            tracker.record_completion(
+                model="gpt-5.4-mini",
+                messages=[{"role": "user", "content": build_id}],
+                response={
+                    "choices": [{"message": {"content": "done"}}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+                },
+                operation="graph.contract_extraction",
+                duration_ms=1,
+                status="completed",
+                metadata={"build_id": build_id},
+            )
+
+        totals = summarize_usage(tracker.records, metadata={"build_id": "build-current"})
+
+        self.assertEqual(totals.total_calls, 1)
+        self.assertEqual(totals.total_tokens, 7)
+
+    def test_jsonl_rejects_records_missing_current_pricing_fields(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "usage.jsonl"
             path.write_text(
@@ -191,11 +212,8 @@ class LLMUsageTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            record = load_usage_records(path)[0]
-
-            self.assertEqual(record.cached_prompt_tokens, 0)
-            self.assertEqual(record.billable_prompt_tokens, 5)
-            self.assertEqual(record.pricing_source, "unknown")
+            with self.assertRaisesRegex(ValueError, "exact schema"):
+                load_usage_records(path)
 
     def test_failed_call_records_prompt_tokens_and_error(self) -> None:
         record = LLMUsageTracker().record_completion(
@@ -215,14 +233,16 @@ class LLMUsageTests(unittest.TestCase):
         self.assertTrue(record.pricing_known)
         self.assertIsNone(record.cost_usd)
 
-    def test_litellm_token_counter_failure_uses_fallback_estimator(self) -> None:
+    def test_litellm_token_counter_failure_uses_local_estimate(self) -> None:
         fake_litellm = types.SimpleNamespace()
 
         def token_counter(**_kwargs):
             raise RuntimeError("counter unavailable")
 
         fake_litellm.token_counter = token_counter
-        fake_litellm.cost_per_token = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unknown"))
+        fake_litellm.cost_per_token = lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("unknown")
+        )
         original = sys.modules.get("litellm")
         sys.modules["litellm"] = fake_litellm
         try:

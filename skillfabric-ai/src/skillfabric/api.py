@@ -1,10 +1,12 @@
-"""Public Python facade for SkillFabric workflows."""
+"""Public Python facade for schema-v2 SkillFabric workflows."""
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from skillfabric.compiled_graph.builder import (
     BuildConfig,
@@ -14,13 +16,13 @@ from skillfabric.compiled_graph.builder import (
 )
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
-    DisabledEmbeddingProvider,
+    EmbeddingProvider,
+    default_embedding_provider,
 )
 from skillfabric.orchestrator.package import (
+    DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     ExecutionPackageResult,
-    PreparedExecutionPackageResult,
-    finalize_execution_package,
-    prepare_execution_package,
+    plan_execution_package,
 )
 from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
@@ -36,7 +38,7 @@ from skillfabric.wiki.models import WikiBuildConfig
 
 @dataclass(slots=True)
 class SkillFabric:
-    """Small facade over the core SkillFabric build, route, and plan workflows."""
+    """Small facade over build, route, and planner-package workflows."""
 
     workspace: Workspace | str | Path = ".skillfabric"
     env_file: str | Path = ".env"
@@ -45,57 +47,43 @@ class SkillFabric:
         if not isinstance(self.workspace, Workspace):
             self.workspace = Workspace(self.workspace)
 
-    def build(self, skill_root: str | Path, **overrides: object) -> BuildResult:
-        """Build registry, indexes, graph, execution artifacts, and wiki for a skill root."""
-
-        _reject_removed_profile(overrides)
+    def build(self, skill_root: str | Path, **overrides: Any) -> BuildResult:
         env_file = overrides.pop("env_file", self.env_file)
         defaults = default_build_options()
-        skip_wiki = bool(overrides.pop("skip_wiki", False))
-        embedding_model = overrides.pop("embedding_model", None)
-        embedding_provider = overrides.pop("embedding_provider", None)
-        if embedding_provider is None:
-            embedding_provider = _embedding_provider_for_name(
-                defaults.embedding_provider,
-                env_file=env_file,
-                model_id=embedding_model,
-            )
-        elif isinstance(embedding_provider, str):
-            embedding_provider = _embedding_provider_for_name(
-                embedding_provider,
-                env_file=env_file,
-                model_id=embedding_model,
-            )
-        else:
-            raise TypeError("embedding_provider must be 'api' or 'disabled'")
-        wiki_summary_mode = str(overrides.pop("wiki_summary_mode", defaults.wiki_summary_mode))
-        llm_concurrency = int(overrides.pop("llm_concurrency", defaults.llm_concurrency) or defaults.llm_concurrency)
-        llm_rate_limit_per_minute = overrides.pop("llm_rate_limit_per_minute", None)
-        llm_max_retries = overrides.pop("llm_max_retries", None)
-        llm_retry_backoff_seconds = overrides.pop("llm_retry_backoff_seconds", None)
-        llm_progress_every = overrides.pop("llm_progress_every", None)
-        llm_batch_size = int(overrides.pop("llm_batch_size", defaults.llm_batch_size) or defaults.llm_batch_size)
-        if overrides:
-            unknown = ", ".join(sorted(overrides))
-            raise TypeError(f"unsupported build option(s): {unknown}")
+        skip_wiki = _required_bool(
+            overrides.pop("skip_wiki", False),
+            name="skip_wiki",
+        )
+        wiki_summary_mode = overrides.pop("wiki_summary_mode", defaults.wiki_summary_mode)
+        if not isinstance(wiki_summary_mode, str):
+            raise ValueError("wiki_summary_mode must be a string")
+        if wiki_summary_mode not in {"off", "all"}:
+            raise ValueError("wiki_summary_mode must be 'off' or 'all'")
+        provider = _embedding_provider(
+            overrides.pop("embedding_provider", None),
+            env_file=env_file,
+            model_id=overrides.pop("embedding_model", None),
+        )
         llm_options = LLMJobOptions.from_env(
             env_path=env_file,
-            concurrency=llm_concurrency,
-            rate_limit_per_minute=float(llm_rate_limit_per_minute) if llm_rate_limit_per_minute is not None else None,
-            max_retries=int(llm_max_retries) if llm_max_retries is not None else None,
-            retry_backoff_seconds=(
-                float(llm_retry_backoff_seconds) if llm_retry_backoff_seconds is not None else None
+            concurrency=_optional_int(overrides.pop("llm_concurrency", None)),
+            rate_limit_per_minute=_optional_float(overrides.pop("llm_rate_limit_per_minute", None)),
+            max_retries=_optional_int(overrides.pop("llm_max_retries", None)),
+            retry_backoff_seconds=_optional_float(overrides.pop("llm_retry_backoff_seconds", None)),
+            progress_every=_optional_int(overrides.pop("llm_progress_every", None)),
+            batch_size=_optional_int(overrides.pop("llm_batch_size", None)),
+        )
+        if overrides:
+            raise TypeError(f"unsupported build option(s): {', '.join(sorted(overrides))}")
+        result = build_graph(
+            BuildConfig(
+                skill_root=skill_root,
+                workspace=self.workspace.root,
+                llm_env_path=env_file,
+                llm_options=llm_options,
             ),
-            progress_every=int(llm_progress_every) if llm_progress_every is not None else None,
-            batch_size=llm_batch_size,
+            dependencies=_BuildDependencies(embedding_provider=provider),
         )
-        config = BuildConfig(
-            skill_root=skill_root,
-            workspace=self.workspace.root,
-            llm_env_path=env_file,
-            llm_options=llm_options,
-        )
-        result = build_graph(config, dependencies=_BuildDependencies(embedding_provider=embedding_provider))
         if not skip_wiki:
             with llm_usage_context(
                 log_path=self.workspace.reports_dir / "llm_usage.jsonl",
@@ -106,34 +94,49 @@ class SkillFabric:
                         workspace=self.workspace.root,
                         env_file=env_file,
                         use_llm_summaries=wiki_summary_mode == "all",
-                        llm_concurrency=llm_concurrency,
-                        llm_batch_size=llm_batch_size,
+                        llm_options=llm_options,
                     )
                 )
             merge_wiki_metrics(self.workspace, wiki_result)
         return result
 
-    def route(self, query: str, **overrides: object) -> RouteResult:
-        """Route a user task to selected skills."""
-
-        _reject_removed_profile(overrides)
+    def route(self, query: str, **overrides: Any) -> RouteResult:
         defaults = default_router_options()
-        explorer_backend = str(overrides.pop("explorer_backend", defaults.explorer_backend))
-        use_llm_router = bool(overrides.pop("use_llm_router", defaults.use_llm_router))
-        if explorer_backend == "fallback":
-            use_llm_router = False
+        sdk_runtime = overrides.pop("sdk_runtime", None)
+        embedding_provider = overrides.pop("embedding_provider", None)
         config = RouterConfig(
             workspace=self.workspace.root,
             query=query,
             env_file=overrides.pop("env_file", self.env_file),
-            use_llm_router=use_llm_router,
-            explorer_backend=explorer_backend,
-            max_selected_skills=int(overrides.pop("max_selected_skills", defaults.max_selected_skills)),
-            seed_limit=int(overrides.pop("seed_limit", defaults.seed_limit)),
-            expanded_limit=int(overrides.pop("expanded_limit", defaults.expanded_limit)),
-            **overrides,
+            max_selected_skills=overrides.pop(
+                "max_selected_skills",
+                defaults.max_selected_skills,
+            ),
+            seed_limit=overrides.pop("seed_limit", defaults.seed_limit),
+            expanded_limit=overrides.pop("expanded_limit", defaults.expanded_limit),
+            max_depth=overrides.pop("max_depth", defaults.max_depth),
+            trace_id=overrides.pop("trace_id", None),
+            explorer_model=overrides.pop("explorer_model", None),
+            explorer_max_turns=overrides.pop(
+                "explorer_max_turns",
+                defaults.explorer_max_turns,
+            ),
+            explorer_load_timeout_ms=overrides.pop(
+                "explorer_load_timeout_ms",
+                defaults.explorer_load_timeout_ms,
+            ),
+            explorer_timeout_seconds=overrides.pop(
+                "explorer_timeout_seconds",
+                defaults.explorer_timeout_seconds,
+            ),
         )
-        return route_task(config)
+        if overrides:
+            raise TypeError(f"unsupported route option(s): {', '.join(sorted(overrides))}")
+        return route_task(
+            config,
+            sdk_runtime=sdk_runtime,
+            embedding_provider=embedding_provider,
+        )
 
     def plan(
         self,
@@ -141,78 +144,135 @@ class SkillFabric:
         *,
         route: RouteResult | None = None,
         route_file: str | Path | None = None,
-        renderer: str = "claude-code",
-        **route_overrides: object,
+        package_root: str | Path | None = None,
+        env_file: str | Path | None = None,
+        planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
+        **route_overrides: Any,
     ) -> ExecutionPackageResult:
-        """Direct finalized planning is not available without an agent planner."""
-
-        del renderer, route_overrides
-        if query is None and route is None and route_file is None:
-            raise ValueError("plan requires query, route, or route_file")
-        raise ValueError(
-            "SkillFabric.plan() no longer creates a finalized execution package without an agent planner. "
-            "Use prepare_plan(...), run the prompt planner, then finalize_plan(...)."
+        if route is not None and route_file is not None:
+            raise TypeError("plan accepts route and route_file as mutually exclusive inputs")
+        route_from_file, file_query, default_root = self._route_context(route_file)
+        if route_file is not None:
+            if not file_query:
+                raise ValueError("route trace has no original query")
+            if query is not None and query != file_query:
+                raise ValueError("plan query differs from the route query")
+        resolved_query = query or file_query
+        resolved_route = route or route_from_file
+        if resolved_route is None:
+            if not resolved_query:
+                raise ValueError("plan requires a query, route, or route_file")
+            resolved_route = self.route(
+                resolved_query,
+                env_file=env_file or self.env_file,
+                **route_overrides,
+            )
+        elif route_overrides:
+            raise TypeError("route options are only valid when plan performs routing")
+        if not resolved_query:
+            raise ValueError("plan requires the original task query")
+        resolved_root = package_root if package_root is not None else default_root
+        if resolved_root is not None:
+            resolved_root = self._runs_path(resolved_root, label="package_root")
+        return plan_execution_package(
+            self.workspace,
+            resolved_route,
+            query=resolved_query,
+            env_file=env_file or self.env_file,
+            package_root=resolved_root,
+            planner_context_max_tokens=planner_context_max_tokens,
         )
 
-    def prepare_plan(
+    def _route_context(
         self,
-        query: str | None = None,
-        *,
-        route: RouteResult | None = None,
-        route_file: str | Path | None = None,
-        renderer: str = "claude-code",
-        **route_overrides: object,
-    ) -> PreparedExecutionPackageResult:
-        """Prepare route evidence and selected skill context for a planner pass."""
-
-        resolved_route = route or self._route_from_file(route_file)
-        if resolved_route is None:
-            if query is None:
-                raise ValueError("prepare_plan requires query, route, or route_file")
-            resolved_route = self.route(query, **route_overrides)
-        return prepare_execution_package(self.workspace, resolved_route, renderer=renderer)
-
-    def finalize_plan(
-        self,
-        package_root: str | Path,
-        planner_output: dict[str, object],
-        *,
-        renderer: str = "claude-code",
-    ) -> ExecutionPackageResult:
-        """Validate planner output and write the final workflow/prompt artifacts."""
-
-        return finalize_execution_package(package_root, planner_output, renderer=renderer)
-
-    @staticmethod
-    def _route_from_file(route_file: str | Path | None) -> RouteResult | None:
+        route_file: str | Path | None,
+    ) -> tuple[RouteResult | None, str, Path | None]:
         if route_file is None:
-            return None
-        payload = json.loads(Path(route_file).read_text(encoding="utf-8"))
-        return RouteResult.from_dict(payload)
+            return None, "", None
+        route_path = self._runs_path(route_file, label="route_file")
+        route = RouteResult.from_dict(json.loads(route_path.read_text(encoding="utf-8")))
+        query_path = route_path.parent / "query.json"
+        query = ""
+        if query_path.is_file():
+            payload = json.loads(query_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("route query artifact must be a JSON object")
+            raw_query = payload.get("query")
+            if not isinstance(raw_query, str) or not raw_query.strip():
+                raise ValueError("route query artifact must contain a non-empty string query")
+            query = raw_query
+        return route, query, route_path.parent / "execution_package"
+
+    def _runs_path(self, value: str | Path, *, label: str) -> Path:
+        runs_root = self.workspace.runs_dir.resolve()
+        raw_path = Path(value)
+        if not str(raw_path):
+            raise ValueError(f"{label} must not be empty")
+        path = (runs_root / raw_path if not raw_path.is_absolute() else raw_path).resolve()
+        try:
+            path.relative_to(runs_root)
+        except ValueError as exc:
+            raise ValueError(f"{label} must stay inside {runs_root}") from exc
+        return path
 
 
-def _embedding_provider_for_name(
-    provider: str,
+def _embedding_provider(
+    provider: Any,
     *,
     env_file: str | Path,
-    model_id: object = None,
-):
-    normalized = provider.strip().lower()
-    if normalized == "disabled":
-        return DisabledEmbeddingProvider()
-    if normalized == "api":
+    model_id: Any,
+) -> EmbeddingProvider:
+    resolved_model = _optional_string(model_id, name="embedding_model")
+    if provider is None:
+        if resolved_model is not None:
+            return ApiEmbeddingProvider.from_env(
+                env_path=env_file,
+                model_id=resolved_model,
+            )
+        return default_embedding_provider(env_path=env_file)
+    if provider == "api":
         return ApiEmbeddingProvider.from_env(
             env_path=env_file,
-            model_id=str(model_id) if model_id else None,
+            model_id=resolved_model,
         )
-    raise ValueError(f"unsupported embedding provider: {provider}. Use 'api' or 'disabled'.")
+    if isinstance(provider, str):
+        raise ValueError(f"unsupported embedding provider: {provider}. Use 'api'.")
+    if not callable(getattr(provider, "embed", None)):
+        raise TypeError("embedding_provider must implement embed(text)")
+    return provider
 
 
-def _reject_removed_profile(overrides: dict[str, object]) -> None:
-    if "profile" not in overrides:
-        return
-    raise TypeError(
-        "SkillFabric public no longer exposes profile=. Use the single public default "
-        "settings, or pass explicit options such as wiki_summary_mode='all' "
-        "or explorer_backend='claude-code'."
-    )
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("integer build options must be integers")
+    return value
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("numeric build options must be numbers")
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise ValueError("numeric build options must be finite")
+    return resolved
+
+
+def _required_bool(value: Any, *, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a boolean")
+    return value
+
+
+def _optional_string(value: Any, *, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+__all__ = ["SkillFabric"]

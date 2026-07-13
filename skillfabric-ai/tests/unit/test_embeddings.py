@@ -1,40 +1,25 @@
 from __future__ import annotations
 
 import json
-import os
-import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
+import skillfabric.indexing.embeddings as embedding_module
 from skillfabric.indexing.embeddings import (
     DEFAULT_EMBEDDING_MODEL_ID,
     ApiEmbeddingProvider,
-    build_embedding_store,
     default_embedding_provider,
     embedding_provider_for_model,
+    load_skill_embedding_store,
 )
 from skillfabric.registry.models import SkillNode
-from skillfabric.router.retrieval import _seed_scores
+from skillfabric.router.retrieval import retrieve_seed_candidates
 from skillfabric.storage import Workspace
 
 
-class _BatchProvider:
-    model_id = "test-batch-model"
-    dimension = 2
-
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def embed(self, text: str) -> list[float]:
-        raise AssertionError("build_embedding_store should use embed_many when available")
-
-    def embed_many(self, texts: list[str]) -> list[list[float]]:
-        self.calls.append(texts)
-        return [[1.0, 0.0] if "alpha" in text else [0.0, 1.0] for text in texts]
-
-
-class _QueryProvider:
+class QueryProvider:
     model_id = DEFAULT_EMBEDDING_MODEL_ID
     dimension = 2
 
@@ -51,174 +36,317 @@ class _QueryProvider:
         return [1.0, 0.0]
 
 
-class EmbeddingTests(unittest.TestCase):
-    def test_api_embedding_provider_is_default_and_uses_litellm_embedding(self) -> None:
-        provider = ApiEmbeddingProvider(api_key="test-key", api_base="https://example.test/v1")
-        calls: list[dict[str, object]] = []
+def test_api_provider_uses_litellm_embedding() -> None:
+    provider = ApiEmbeddingProvider(
+        dimension=2,
+        api_key="test-key",
+        api_base="https://example.test/v1",
+    )
+    calls: list[dict[str, object]] = []
 
-        def fake_embedding(**kwargs: object) -> dict[str, object]:
-            calls.append(dict(kwargs))
-            return {"data": [{"embedding": [0.25, 0.75]}]}
+    def fake_embedding(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        return {"data": [{"embedding": [0.25, 0.75]}]}
 
-        fake_litellm = type("FakeLiteLLM", (), {"embedding": staticmethod(fake_embedding)})
-        with patch.dict("sys.modules", {"litellm": fake_litellm}):
-            vector = provider.embed("find pdf table parser")
+    fake_litellm = type("FakeLiteLLM", (), {"embedding": staticmethod(fake_embedding)})
+    with patch.dict("sys.modules", {"litellm": fake_litellm}):
+        vector = provider.embed("find pdf table parser")
 
-        self.assertEqual(vector, [0.25, 0.75])
-        self.assertEqual(calls[0]["model"], DEFAULT_EMBEDDING_MODEL_ID)
-        self.assertEqual(calls[0]["input"], ["find pdf table parser"])
-        self.assertEqual(calls[0]["api_key"], "test-key")
-        self.assertEqual(calls[0]["api_base"], "https://example.test/v1")
+    assert vector == [0.25, 0.75]
+    assert calls[0]["model"] == DEFAULT_EMBEDDING_MODEL_ID
+    assert calls[0]["input"] == ["find pdf table parser"]
+    assert calls[0]["api_key"] == "test-key"
+    assert calls[0]["api_base"] == "https://example.test/v1"
 
-    def test_api_embedding_provider_uses_skillnet_style_api_env_by_default(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_path = Path(tmp) / ".env"
-            env_path.write_text(
-                "\n".join(
-                    [
-                        "API_KEY=sk-shared",
-                        "BASE_URL=https://shared.example/v1",
-                        "EMBEDDING_MODEL=openai/custom-embedding",
+
+def test_api_provider_rejects_a_response_with_the_wrong_dimension() -> None:
+    provider = ApiEmbeddingProvider(dimension=3)
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {"embedding": staticmethod(lambda **_kwargs: {"data": [{"embedding": [0.2, 0.8]}]})},
+    )
+
+    with (
+        patch.dict("sys.modules", {"litellm": fake_litellm}),
+        pytest.raises(
+            RuntimeError,
+            match="dimension",
+        ),
+    ):
+        provider.embed("dimension mismatch")
+
+
+@pytest.mark.parametrize("vector", [[0.0, 0.0], [float("nan"), 1.0]])
+def test_api_provider_rejects_invalid_vector_values(vector) -> None:
+    provider = ApiEmbeddingProvider(dimension=2)
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {"embedding": staticmethod(lambda **_kwargs: {"data": [{"embedding": vector}]})},
+    )
+
+    with (
+        patch.dict("sys.modules", {"litellm": fake_litellm}),
+        pytest.raises(
+            RuntimeError,
+            match="finite and non-zero",
+        ),
+    ):
+        provider.embed("invalid vector")
+
+
+def test_api_provider_rejects_duplicate_response_indexes() -> None:
+    provider = ApiEmbeddingProvider(dimension=2)
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {
+            "embedding": staticmethod(
+                lambda **_kwargs: {
+                    "data": [
+                        {"index": 0, "embedding": [1.0, 0.0]},
+                        {"index": 0, "embedding": [0.0, 1.0]},
                     ]
-                )
-                + "\n",
-                encoding="utf-8",
+                }
             )
+        },
+    )
 
-            with patch.dict(
-                os.environ,
-                {
-                    "API_KEY": "",
-                    "BASE_URL": "",
-                    "EMBEDDING_API_KEY": "",
-                    "EMBEDDING_BASE_URL": "",
-                    "OPENAI_API_KEY": "",
-                    "OPENAI_BASE_URL": "",
-                    "OPENAI_API_BASE": "",
-                },
-                clear=False,
-            ):
-                provider = ApiEmbeddingProvider.from_env(env_path=env_path)
+    with (
+        patch.dict("sys.modules", {"litellm": fake_litellm}),
+        pytest.raises(
+            RuntimeError,
+            match="indexes",
+        ),
+    ):
+        provider.embed_many(["first", "second"])
 
-        self.assertEqual(provider.api_key, "sk-shared")
-        self.assertEqual(provider.api_base, "https://shared.example/v1")
-        self.assertEqual(provider.model_id, "openai/custom-embedding")
 
-    def test_api_embedding_provider_specific_env_overrides_shared_api_env(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_path = Path(tmp) / ".env"
-            env_path.write_text(
-                "\n".join(
-                    [
-                        "API_KEY=sk-shared",
-                        "BASE_URL=https://shared.example/v1",
-                        "EMBEDDING_API_KEY=sk-embedding",
-                        "EMBEDDING_BASE_URL=https://embedding.example/v1",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+def test_embedding_specific_env_overrides_shared_api_env(tmp_path) -> None:
+    env_path = tmp_path / ".env.test"
+    env_path.write_text(
+        "API_KEY=shared-test-key\n"
+        "BASE_URL=https://shared.example/v1\n"
+        "EMBEDDING_API_KEY=embedding-test-key\n"
+        "EMBEDDING_BASE_URL=https://embedding.example/v1\n"
+        "EMBEDDING_MODEL=openai/custom-embedding\n",
+        encoding="utf-8",
+    )
 
-            provider = ApiEmbeddingProvider.from_env(env_path=env_path)
+    provider = ApiEmbeddingProvider.from_env(env_path=env_path)
 
-        self.assertEqual(provider.api_key, "sk-embedding")
-        self.assertEqual(provider.api_base, "https://embedding.example/v1")
+    assert provider.api_key == "embedding-test-key"
+    assert provider.api_base == "https://embedding.example/v1"
+    assert provider.model_id == "openai/custom-embedding"
 
-    def test_default_provider_for_model_resolves_api_provider(self) -> None:
-        provider = embedding_provider_for_model(DEFAULT_EMBEDDING_MODEL_ID, dimension=1536)
 
-        self.assertIsInstance(provider, ApiEmbeddingProvider)
-        self.assertEqual(provider.dimension, 1536)
+def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path) -> None:
+    env_path = tmp_path / ".env.test"
+    env_path.write_text(
+        "EMBEDDING_BATCH_SIZE=7\nEMBEDDING_TEXT_CHARS=2500\nEMBEDDING_TIMEOUT=45\n",
+        encoding="utf-8",
+    )
 
-    def test_embedding_provider_for_model_accepts_api_model_ids(self) -> None:
-        provider = embedding_provider_for_model("custom/openai-compatible-embedding", dimension=32)
+    provider = ApiEmbeddingProvider.from_env(env_path=env_path)
 
-        self.assertIsInstance(provider, ApiEmbeddingProvider)
-        self.assertEqual(provider.model_id, "custom/openai-compatible-embedding")
-        self.assertEqual(provider.dimension, 32)
+    assert provider.batch_size == 7
+    assert provider.max_text_chars == 2500
+    assert provider.timeout == 45
 
-    def test_default_embedding_provider_rejects_unknown_provider(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_path = Path(tmp) / ".env"
-            env_path.write_text("EMBEDDING_PROVIDER=custom-provider\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
-                default_embedding_provider(env_path=env_path)
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"model_id": ""},
+        {"dimension": 0},
+        {"dimension": True},
+        {"timeout": 0},
+        {"timeout": float("nan")},
+        {"batch_size": 0},
+        {"max_text_chars": -1},
+    ],
+)
+def test_api_provider_rejects_invalid_runtime_configuration(overrides) -> None:
+    with pytest.raises(ValueError):
+        ApiEmbeddingProvider(**overrides)
 
-    def test_default_embedding_provider_rejects_unknown_provider_from_shell(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_path = Path(tmp) / ".env"
-            env_path.write_text("", encoding="utf-8")
 
-            with patch.dict(os.environ, {"EMBEDDING_PROVIDER": "custom-provider"}, clear=False):
-                with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
-                    default_embedding_provider(env_path=env_path)
+def test_api_provider_rejects_invalid_numeric_env_instead_of_using_defaults(tmp_path) -> None:
+    env_path = tmp_path / ".env.test"
+    env_path.write_text("EMBEDDING_BATCH_SIZE=not-an-integer\n", encoding="utf-8")
 
-    def test_build_embedding_store_batches_sentence_vectors_and_records_model(self) -> None:
-        with TemporaryDirectory() as tmp:
-            provider = _BatchProvider()
-            target = Path(tmp) / "embeddings.json"
+    with pytest.raises(ValueError, match="EMBEDDING_BATCH_SIZE"):
+        ApiEmbeddingProvider.from_env(env_path=env_path)
 
-            build_embedding_store([_skill("skill:alpha", "alpha"), _skill("skill:beta", "beta")], target, provider=provider)
 
-            payload = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(set(payload), {"model_id", "dimension", "embeddings"})
-            self.assertEqual(payload["model_id"], "test-batch-model")
-            self.assertEqual(payload["dimension"], 2)
-            self.assertEqual(len(provider.calls), 1)
-            self.assertEqual(len(payload["embeddings"]), 2)
-            self.assertEqual(
-                set(payload["embeddings"][0]),
-                {"skill_id", "content_hash", "vector"},
-            )
+def test_default_provider_rejects_unknown_provider(tmp_path) -> None:
+    env_path = tmp_path / ".env.test"
+    env_path.write_text("EMBEDDING_PROVIDER=custom-provider\n", encoding="utf-8")
 
-    def test_build_embedding_store_can_disable_dense_embeddings(self) -> None:
-        with TemporaryDirectory() as tmp, patch.dict(os.environ, {"DISABLE_DENSE_EMBEDDINGS": "1"}):
-            provider = _BatchProvider()
-            target = Path(tmp) / "embeddings.json"
+    with pytest.raises(ValueError, match="unsupported embedding provider"):
+        default_embedding_provider(env_path=env_path)
 
-            vectors = build_embedding_store([_skill("skill:alpha", "alpha")], target, provider=provider)
 
-            payload = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(vectors, {"skill:alpha": []})
-            self.assertEqual(set(payload), {"model_id", "dimension", "embeddings"})
-            self.assertEqual(payload["dimension"], 0)
-            self.assertEqual(payload["embeddings"][0]["vector"], [])
-            self.assertEqual(provider.calls, [])
+def test_provider_for_store_model_preserves_dimension() -> None:
+    provider = embedding_provider_for_model("custom/openai-compatible-embedding", dimension=32)
 
-    def test_router_query_embedding_uses_store_model_id(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Workspace(Path(tmp) / ".skillfabric")
-            workspace.ensure()
-            workspace.write_json(
-                workspace.graph_dir / "embeddings.json",
-                {
-                    "model_id": DEFAULT_EMBEDDING_MODEL_ID,
-                    "dimension": 2,
-                    "embeddings": [
-                        {
-                            "skill_id": "skill:alpha",
-                            "content_hash": "h",
-                            "vector": [1.0, 0.0],
-                        }
-                    ],
-                },
-            )
-            skills = {"skill:alpha": _skill("skill:alpha", "alpha")}
+    assert isinstance(provider, ApiEmbeddingProvider)
+    assert provider.model_id == "custom/openai-compatible-embedding"
+    assert provider.dimension == 32
 
-            query_provider = _QueryProvider()
-            with patch("skillfabric.router.retrieval.search_bm25", return_value=[]), patch(
-                "skillfabric.router.retrieval.embedding_provider_for_model",
-                return_value=query_provider,
-            ) as provider_factory:
-                seeds = _seed_scores(workspace, "find alpha", skills, warnings=[])
 
-            provider_factory.assert_called_once_with(DEFAULT_EMBEDDING_MODEL_ID, dimension=2)
-            self.assertEqual(query_provider.query_calls, ["find alpha"])
-            self.assertEqual(query_provider.embed_calls, [])
-            self.assertIn("skill:alpha", seeds)
-            self.assertIn("embedding", seeds["skill:alpha"].sources)
+def test_schema_v2_loader_returns_only_skill_document_vectors(tmp_path) -> None:
+    path = tmp_path / "embeddings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "model_id": "embedding-test-model",
+                "dimension": 2,
+                "records": [
+                    _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
+                    _record("requires:skill:alpha:0", "skill:alpha", "requires", [0.0, 1.0]),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = load_skill_embedding_store(path)
+
+    assert store.model_id == "embedding-test-model"
+    assert store.dimension == 2
+    assert store.vectors == {"skill:alpha": [1.0, 0.0]}
+
+
+def test_schema_v2_loader_rejects_duplicate_skill_records(tmp_path) -> None:
+    path = tmp_path / "embeddings.json"
+    row = _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0])
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "model_id": "embedding-test-model",
+                "dimension": 2,
+                "records": [row, {**row, "key": "skill:duplicate"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate skill embedding"):
+        load_skill_embedding_store(path)
+
+
+def test_schema_v2_loader_rejects_zero_norm_skill_vectors(tmp_path) -> None:
+    path = tmp_path / "embeddings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "model_id": "embedding-test-model",
+                "dimension": 2,
+                "records": [
+                    _record("skill:skill:alpha", "skill:alpha", "skill", [0.0, 0.0]),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="non-zero norm"):
+        load_skill_embedding_store(path)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.update({"model_id": 123}),
+        lambda payload: payload.update({"dimension": "2"}),
+        lambda payload: payload["records"][0].update({"skill_id": 123}),
+        lambda payload: payload["records"][0].update({"vector": ["1.0", 0.0]}),
+        lambda payload: payload["records"][0].update({"vector": [True, 0.0]}),
+    ],
+)
+def test_schema_v2_loader_rejects_coerced_metadata_and_vectors(tmp_path, mutate) -> None:
+    path = tmp_path / "embeddings.json"
+    payload = {
+        "schema_version": "2.0",
+        "model_id": "embedding-test-model",
+        "dimension": 2,
+        "records": [
+            _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
+        ],
+    }
+    mutate(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_skill_embedding_store(path)
+
+
+def test_router_query_uses_store_model_and_query_embedding(tmp_path) -> None:
+    workspace = Workspace(tmp_path / ".skillfabric")
+    workspace.ensure()
+    workspace.write_json(
+        workspace.graph_dir / "embeddings.json",
+        {
+            "schema_version": "2.0",
+            "model_id": DEFAULT_EMBEDDING_MODEL_ID,
+            "dimension": 2,
+            "records": [
+                _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
+            ],
+        },
+    )
+    skills = {"skill:alpha": _skill("skill:alpha", "alpha")}
+    query_provider = QueryProvider()
+
+    with (
+        patch("skillfabric.router.retrieval.search_bm25", return_value=[]),
+        patch(
+            "skillfabric.router.retrieval.embedding_provider_for_model",
+            return_value=query_provider,
+        ) as provider_factory,
+    ):
+        seeds = retrieve_seed_candidates(
+            workspace,
+            "find alpha",
+            skills,
+            limit=1,
+            env_file=None,
+        )
+
+    provider_factory.assert_called_once_with(
+        DEFAULT_EMBEDDING_MODEL_ID,
+        dimension=2,
+        env_path=None,
+    )
+    assert query_provider.query_calls == ["find alpha"]
+    assert query_provider.embed_calls == []
+    assert seeds[0].skill_id == "skill:alpha"
+    assert seeds[0].retrieval_ranks == {"embedding": 1}
+
+
+def test_legacy_embedding_store_api_is_removed() -> None:
+    assert not hasattr(embedding_module, "build_embedding_store")
+    assert not hasattr(embedding_module, "load_embedding_store")
+    assert not hasattr(embedding_module, "load_embedding_store_payload")
+    assert "DISABLE_DENSE_EMBEDDINGS" not in Path(embedding_module.__file__).read_text(
+        encoding="utf-8"
+    )
+
+
+def _record(key: str, skill_id: str, kind: str, vector: list[float]) -> dict[str, object]:
+    return {
+        "key": key,
+        "skill_id": skill_id,
+        "kind": kind,
+        "field_name": "",
+        "text_hash": "text-hash",
+        "vector": vector,
+    }
 
 
 def _skill(skill_id: str, name: str) -> SkillNode:
@@ -227,10 +355,6 @@ def _skill(skill_id: str, name: str) -> SkillNode:
         type="skill",
         name=name,
         description=f"{name} description",
-        content_hash="h",
+        content_hash="content-hash",
         raw_text=f"# {name}\n\n{name} raw text.",
     )
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,38 +1,118 @@
-"""Public default runtime options for SkillFabric workflows."""
+"""Single public runtime defaults for build and routing."""
 
 from __future__ import annotations
 
+import math
+import os
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
 class BuildOptions:
-    """Default build behavior for the public package."""
-
-    embedding_provider: str = "api"
-    wiki_summary_mode: str = "all"
-    llm_concurrency: int = 2
-    llm_batch_size: int = 8
+    wiki_summary_mode: str = "off"
 
 
 @dataclass(frozen=True, slots=True)
 class RouterOptions:
-    """Default route/plan behavior for the public package."""
-
-    use_llm_router: bool = True
-    explorer_backend: str = "claude-code"
     max_selected_skills: int = 8
     seed_limit: int = 8
     expanded_limit: int = 100
+    max_depth: int = 2
+    explorer_max_turns: int = 24
+    explorer_load_timeout_ms: int = 30_000
+    explorer_timeout_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        for name in ("max_selected_skills", "seed_limit", "max_depth"):
+            _require_nonnegative_int(getattr(self, name), name=name)
+        if (
+            isinstance(self.expanded_limit, bool)
+            or not isinstance(self.expanded_limit, int)
+            or self.expanded_limit < self.seed_limit
+        ):
+            raise ValueError("expanded_limit must be an integer at least seed_limit")
+        _require_positive_int(self.explorer_max_turns, name="explorer_max_turns")
+        _require_positive_int(
+            self.explorer_load_timeout_ms,
+            name="explorer_load_timeout_ms",
+        )
+        if (
+            isinstance(self.explorer_timeout_seconds, bool)
+            or not isinstance(self.explorer_timeout_seconds, (int, float))
+            or not math.isfinite(self.explorer_timeout_seconds)
+            or self.explorer_timeout_seconds <= 0
+        ):
+            raise ValueError("explorer_timeout_seconds must be finite and positive")
 
 
 def default_build_options() -> BuildOptions:
-    """Return the single public build configuration."""
-
-    return BuildOptions()
+    mode = os.environ.get("SKILLFABRIC_WIKI_SUMMARY_MODE", "off").strip().lower()
+    if mode not in {"off", "all"}:
+        raise ValueError("SKILLFABRIC_WIKI_SUMMARY_MODE must be 'off' or 'all'")
+    return BuildOptions(wiki_summary_mode=mode)
 
 
 def default_router_options() -> RouterOptions:
-    """Return the single public router configuration."""
+    return RouterOptions(
+        max_selected_skills=_nonnegative_int("SKILLFABRIC_MAX_SELECTED_SKILLS", 8),
+        seed_limit=_nonnegative_int("SKILLFABRIC_SEED_LIMIT", 8),
+        expanded_limit=_nonnegative_int("SKILLFABRIC_EXPANDED_LIMIT", 100),
+        max_depth=_nonnegative_int("SKILLFABRIC_MAX_GRAPH_DEPTH", 2),
+        explorer_max_turns=_positive_int("SKILLFABRIC_EXPLORER_MAX_TURNS", 24),
+        explorer_load_timeout_ms=_positive_int(
+            "SKILLFABRIC_EXPLORER_LOAD_TIMEOUT_MS",
+            30_000,
+        ),
+        explorer_timeout_seconds=_positive_float(
+            "SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS",
+            300.0,
+        ),
+    )
 
-    return RouterOptions()
+
+def _positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _nonnegative_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    value = float(raw)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _require_nonnegative_int(value: object, *, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+
+
+def _require_positive_int(value: object, *, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+__all__ = [
+    "BuildOptions",
+    "RouterOptions",
+    "default_build_options",
+    "default_router_options",
+]

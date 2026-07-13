@@ -29,8 +29,8 @@ Use this Run State JSON as canonical:
 2. Read the Run State JSON.
 3. If `action` is `reuse_prompt`, read its `prompt_path` before any task work.
 4. If `action` is `missing_task`, ask for the task and stop.
-5. If `action` is `prepare_required`, build if needed, then run SkillFabric
-   route prepare/finalize and plan prepare/finalize.
+5. If `action` is `prepare_required`, build if needed, then run the SkillFabric
+   plan command once.
 6. Read finalized `execution_prompt.md` before task tools, search, or final answers.
 7. Execute the final task in the active workspace.
 

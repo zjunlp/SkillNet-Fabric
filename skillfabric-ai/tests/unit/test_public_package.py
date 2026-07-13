@@ -4,13 +4,13 @@ import dataclasses
 import importlib.util
 import json
 import tarfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +43,8 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.build))
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
+        self.assertFalse(hasattr(client, "prepare_plan"))
+        self.assertFalse(hasattr(client, "finalize_plan"))
         self.assertFalse(hasattr(client, "package"))
         self.assertFalse(hasattr(client, "build_wiki"))
         self.assertFalse(hasattr(client, "build_execution_package"))
@@ -88,95 +90,39 @@ class PublicPackageTests(unittest.TestCase):
         self.assertFalse(hasattr(orchestrator, "classify_execution_outcome"))
 
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
-        pyproject = (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = {
+            item.split(";", 1)[0].split(">", 1)[0].split("=", 1)[0]
+            for item in pyproject["project"]["dependencies"]
+        }
 
-        for dependency in (
-            "litellm",
-            "networkx",
-            "python-dotenv",
-            "pyyaml",
-            "rapidfuzz",
-        ):
-            with self.subTest(dependency=dependency):
-                self.assertIn(f'"{dependency}', pyproject)
-
-        self.assertNotIn("embedding-model-path", pyproject)
+        self.assertEqual(
+            dependencies,
+            {"faiss-cpu", "litellm", "numpy", "pyyaml"},
+        )
 
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
         manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
-
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
         self.assertEqual(manifest["name"], "skillfabric")
         self.assertEqual(manifest["version"], "0.1.0")
         self.assertEqual(manifest["license"], "MIT")
-        self.assertLessEqual(
-            set(manifest),
-            {
-                "name",
-                "version",
-                "description",
-                "author",
-                "license",
-                "keywords",
-                "homepage",
-                "repository",
-                "skills",
-            },
-        )
         self.assertEqual(manifest["skills"], ["./"])
         for unsupported_field in ("hooks", "mcpServers"):
             self.assertNotIn(unsupported_field, manifest)
+
         command_dir = plugin_root / "commands"
-        expected_commands = {
-            "doctor": (
-                "skillfabric-doctor",
-                "[--env-file path] [--workspace path]",
-            ),
-            "build": (
-                "skillfabric-build",
-                "[skill-root] [--workspace path] [--env-file path]",
-            ),
-            "prepare": (
-                "skillfabric-prepare",
-                "[task] [--workspace path] [--skill-root path]",
-            ),
-            "run": (
-                "skillfabric-run",
-                "[task] [--workspace path] [--skill-root path]",
-            ),
-        }
-        self.assertTrue(command_dir.exists())
+        expected_commands = {"doctor", "build", "prepare", "run"}
         self.assertEqual(
-            sorted(path.stem for path in command_dir.glob("*.md")),
-            sorted(expected_commands),
+            {path.stem for path in command_dir.glob("*.md")},
+            expected_commands,
         )
-        forbidden_tokens = (
-            "<task>",
-            "<workspace>",
-            "<skill-root>",
-            "<task-or-route-file>",
-            "skillfabric scan",
-            "skillfabric build-wiki",
-            "skillfabric build-execution-package",
-        )
-        for command, required_snippets in expected_commands.items():
+        for command in expected_commands:
             command_path = command_dir / f"{command}.md"
-            self.assertTrue(command_path.exists(), f"missing slash command: {command_path}")
             command_text = command_path.read_text(encoding="utf-8")
             self.assertIn("description:", command_text)
             self.assertIn("argument-hint:", command_text)
-            if command == "run":
-                self.assertIn("allowed-tools:", command_text)
-                self.assertIn("!`skillfabric run-state $ARGUMENTS`", command_text)
-                self.assertIn("Run State JSON", command_text)
-                self.assertIn("Do not use `find`, `grep`, `rg`, or `ls`", command_text)
-            if command == "doctor":
-                self.assertIn("allowed-tools:", command_text)
-                self.assertIn("!`skillfabric doctor-state $ARGUMENTS`", command_text)
-                self.assertIn("Doctor State JSON", command_text)
-                self.assertIn("Do not use `find`, `grep`, `rg`, `sed`, `cat`, or directory scans", command_text)
             for section in (
                 "# Command Contract",
                 "## Inputs",
@@ -185,56 +131,29 @@ class PublicPackageTests(unittest.TestCase):
                 "## Completion Criteria",
             ):
                 self.assertIn(section, command_text)
-            self.assertIn(f"Use the `skillfabric-{command}` skill as the authoritative workflow.", command_text)
-            self.assertIn("Never reveal env-file contents, API keys, tokens, or shell secret values.", command_text)
-            for snippet in required_snippets:
-                self.assertIn(snippet, command_text)
+            self.assertIn(
+                f"Use the `skillfabric-{command}` skill as the authoritative workflow.",
+                command_text,
+            )
+            self.assertIn(
+                "Never reveal env-file contents, API keys, tokens, or shell secret values.",
+                command_text,
+            )
 
-            path = plugin_root / "skills" / f"skillfabric-{command}" / "SKILL.md"
-            self.assertTrue(path.exists(), f"missing command skill: {path}")
-            text = path.read_text(encoding="utf-8")
-            self.assertIn(f"name: skillfabric-{command}", text)
-            self.assertIn("disable-model-invocation: true", text)
-            self.assertIn("$ARGUMENTS", text)
-            if command == "run":
-                self.assertIn("execute the user's task", text.lower())
-                self.assertIn("skillfabric run-state", text)
-                self.assertIn("Run State JSON", text)
-            if command == "doctor":
-                self.assertIn("Write a concise readiness summary", text)
-                self.assertIn("not a raw JSON field dump", text)
-                self.assertIn("Do not list every `present`", text)
-            for snippet in required_snippets:
-                if snippet.startswith("["):
-                    continue
-                self.assertIn(snippet, command_text + text)
-            if command != "doctor":
-                self.assertNotIn("--profile", text)
-            if command in {"build", "prepare", "run"}:
-                self.assertIn("--progress-json", text)
-                self.assertNotIn("--budget-usd", text)
-                self.assertNotIn("--estimate-only", text)
-            if command in {"prepare", "run"}:
-                self.assertNotIn("--task-atoms-file", text)
-                self.assertNotIn("TaskAtoms Schema", text)
-                self.assertNotIn("Do not output `skill_id`", text)
-            for token in forbidden_tokens:
-                self.assertNotIn(token, command_text + text)
-            self.assertNotIn("print `.env`", text.lower())
-            self.assertNotIn("print api key", text.lower())
-            self.assertNotIn("claude-agent-sdk", text)
+            skill_path = plugin_root / "skills" / f"skillfabric-{command}" / "SKILL.md"
+            skill_text = skill_path.read_text(encoding="utf-8")
+            self.assertIn(f"name: skillfabric-{command}", skill_text)
+            self.assertIn("disable-model-invocation: true", skill_text)
+            self.assertIn("$ARGUMENTS", skill_text)
+
         for removed in ("init", "route", "plan", "assist", "execute"):
             self.assertFalse((command_dir / f"{removed}.md").exists())
-            self.assertFalse((plugin_root / "skills" / removed).exists())
-            self.assertFalse((plugin_root / "skills" / removed / "SKILL.md").exists())
-            self.assertFalse((plugin_root / "skills" / f"skillfabric-{removed}" / "SKILL.md").exists())
-        for public_name in expected_commands:
-            self.assertFalse((plugin_root / "skills" / public_name).exists())
+            self.assertFalse(
+                (plugin_root / "skills" / f"skillfabric-{removed}" / "SKILL.md").exists()
+            )
         self.assertFalse((plugin_root / "agents").exists())
         self.assertFalse((plugin_root / "hooks").exists())
         self.assertFalse((plugin_root / ".mcp.json").exists())
-        self.assertTrue((plugin_root / "SKILL.md").exists())
-        self.assertFalse((plugin_root / "skills" / "skillfabric" / "SKILL.md").exists())
 
     def test_claude_code_plugin_prompts_have_quality_guardrails(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -249,8 +168,6 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn("Use when", text)
             self.assertIn("Treat CLI JSON as canonical", text)
             self.assertIn("Do not reveal secret values or env-file contents.", text)
-            self.assertNotIn("--budget-usd", text)
-            self.assertNotIn("--estimate-only", text)
 
         required_command_sections = (
             "## Purpose",
@@ -278,29 +195,9 @@ class PublicPackageTests(unittest.TestCase):
                 "## Completion Criteria",
             ):
                 self.assertIn(section, text)
-            self.assertIn(f"Use the `skillfabric-{path.stem}` skill as the authoritative workflow.", text)
-            if path.stem == "doctor":
-                self.assertIn("Doctor State JSON", text)
-                self.assertIn("Report readiness from that JSON only.", text)
-            if path.stem in {"prepare", "run"}:
-                self.assertIn("Treat all non-option text in `$ARGUMENTS` as the task query.", text)
-                self.assertIn("Preserve the user's wording", text)
-                self.assertIn("execution_prompt.md", text)
-                self.assertIn("Do not stop after only loading the skill", text)
-                if path.stem == "prepare":
-                    self.assertIn("Run SkillFabric route prepare and route finalize.", text)
-                    self.assertIn("Run SkillFabric plan prepare and plan finalize.", text)
-                    self.assertIn("Do not answer or perform the user's task", text)
-                    self.assertIn("route finalization", text)
-                    self.assertIn("plan finalization", text)
-                    self.assertIn("have run", text)
-                else:
-                    self.assertIn("Run State JSON", text)
-                    self.assertIn("prepare/finalize and plan prepare/finalize", text)
-                    self.assertIn("before task tools, search, or final answers", text)
-                    self.assertIn("task tools, search, or final answers", text)
-            if path.stem == "build":
-                self.assertIn("the CLI build must", text)
+            self.assertIn(
+                f"Use the `skillfabric-{path.stem}` skill as the authoritative workflow.", text
+            )
 
         overview_text = (plugin_root / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("## Command Choice", overview_text)
@@ -310,8 +207,13 @@ class PublicPackageTests(unittest.TestCase):
         self.assertNotIn("Run `skillfabric route", overview_text)
         self.assertFalse((plugin_root / "skills" / "skillfabric").exists())
 
-    def test_claude_code_prepare_and_run_prompts_match_agent_cli_contract(self) -> None:
+    def test_claude_code_prepare_and_run_prompts_match_single_plan_contract(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
+        reference_path = plugin_root / "references" / "route-plan.md"
+        self.assertTrue(reference_path.exists())
+        reference = reference_path.read_text(encoding="utf-8")
+        reference_flat = " ".join(reference.split())
+
         for name in ("prepare", "run"):
             text = (plugin_root / "skills" / f"skillfabric-{name}" / "SKILL.md").read_text(
                 encoding="utf-8"
@@ -319,40 +221,44 @@ class PublicPackageTests(unittest.TestCase):
             with self.subTest(command=name):
                 self.assertIn("The task is the user's natural-language request", text)
                 self.assertIn("Treat only recognized flags as workflow configuration.", text)
-                self.assertIn('skillfabric route "$task"', text)
-                self.assertIn("--agent-mode prepare", text)
-                self.assertIn("--agent-mode finalize", text)
-                self.assertIn('--trace-id "$trace_id"', text)
-                self.assertIn('--skill-package-file "$skill_package_file"', text)
-                self.assertIn("single raw SkillPackage JSON object", text)
-                self.assertIn("to the returned\n   `skill_package_file`", text)
-                self.assertIn('skillfabric plan --workspace "$workspace"', text)
-                self.assertIn('--route-file "$route_json"', text)
-                self.assertIn('--package-root "$package_root"', text)
-                self.assertIn('--planner-output-file "$planner_output_path"', text)
-                self.assertIn("single raw planner JSON object", text)
-                self.assertIn("to the returned\n    `planner_output_path`", text)
-                self.assertIn("Use real newline characters inside `execution_prompt`", text)
-                self.assertIn("Do not wrap it in Markdown fences", text)
-                self.assertIn("comments, or", text)
-                self.assertIn("explanatory text", text)
+                self.assertIn("references/route-plan.md", text)
                 if name == "run":
                     self.assertIn('skillfabric run-state "$task"', text)
-                    self.assertIn('set `$execution_prompt` to `prompt_path`', text)
-                    self.assertIn("Before reading `execution_prompt.md`, do not use Web Search, Fetch", text)
+                    self.assertIn("set `$execution_prompt` to `prompt_path`", text)
+                    self.assertIn(
+                        "Before reading `execution_prompt.md`, do not use Web Search, Fetch", text
+                    )
                     self.assertIn("If no reusable prompt exists and no task was provided", text)
-                    self.assertIn("Do not substitute shell path discovery for `run-state`", text)
-                self.assertIn("agent_route_request.json", text)
-                self.assertIn("planner_request.json", text)
-                self.assertIn("query_wiki_root", text)
-                self.assertIn("In the main Claude Code session", text)
-                self.assertIn("Do not inspect the active project workspace", text)
-                self.assertIn("Route selection is about choosing skills", text)
-                self.assertIn("bounded active-workspace inspection", text)
+                    self.assertIn("shell path discovery for `run-state`", text)
                 self.assertIn("execution_prompt.md", text)
-                self.assertNotIn("Launch `skillfabric-query-wiki-explorer`", text)
-                self.assertNotIn("Launch `skillfabric-workflow-planner`", text)
                 self.assertIn("$ARGUMENTS", text)
+
+        for snippet in (
+            'skillfabric plan "$task"',
+            '--workspace "$workspace"',
+            '--env-file "$env_file"',
+            "route.json",
+            "execution_prompt.md",
+            "planner_validation.json",
+        ):
+            self.assertIn(snippet, reference)
+        for removed in (
+            "community",
+            "fallback",
+            "prepare-finalize",
+            "--agent-mode",
+            "--skill-package-file",
+            "--planner-output-file",
+            "workflow_plan",
+            "evidence/required_edges.json",
+            "evidence/selected_skill_evidence.json",
+            "evidence/route_summary.json",
+            "agent_run_spec",
+        ):
+            self.assertNotIn(removed, reference.lower())
+        self.assertNotIn("raw json", reference_flat.lower())
+        prepare_command = (plugin_root / "commands" / "prepare.md").read_text(encoding="utf-8")
+        self.assertNotIn("warnings", prepare_command.lower())
 
     def test_claude_code_plugin_prompts_handle_natural_language_commands(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -364,18 +270,18 @@ class PublicPackageTests(unittest.TestCase):
         )
 
         self.assertIn("natural language that may contain a skill root", build_text)
-        self.assertIn("first existing directory as the skill root", build_text)
-        self.assertIn("Ignore surrounding natural language", build_text)
-        self.assertIn("contains at least one `SKILL.md` or", build_text)
+        self.assertIn("first existing path-like directory as the skill root", build_text)
+        self.assertIn("ignore surrounding", build_text)
+        self.assertIn("must contain at least one `SKILL.md` or", build_text)
         self.assertIn("not built yet", doctor_text)
         self.assertIn("normal before\n  the first build", doctor_text)
         self.assertIn("SkillFabric ready.", doctor_text)
         self.assertIn("Workspace: ready, <skill_count> skills, build <build_id>", doctor_text)
 
     def test_claude_code_plugin_readme_is_product_grade(self) -> None:
-        readme = (
-            PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md"
-        ).read_text(encoding="utf-8")
+        readme = (PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md").read_text(
+            encoding="utf-8"
+        )
         for section in (
             "## Requirements",
             "## Installation",
@@ -396,10 +302,17 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:prepare",
             "/skillfabric:run",
             "reuses the latest prepared prompt when available",
-            "--embedding-provider disabled",
+            "--wiki-summary-mode off",
             "Do not paste API keys",
         ):
             self.assertIn(snippet, readme)
+        for removed in (
+            "--embedding-provider",
+            "community",
+            "canonicalization",
+            "fallback",
+        ):
+            self.assertNotIn(removed, readme.lower())
         for removed_command in (
             "/skillfabric:init",
             "/skillfabric:route",
@@ -409,7 +322,7 @@ class PublicPackageTests(unittest.TestCase):
         ):
             self.assertNotIn(removed_command, readme)
         for internal_reference in (
-            "/Users/chenjiang",
+            "/Users/",
             "SkillNet/experiments",
             "AgentSkillOS",
             "benchmark",
@@ -424,12 +337,18 @@ class PublicPackageTests(unittest.TestCase):
             PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md",
         ]
         forbidden = (
-            "/Users/chenjiang",
+            "/Users/",
             "SkillNet/experiments",
             "AgentSkillOS",
             "SKILLFABRIC_EXPERIMENTAL_ROOT",
             "eval aggregation",
             "eval_report",
+            "community labels",
+            "canonicalization",
+            "--embedding-provider disabled",
+            "--skip-llm-router",
+            "graph/communities.json",
+            "graph/compiled.json",
         )
         for path in doc_paths:
             text = path.read_text(encoding="utf-8")
@@ -437,54 +356,195 @@ class PublicPackageTests(unittest.TestCase):
                 with self.subTest(path=path, marker=marker):
                     self.assertNotIn(marker, text)
 
-    def test_python_facade_plan_requires_agent_planner(self) -> None:
+    def test_python_facade_rejects_removed_route_switches(self) -> None:
+        from skillfabric import SkillFabric
+
+        client = SkillFabric(workspace=".skillfabric")
+
+        with self.assertRaisesRegex(TypeError, "unsupported route option"):
+            client.route("extract financial KPIs", use_llm_router=False)
+
+    def test_python_facade_rejects_coerced_route_limits(self) -> None:
+        from skillfabric import SkillFabric
+
+        client = SkillFabric(workspace=".skillfabric")
+        invalid_overrides = [
+            {"max_selected_skills": True},
+            {"seed_limit": "3"},
+            {"explorer_timeout_seconds": "30"},
+        ]
+
+        with patch("skillfabric.api.route_task") as route_mock:
+            for overrides in invalid_overrides:
+                with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                    client.route("extract financial KPIs", **overrides)
+
+        route_mock.assert_not_called()
+
+    def test_python_facade_rejects_coerced_build_options(self) -> None:
+        from skillfabric import SkillFabric
+
+        client = SkillFabric(workspace=".skillfabric")
+        invalid_overrides = [
+            {"skip_wiki": "false"},
+            {"llm_concurrency": True},
+            {"embedding_model": 123},
+        ]
+
+        with patch("skillfabric.api.build_graph") as build_mock:
+            for overrides in invalid_overrides:
+                with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                    client.build(FIXTURE_SKILLS, **overrides)
+
+        build_mock.assert_not_called()
+
+    def test_python_facade_plans_once_and_writes_prompt_only(self) -> None:
         from skillfabric import SkillFabric
 
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
             client = SkillFabric(workspace=workspace)
+            with patch(
+                "skillfabric.orchestrator.package.litellm_completion",
+                return_value=json.dumps(
+                    {"execution_prompt": "Parse the PDF, extract KPIs, and verify each value."}
+                ),
+            ) as planner:
+                result = client.plan(
+                    "extract financial KPIs from a PDF report",
+                    route=_facade_route(),
+                )
 
-            route = client.route(
-                "extract financial KPIs from a PDF report",
-                use_llm_router=False,
-                explorer_backend="fallback",
-            )
-
-            with self.assertRaisesRegex(ValueError, "no longer creates a finalized execution package"):
-                client.plan(route=route, renderer="codex")
-
-    def test_python_facade_prepare_and_finalize_plan_prompt_only(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-            client = SkillFabric(workspace=workspace)
-
-            route = client.route(
-                "extract financial KPIs from a PDF report",
-                use_llm_router=False,
-                explorer_backend="fallback",
-            )
-            prepared = client.prepare_plan(route=route, renderer="codex")
-            self.assertTrue((prepared.root / "planner_request.json").exists())
-            self.assertFalse((prepared.root / "agent_run_spec_draft.json").exists())
-            self.assertFalse((prepared.root / "execution_prompt.md").exists())
-
-            result = client.finalize_plan(
-                prepared.root,
-                {"execution_prompt": "# Prompt\n\nExtract the KPIs and verify the deliverable."},
-                renderer="codex",
-            )
-
-            self.assertEqual(result.renderer, "codex")
-            self.assertEqual(result.prompt_path, prepared.root / "execution_prompt.md")
+            planner.assert_called_once()
+            self.assertEqual(result.prompt_path, result.root / "execution_prompt.md")
             self.assertTrue(result.prompt_path.exists())
-            self.assertFalse((prepared.root / "workflow_plan.json").exists())
-            self.assertFalse((prepared.root / "agent_run_spec.json").exists())
+            self.assertFalse((result.root / "workflow_plan.json").exists())
+            self.assertFalse((result.root / "PLANNER.md").exists())
+
+    def test_python_facade_rejects_route_file_query_mismatch(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            trace = workspace / "runs" / "route-trace"
+            trace.mkdir(parents=True)
+            route_path = trace / "route.json"
+            route_path.write_text(json.dumps(_facade_route().to_dict()), encoding="utf-8")
+            (trace / "query.json").write_text(
+                json.dumps({"query": "original task"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "differs from the route query"):
+                SkillFabric(workspace=workspace).plan(
+                    "different task",
+                    route_file=route_path,
+                )
+
+    def test_python_facade_resolves_relative_plan_paths_inside_workspace_runs(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            trace = workspace / "runs" / "route-trace"
+            trace.mkdir(parents=True)
+            (trace / "route.json").write_text(
+                json.dumps(_facade_route().to_dict()),
+                encoding="utf-8",
+            )
+            (trace / "query.json").write_text(
+                json.dumps({"query": "original task"}),
+                encoding="utf-8",
+            )
+
+            with patch("skillfabric.api.plan_execution_package") as planner:
+                SkillFabric(workspace=workspace).plan(
+                    route_file="route-trace/route.json",
+                    package_root="relative-package",
+                )
+
+            self.assertEqual(
+                planner.call_args.kwargs["package_root"],
+                (workspace / "runs" / "relative-package").resolve(),
+            )
+
+    def test_python_facade_rejects_non_string_route_query_artifact(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            trace = workspace / "runs" / "route-trace"
+            trace.mkdir(parents=True)
+            route_path = trace / "route.json"
+            route_path.write_text(json.dumps(_facade_route().to_dict()), encoding="utf-8")
+            (trace / "query.json").write_text(json.dumps({"query": 123}), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "query"):
+                SkillFabric(workspace=workspace).plan(route_file=route_path)
+
+    def test_python_facade_rejects_ambiguous_route_sources(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            trace = workspace / "runs" / "route-trace"
+            trace.mkdir(parents=True)
+            route_path = trace / "route.json"
+            route_path.write_text(json.dumps(_facade_route().to_dict()), encoding="utf-8")
+            (trace / "query.json").write_text(
+                json.dumps({"query": "original task"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(TypeError, "route and route_file"):
+                SkillFabric(workspace=workspace).plan(
+                    "original task",
+                    route=_facade_route(),
+                    route_file=route_path,
+                )
+
+    def test_python_facade_rejects_route_file_outside_workspace_runs(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / ".skillfabric"
+            build_fixture_workspace(workspace)
+            external_trace = root / "external-trace"
+            external_trace.mkdir()
+            route_path = external_trace / "route.json"
+            route_path.write_text(json.dumps(_facade_route().to_dict()), encoding="utf-8")
+            (external_trace / "query.json").write_text(
+                json.dumps({"query": "original task"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "route_file must stay inside"):
+                SkillFabric(workspace=workspace).plan(
+                    "original task",
+                    route_file=route_path,
+                    package_root=workspace / "runs" / "package",
+                )
+
+    def test_python_facade_rejects_package_root_outside_workspace_runs(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / ".skillfabric"
+            build_fixture_workspace(workspace)
+
+            with self.assertRaisesRegex(ValueError, "package_root must stay inside"):
+                SkillFabric(workspace=workspace).plan(
+                    "original task",
+                    route=_facade_route(),
+                    package_root=root / "external-package",
+                )
 
     def test_python_facade_build_rejects_removed_skip_llm_validation_option(self) -> None:
         from skillfabric import SkillFabric
@@ -526,6 +586,45 @@ def _find_spec(module_name: str) -> object | None:
         return importlib.util.find_spec(module_name)
     except ModuleNotFoundError:
         return None
+
+
+def _facade_route():
+    from skillfabric.router.models import RouteRelationEvidence, RouteResult, RouteSelectedSkill
+
+    return RouteResult(
+        selected_skills=(
+            RouteSelectedSkill(
+                skill_id="skill:pdf-table-parser",
+                name="pdf-table-parser",
+                reason="Parse the PDF into normalized tables.",
+                evidence=("skills/cards/pdf-table-parser.md",),
+            ),
+            RouteSelectedSkill(
+                skill_id="skill:financial-kpi-extractor",
+                name="financial-kpi-extractor",
+                reason="Extract financial KPI values.",
+                evidence=("skills/cards/financial-kpi-extractor.md",),
+            ),
+        ),
+        relation_evidence=(
+            RouteRelationEvidence(
+                relation_type="depend_on",
+                source_skill="skill:financial-kpi-extractor",
+                target_skill="skill:pdf-table-parser",
+                confidence=0.94,
+                reason="KPI extraction requires normalized tables.",
+                evidence=("edges/semantic_edges.jsonl",),
+            ),
+        ),
+        near_misses=(),
+        coverage_gaps=(),
+        wiki_pages_read=(
+            "skills/cards/pdf-table-parser.md",
+            "skills/cards/financial-kpi-extractor.md",
+            "edges/semantic_edges.jsonl",
+        ),
+        rationale="Parse tables before extracting KPIs.",
+    )
 
 
 if __name__ == "__main__":

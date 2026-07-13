@@ -3,569 +3,260 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
+from skillfabric.cli import PUBLIC_COMMANDS
 from skillfabric.cli import main as cli_main
-from skillfabric.router.models import RouteResult
-from skillfabric.storage import atomic_write_text
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig
-from tests.unit.wiki_helpers import build_fixture_workspace
+from skillfabric.router.models import RouteResult, RouteSelectedSkill
 
 
-class RoutePlanCliTests(unittest.TestCase):
-    def test_public_cli_surface_only_exposes_core_commands(self) -> None:
-        help_output = io.StringIO()
-        with contextlib.redirect_stdout(help_output):
-            cli_main(["--help"])
-        help_text = help_output.getvalue()
-
-        for command in ("init", "help", "build", "route", "plan", "doctor-state", "run-state"):
-            self.assertIn(command, help_text)
-        for command in (
-            "package",
-            "scan",
-            "build-wiki",
-            "wiki-status",
-            "get-status",
-            "get-skill-neighbors",
-            "query-bundle",
-            "build-execution-package",
-            "eval",
-            "llm-smoke",
-            "export-neo4j",
-        ):
-            self.assertNotIn(command, help_text)
-            with self.assertRaises(SystemExit) as raised:
-                with contextlib.redirect_stderr(io.StringIO()):
-                    cli_main([command, "--help"])
-            self.assertNotEqual(raised.exception.code, 0)
-
-    def test_help_config_prints_api_configuration_policy(self) -> None:
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            cli_main(["help", "config"])
-
-        text = output.getvalue()
-        self.assertIn("API_KEY", text)
-        self.assertIn("BASE_URL", text)
-        self.assertIn("MODEL", text)
-        self.assertIn("EMBEDDING_MODEL", text)
-        self.assertIn("EMBEDDING_API_KEY", text)
-        self.assertIn("EMBEDDING_BASE_URL", text)
-        self.assertIn("OPENAI_API_KEY", text)
-        self.assertIn("Claude Code SDK", text)
-        self.assertNotIn("SKILLFABRIC_API_KEY", text)
-        self.assertNotIn("SKILLFABRIC_BASE_URL", text)
-
-    def test_route_cli_defaults_to_llm_router(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            captured = {}
-
-            def fake_route(config):
-                captured["config"] = config
-                return RouteResult(
-                    query=config.query,
-                    trace_id=config.trace_id or "trace",
-                    trace_dir=workspace / "runs" / "trace",
-                    selected_skills=[],
-                    provenance="claude_code",
-                )
-
-            output = io.StringIO()
-            with patch("skillfabric.cli.route_task", side_effect=fake_route):
-                with contextlib.redirect_stdout(output):
-                    cli_main(
-                        [
-                            "route",
-                            "extract financial KPIs from a PDF report",
-                            "--workspace",
-                            str(workspace),
-                        ]
-                    )
-
-            payload = json.loads(output.getvalue())
-            self.assertEqual(payload["provenance"], "claude_code")
-            self.assertTrue(captured["config"].use_llm_router)
-            self.assertEqual(captured["config"].explorer_backend, "claude-code")
-
-    def test_route_and_plan_cli_offline_requires_agent_mode(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            query = "extract financial KPIs from a PDF report"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            route_output = io.StringIO()
-            with contextlib.redirect_stdout(route_output):
-                cli_main(
-                    [
-                        "route",
-                        query,
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                    ]
-                )
-            route_payload = json.loads(route_output.getvalue())
-            self.assertGreaterEqual(len(route_payload["selected_skills"]), 1)
-            route_path = Path(route_payload["trace_dir"]) / "route.json"
-            self.assertTrue(route_path.exists())
-
-            with self.assertRaises(SystemExit) as raised:
-                cli_main(
-                    [
-                        "plan",
-                        "--route-file",
-                        str(route_path),
-                        "--workspace",
-                        str(workspace),
-                        "--renderer",
-                        "codex",
-                    ]
-                )
-            self.assertIn("requires --agent-mode prepare", str(raised.exception))
-
-            prepare_output = io.StringIO()
-            with contextlib.redirect_stdout(prepare_output):
-                cli_main(
-                    [
-                        "plan",
-                        "--route-file",
-                        str(route_path),
-                        "--workspace",
-                        str(workspace),
-                        "--renderer",
-                        "codex",
-                        "--agent-mode",
-                        "prepare",
-                    ]
-                )
-            prepared = json.loads(prepare_output.getvalue())
-            package_root = Path(prepared["root"])
-            self.assertTrue((package_root / "planner_request.json").exists())
-            self.assertFalse((package_root / "execution_prompt.md").exists())
-            self.assertFalse((package_root / "agent_run_spec_draft.json").exists())
-
-            planner_output = {"execution_prompt": "# Prompt\n\nExecute the task."}
-            finalize_output = io.StringIO()
-            with patch("sys.stdin", io.StringIO(json.dumps(planner_output))):
-                with contextlib.redirect_stdout(finalize_output):
-                    cli_main(
-                        [
-                            "plan",
-                            "--workspace",
-                            str(workspace),
-                            "--renderer",
-                            "codex",
-                            "--agent-mode",
-                            "finalize",
-                            "--package-root",
-                            str(package_root),
-                            "--planner-output-file",
-                            "-",
-                        ]
-                    )
-            finalized = json.loads(finalize_output.getvalue())
-            self.assertEqual(Path(finalized["prompt_path"]), package_root / "execution_prompt.md")
-            self.assertEqual(finalized["renderer"], "codex")
-            self.assertTrue((package_root / "execution_prompt.md").exists())
-            self.assertFalse((package_root / "workflow_plan.json").exists())
-            self.assertFalse((package_root / "agent_run_spec.json").exists())
-
-    def test_plan_cli_can_prepare_from_query(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            query = "extract financial KPIs from a PDF report"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                cli_main(
-                    [
-                        "plan",
-                        query,
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                        "--renderer",
-                        "claude-code",
-                        "--agent-mode",
-                        "prepare",
-                    ]
-                )
-
-            payload = json.loads(output.getvalue())
-            package_root = Path(payload["root"])
-            self.assertTrue((package_root / "planner_request.json").exists())
-            self.assertFalse((package_root / "execution_prompt.md").exists())
-            self.assertEqual(payload["renderer"], "claude-code")
-
-    def test_plan_cli_without_agent_mode_rejects_query(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            query = "extract financial KPIs from a PDF report"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            with self.assertRaises(SystemExit) as raised:
-                cli_main(
-                    [
-                        "plan",
-                        query,
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                        "--renderer",
-                        "claude-code",
-                    ]
-                )
-
-            self.assertIn("direct deterministic planning was removed", str(raised.exception))
-
-    def test_doctor_state_reports_non_secret_readiness(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            env_file = root / ".env"
-            workspace = root / ".skillfabric"
-            env_file.write_text(
-                "API_KEY=secret-value\n"
-                "BASE_URL=https://example.test/v1\n"
-                "MODEL=test-model\n"
-                "EMBEDDING_MODEL=test-embed\n",
-                encoding="utf-8",
-            )
-            output = io.StringIO()
-
-            with contextlib.redirect_stdout(output):
-                cli_main(["doctor-state", "--env-file", str(env_file), "--workspace", str(workspace)])
-
-            raw = output.getvalue()
-            state = json.loads(raw)
-            self.assertTrue(state["cli_available"])
-            self.assertTrue(state["api_configured"])
-            self.assertEqual(state["missing"], [])
-            self.assertEqual(state["workspace_status"]["stage"], "not_built")
-            self.assertFalse(state["workspace_ready"])
-            self.assertNotIn("secret-value", raw)
-
-    def test_doctor_state_summarizes_existing_workspace_status(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            env_file = root / ".env"
-            workspace = root / ".skillfabric"
-            env_file.write_text(
-                "API_KEY=secret-value\n"
-                "BASE_URL=https://example.test/v1\n"
-                "MODEL=test-model\n"
-                "EMBEDDING_MODEL=test-embed\n",
-                encoding="utf-8",
-            )
-            workspace.mkdir()
-            atomic_write_text(
-                workspace / "status.json",
-                json.dumps(
-                    {
-                        "stage": "complete",
-                        "build_id": 123,
-                        "skill_count": 7,
-                        "warnings": ["warning"],
-                    }
-                ),
-            )
-            output = io.StringIO()
-
-            with contextlib.redirect_stdout(output):
-                cli_main(["doctor-state", "--env-file", str(env_file), "--workspace", str(workspace)])
-
-            raw = output.getvalue()
-            state = json.loads(raw)
-            self.assertTrue(state["workspace_ready"])
-            self.assertEqual(state["workspace_status"]["stage"], "complete")
-            self.assertEqual(state["workspace_status"]["build_id"], 123)
-            self.assertEqual(state["workspace_status"]["skill_count"], 7)
-            self.assertEqual(state["workspace_status"]["warnings_count"], 1)
-            self.assertNotIn("secret-value", raw)
-
-    def test_doctor_state_treats_build_summary_status_as_complete(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            env_file = root / ".env"
-            workspace = root / ".skillfabric"
-            env_file.write_text(
-                "API_KEY=secret-value\n"
-                "BASE_URL=https://example.test/v1\n"
-                "MODEL=test-model\n"
-                "EMBEDDING_MODEL=test-embed\n",
-                encoding="utf-8",
-            )
-            workspace.mkdir()
-            atomic_write_text(
-                workspace / "status.json",
-                json.dumps(
-                    {
-                        "schema_version": "1.0",
-                        "build_id": "build-123",
-                        "skill_count": 7,
-                        "artifacts": {"graph": "graph/graph.json"},
-                    }
-                ),
-            )
-            output = io.StringIO()
-
-            with contextlib.redirect_stdout(output):
-                cli_main(["doctor-state", "--env-file", str(env_file), "--workspace", str(workspace)])
-
-            state = json.loads(output.getvalue())
-            self.assertTrue(state["workspace_ready"])
-            self.assertEqual(state["workspace_status"]["stage"], "complete")
-
-    def test_plan_cli_latest_returns_most_recent_finalized_execution_prompt(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            route_output = io.StringIO()
-            with contextlib.redirect_stdout(route_output):
-                cli_main(
-                    [
-                        "route",
-                        "extract financial KPIs from a PDF report",
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                    ]
-                )
-            route_payload = json.loads(route_output.getvalue())
-
-            prepare_output = io.StringIO()
-            with contextlib.redirect_stdout(prepare_output):
-                cli_main(
-                    [
-                        "plan",
-                        "--route-file",
-                        str(Path(route_payload["trace_dir"]) / "route.json"),
-                        "--workspace",
-                        str(workspace),
-                        "--renderer",
-                        "claude-code",
-                        "--agent-mode",
-                        "prepare",
-                    ]
-                )
-            prepared = json.loads(prepare_output.getvalue())
-            package_root = Path(prepared["root"])
-
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    cli_main(
-                        [
-                            "plan",
-                            "--workspace",
-                            str(workspace),
-                            "--renderer",
-                            "claude-code",
-                            "--agent-mode",
-                            "finalize",
-                            "--package-root",
-                            str(package_root),
-                            "--planner-output-file",
-                            "-",
-                        ]
-                    )
-
-            latest_output = io.StringIO()
-            with contextlib.redirect_stdout(latest_output):
-                cli_main(
-                    [
-                        "plan",
-                        "--workspace",
-                        str(workspace),
-                        "--agent-mode",
-                        "latest",
-                    ]
-                )
-
-            latest = json.loads(latest_output.getvalue())
-            self.assertTrue(latest["found"])
-            self.assertEqual(Path(latest["package_root"]), package_root)
-            self.assertEqual(Path(latest["prompt_path"]), package_root / "execution_prompt.md")
-            self.assertEqual(latest["trace_id"], route_payload["trace_id"])
-            self.assertEqual(latest["task"], route_payload["query"])
-            self.assertGreaterEqual(len(latest["selected_skills"]), 1)
-
-    def test_run_state_reuses_latest_finalized_execution_prompt(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            route_output = io.StringIO()
-            with contextlib.redirect_stdout(route_output):
-                cli_main(
-                    [
-                        "route",
-                        "extract financial KPIs from a PDF report",
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                    ]
-                )
-            route_payload = json.loads(route_output.getvalue())
-
-            prepare_output = io.StringIO()
-            with contextlib.redirect_stdout(prepare_output):
-                cli_main(
-                    [
-                        "plan",
-                        "--route-file",
-                        str(Path(route_payload["trace_dir"]) / "route.json"),
-                        "--workspace",
-                        str(workspace),
-                        "--renderer",
-                        "claude-code",
-                        "--agent-mode",
-                        "prepare",
-                    ]
-                )
-            prepared = json.loads(prepare_output.getvalue())
-            package_root = Path(prepared["root"])
-
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    cli_main(
-                        [
-                            "plan",
-                            "--workspace",
-                            str(workspace),
-                            "--renderer",
-                            "claude-code",
-                            "--agent-mode",
-                            "finalize",
-                            "--package-root",
-                            str(package_root),
-                            "--planner-output-file",
-                            "-",
-                        ]
-                    )
-
-            state_output = io.StringIO()
-            with contextlib.redirect_stdout(state_output):
-                cli_main(["run-state", "--workspace", str(workspace)])
-
-            state = json.loads(state_output.getvalue())
-            self.assertEqual(state["action"], "reuse_prompt")
-            self.assertEqual(Path(state["prompt_path"]), package_root / "execution_prompt.md")
-            self.assertEqual(Path(state["package_root"]), package_root)
-            self.assertEqual(state["trace_id"], route_payload["trace_id"])
-            self.assertEqual(state["task"], route_payload["query"])
-            self.assertGreaterEqual(len(state["selected_skills"]), 1)
-
-    def test_run_state_prepares_new_task_instead_of_reusing_unrelated_prompt(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            route_output = io.StringIO()
-            with contextlib.redirect_stdout(route_output):
-                cli_main(
-                    [
-                        "route",
-                        "extract financial KPIs from a PDF report",
-                        "--workspace",
-                        str(workspace),
-                        "--skip-llm-router",
-                        "--explorer-backend",
-                        "fallback",
-                    ]
-                )
-            route_payload = json.loads(route_output.getvalue())
-
-            prepare_output = io.StringIO()
-            with contextlib.redirect_stdout(prepare_output):
-                cli_main(
-                    [
-                        "plan",
-                        "--route-file",
-                        str(Path(route_payload["trace_dir"]) / "route.json"),
-                        "--workspace",
-                        str(workspace),
-                        "--renderer",
-                        "claude-code",
-                        "--agent-mode",
-                        "prepare",
-                    ]
-                )
-            prepared = json.loads(prepare_output.getvalue())
-
-            with patch("sys.stdin", io.StringIO('{"execution_prompt": "# Prompt\\n\\nExecute it."}')):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    cli_main(
-                        [
-                            "plan",
-                            "--workspace",
-                            str(workspace),
-                            "--renderer",
-                            "claude-code",
-                            "--agent-mode",
-                            "finalize",
-                            "--package-root",
-                            str(prepared["root"]),
-                            "--planner-output-file",
-                            "-",
-                        ]
-                    )
-
-            state_output = io.StringIO()
-            with contextlib.redirect_stdout(state_output):
-                cli_main(
-                    [
-                        "run-state",
-                        "review",
-                        "graph-based",
-                        "skill",
-                        "routing",
-                        "--workspace",
-                        str(workspace),
-                    ]
-                )
-
-            state = json.loads(state_output.getvalue())
-            self.assertEqual(state["action"], "prepare_required")
-            self.assertTrue(state["prepared_prompt_found"])
-            self.assertTrue(state["existing_prompt_ignored"])
-            self.assertEqual(state["task"], "review graph-based skill routing")
-            self.assertEqual(state["existing_task"], route_payload["query"])
-
-    def test_run_state_requires_task_when_no_prepared_prompt_exists(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                cli_main(["run-state", "--workspace", str(workspace)])
-
-            state = json.loads(output.getvalue())
-            self.assertEqual(state["action"], "missing_task")
-            self.assertFalse(state["prepared_prompt_found"])
-            self.assertEqual(state["workspace"], str(workspace))
+def _route() -> RouteResult:
+    return RouteResult(
+        selected_skills=(
+            RouteSelectedSkill(
+                skill_id="skill:test",
+                name="test",
+                reason="Handle the test task.",
+                evidence=("skills/cards/test.md",),
+            ),
+        ),
+        relation_evidence=(),
+        near_misses=(),
+        coverage_gaps=(),
+        wiki_pages_read=("skills/cards/test.md",),
+        rationale="One skill covers the task.",
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_public_cli_surface_exposes_only_core_commands() -> None:
+    output = io.StringIO()
+
+    with pytest.raises(SystemExit) as raised, contextlib.redirect_stdout(output):
+        cli_main(["--help"])
+
+    assert raised.value.code == 0
+    text = output.getvalue()
+    assert set(PUBLIC_COMMANDS) == {
+        "init",
+        "help",
+        "build",
+        "route",
+        "plan",
+        "query-wiki",
+        "doctor-state",
+        "run-state",
+    }
+    assert "fallback" not in text.lower()
+    assert "Prepare or finalize" not in text
+    assert "Generate one execution prompt" in text
+
+
+def test_route_cli_constructs_only_current_router_config_fields() -> None:
+    output = io.StringIO()
+
+    with (
+        patch("skillfabric.cli.route_task", return_value=_route()) as route_mock,
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(
+            [
+                "route",
+                "test task",
+                "--workspace",
+                ".skillfabric-test",
+                "--max-selected-skills",
+                "3",
+                "--max-depth",
+                "1",
+                "--trace-id",
+                "test-trace",
+            ]
+        )
+
+    config = route_mock.call_args.args[0]
+    assert config.query == "test task"
+    assert config.max_selected_skills == 3
+    assert config.max_depth == 1
+    assert config.trace_id == "test-trace"
+    assert json.loads(output.getvalue())["selected_skills"][0]["skill_id"] == "skill:test"
+
+
+def test_route_cli_preserves_explicit_zero_budgets() -> None:
+    output = io.StringIO()
+
+    with (
+        patch("skillfabric.cli.route_task", return_value=_route()) as route_mock,
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(
+            [
+                "route",
+                "unsupported task",
+                "--max-selected-skills",
+                "0",
+                "--seed-limit",
+                "0",
+                "--expanded-limit",
+                "0",
+                "--max-depth",
+                "0",
+            ]
+        )
+
+    config = route_mock.call_args.args[0]
+    assert config.max_selected_skills == 0
+    assert config.seed_limit == 0
+    assert config.expanded_limit == 0
+    assert config.max_depth == 0
+
+
+def test_plan_cli_calls_prompt_planner_once(tmp_path) -> None:
+    package_root = tmp_path / ".skillfabric" / "runs" / "plan" / "execution_package"
+    result = SimpleNamespace(
+        to_dict=lambda: {
+            "root": str(package_root),
+            "prompt_path": str(package_root / "execution_prompt.md"),
+            "estimated_prompt_tokens": 321,
+        }
+    )
+    output = io.StringIO()
+
+    with (
+        patch(
+            "skillfabric.cli._plan_route_context",
+            return_value=(_route(), "test task", package_root),
+        ),
+        patch("skillfabric.cli.plan_execution_package", return_value=result) as planner,
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(
+            [
+                "plan",
+                "test task",
+                "--workspace",
+                str(tmp_path / ".skillfabric"),
+                "--planner-context-max-tokens",
+                "5000",
+            ]
+        )
+
+    planner.assert_called_once()
+    assert planner.call_args.kwargs["planner_context_max_tokens"] == 5000
+    assert json.loads(output.getvalue())["estimated_prompt_tokens"] == 321
+
+
+def test_plan_route_file_rejects_non_string_query_artifact(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    trace = workspace / "runs" / "bad-query"
+    trace.mkdir(parents=True)
+    (trace / "route.json").write_text(json.dumps(_route().to_dict()), encoding="utf-8")
+    (trace / "query.json").write_text(json.dumps({"query": 123}), encoding="utf-8")
+
+    with (
+        patch("skillfabric.cli.plan_execution_package") as planner,
+        pytest.raises(SystemExit, match="non-empty string query"),
+    ):
+        cli_main(
+            [
+                "plan",
+                "--workspace",
+                str(workspace),
+                "--route-file",
+                str(trace / "route.json"),
+            ]
+        )
+
+    planner.assert_not_called()
+
+
+def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    workspace.mkdir()
+    (workspace / "status.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "state": "ready",
+                "build_id": "build-test",
+                "stats": {"skill_count": 8},
+            }
+        ),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env.test"
+    env_file.write_text(
+        "API_KEY=private-value\n"
+        "BASE_URL=https://example.test/v1\n"
+        "MODEL=openai/test-model\n"
+        "EMBEDDING_MODEL=openai/test-embedding\n",
+        encoding="utf-8",
+    )
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(
+            [
+                "doctor-state",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+            ]
+        )
+
+    text = output.getvalue()
+    payload = json.loads(text)
+    assert payload["workspace_ready"] is True
+    assert payload["skill_count"] == 8
+    assert payload["next_action"] == "ready"
+    assert "private-value" not in text
+
+
+def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    root = workspace / "runs" / "run-test" / "execution_package"
+    root.mkdir(parents=True)
+    (root / "execution_prompt.md").write_text("Execute the task.\n", encoding="utf-8")
+    (root / "planner_output.json").write_text(
+        json.dumps({"execution_prompt": "Execute the task."}),
+        encoding="utf-8",
+    )
+    (root / "planner_validation.json").write_text(
+        '{"valid": true, "errors": []}\n',
+        encoding="utf-8",
+    )
+    (root / "planner_request.json").write_text(
+        json.dumps({"task": "original task"}),
+        encoding="utf-8",
+    )
+    (root / "route.json").write_text(json.dumps(_route().to_dict()), encoding="utf-8")
+
+    reuse_output = io.StringIO()
+    with contextlib.redirect_stdout(reuse_output):
+        cli_main(["run-state", "original task", "--workspace", str(workspace)])
+    different_output = io.StringIO()
+    with contextlib.redirect_stdout(different_output):
+        cli_main(["run-state", "different task", "--workspace", str(workspace)])
+
+    reuse = json.loads(reuse_output.getvalue())
+    different = json.loads(different_output.getvalue())
+    assert reuse["action"] == "reuse_prompt"
+    assert reuse["prompt_path"].endswith("execution_prompt.md")
+    assert "workflow_plan_path" not in reuse
+    assert different["action"] == "prepare_required"
+
+
+def test_run_state_ignores_incomplete_execution_package(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    root = workspace / "runs" / "incomplete" / "execution_package"
+    root.mkdir(parents=True)
+    (root / "execution_prompt.md").write_text("Execute.\n", encoding="utf-8")
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(["run-state", "task", "--workspace", str(workspace)])
+
+    assert json.loads(output.getvalue())["action"] == "prepare_required"

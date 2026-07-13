@@ -1,215 +1,222 @@
-"""Deterministic SkillPackage validation and RouteResult conversion."""
+"""Fail-closed validation of explorer output against a schema-v2 query wiki."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from skillfabric.compiled_graph.models import Edge
 from skillfabric.router.models import (
-    RouteEdge,
+    RouteNearMiss,
     RouterBundle,
+    RouteRelationEvidence,
     RouteResult,
     RouteSelectedSkill,
 )
-from skillfabric.router.route_edges import (
-    _edges_from_ordered_skill_ids,
-    _edges_from_workflow_hints,
-    _merge_edges,
-    _reconcile_ordered_hints,
-    _reconcile_route_edges,
-)
-from skillfabric.wiki.explorer.skill_package import (
-    SkillPackage,
-    SkillPackageNearMiss,
-    SkillPackageRequiredEdge,
-    SkillPackageSelectedSkill,
-)
+from skillfabric.wiki.explorer.skill_package import SkillPackage
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class SkillPackageValidationResult:
-    """Validation result for route-time explorer output."""
-
     valid: bool
-    valid_package: SkillPackage
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    errors: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "valid": self.valid,
-            "valid_package": self.valid_package.to_dict(),
             "errors": list(self.errors),
-            "warnings": list(self.warnings),
         }
 
 
-def validate_skill_package(package: SkillPackage, query_wiki_root: Path) -> SkillPackageValidationResult:
-    """Validate explorer output against query_wiki manifest and file boundaries."""
+def validate_skill_package(
+    package: SkillPackage,
+    query_wiki_root: Path,
+    *,
+    max_selected_skills: int = 8,
+) -> SkillPackageValidationResult:
+    """Validate selection ids and evidence without treating graph edges as authority."""
 
-    manifest = json.loads((query_wiki_root / "manifest.json").read_text(encoding="utf-8"))
-    manifest_skills = {item["skill_id"]: item for item in manifest.get("skills", []) if isinstance(item, dict)}
-    selected: list[SkillPackageSelectedSkill] = []
-    selected_ids: set[str] = set()
+    root = query_wiki_root.resolve()
+    manifest = _load_manifest(root)
+    manifest_skills = {str(item["skill_id"]): item for item in manifest["skills"]}
     errors: list[str] = []
-    warnings: list[str] = []
-    for skill in package.selected_skills:
-        valid_evidence = []
-        for evidence in skill.evidence:
-            if not _path_is_inside(query_wiki_root, evidence.path):
-                errors.append(f"evidence path escapes query_wiki: {evidence.path}")
-                continue
-            if not (query_wiki_root / evidence.path).exists():
-                errors.append(f"evidence path missing: {evidence.path}")
-                continue
-            valid_evidence.append(evidence)
-        row = manifest_skills.get(skill.skill_id)
-        if row is None:
-            errors.append(f"selected skill not in query_wiki manifest: {skill.skill_id}")
-            continue
-        if not row.get("selectable", False):
-            errors.append(f"selected skill is not selectable: {skill.skill_id}")
-            continue
-        if not valid_evidence:
-            errors.append(f"selected skill has no valid evidence: {skill.skill_id}")
-            continue
-        selected.append(
-            SkillPackageSelectedSkill(
-                skill_id=skill.skill_id,
-                role=skill.role,
-                evidence=valid_evidence,
-            )
+    selected_ids = [item.skill_id for item in package.selected_skills]
+    selected_set = set(selected_ids)
+
+    if len(selected_ids) > max(0, max_selected_skills):
+        errors.append(
+            f"selected skill count {len(selected_ids)} exceeds max_selected_skills={max_selected_skills}"
         )
-        selected_ids.add(skill.skill_id)
+    if len(selected_set) != len(selected_ids):
+        errors.append("selected_skills contains duplicate skill ids")
 
-    required_edges: list[SkillPackageRequiredEdge] = []
-    for edge in package.required_edges:
-        if edge.evidence_path:
-            if not _path_is_inside(query_wiki_root, edge.evidence_path):
-                errors.append(f"edge evidence path escapes query_wiki: {edge.evidence_path}")
-                continue
-            if not _valid_edge_evidence_path(edge.evidence_path):
+    pages_read = list(package.wiki_pages_read)
+    if len(set(pages_read)) != len(pages_read):
+        errors.append("wiki_pages_read contains duplicate paths")
+    for path in pages_read:
+        error = _path_error(root, path, label="wiki page")
+        if error:
+            errors.append(error)
+    pages_read_set = set(pages_read)
+
+    for selected in package.selected_skills:
+        row = manifest_skills.get(selected.skill_id)
+        if row is None:
+            errors.append(f"selected skill not in query_wiki manifest: {selected.skill_id}")
+        elif not row.get("selectable", False):
+            errors.append(f"selected skill is not selectable: {selected.skill_id}")
+        if not selected.evidence:
+            errors.append(f"selected skill has no evidence: {selected.skill_id}")
+        own_evidence_paths = (
+            {str(row["card_path"]), str(row["source_path"])} if row is not None else set()
+        )
+        cited_paths = {evidence.path for evidence in selected.evidence}
+        for evidence in selected.evidence:
+            error = _path_error(root, evidence.path, label="evidence path")
+            if error:
+                errors.append(error)
+            if evidence.path not in pages_read_set:
                 errors.append(
-                    "edge evidence path must be edges/*.jsonl, workflows/*.md, "
-                    f"or skills/cards/*.md: {edge.evidence_path}"
+                    f"selected skill evidence was not declared in wiki_pages_read: {evidence.path}"
                 )
-                continue
-            if not (query_wiki_root / edge.evidence_path).exists():
-                errors.append(f"edge evidence path missing: {edge.evidence_path}")
-                continue
-        if edge.before not in selected_ids or edge.after not in selected_ids:
-            warnings.append(f"dropped required edge whose endpoints are not selected: {edge.before} -> {edge.after}")
-            continue
-        required_edges.append(edge)
+        if row is not None and own_evidence_paths.isdisjoint(cited_paths):
+            errors.append(
+                f"selected skill evidence must cite its own card or source: {selected.skill_id}"
+            )
 
-    near_misses: list[SkillPackageNearMiss] = []
+    near_miss_ids: set[str] = set()
     for near_miss in package.near_misses:
+        if near_miss.skill_id in near_miss_ids:
+            errors.append(f"near_misses contains duplicate skill id: {near_miss.skill_id}")
+        near_miss_ids.add(near_miss.skill_id)
         if near_miss.skill_id not in manifest_skills:
-            warnings.append(f"dropped near miss outside manifest: {near_miss.skill_id}")
-            continue
-        if near_miss.skill_id in selected_ids:
-            warnings.append(f"dropped near miss already selected: {near_miss.skill_id}")
-            continue
-        near_misses.append(near_miss)
+            errors.append(f"near miss not in query_wiki manifest: {near_miss.skill_id}")
+        if near_miss.skill_id in selected_set:
+            errors.append(f"near miss is also selected: {near_miss.skill_id}")
 
-    valid_package = SkillPackage(
-        selected_skills=selected,
-        required_edges=required_edges,
-        ordered_hints=[
-            hint for hint in package.ordered_hints if hint.skill_id in selected_ids
-        ],
-        near_misses=near_misses,
-        coverage_notes=list(package.coverage_notes),
-        rationale=package.rationale,
-    )
-    return SkillPackageValidationResult(
-        valid=bool(selected),
-        valid_package=valid_package,
-        errors=errors,
-        warnings=warnings,
-    )
+    if not selected_ids and not package.coverage_gaps:
+        errors.append("empty selected_skills requires at least one explicit coverage gap")
+    return SkillPackageValidationResult(valid=not errors, errors=tuple(errors))
 
 
 def route_from_skill_package(
     package: SkillPackage,
     bundle: RouterBundle,
-    *,
-    query: str,
-    trace_id: str,
-    trace_dir: Path,
-    warnings: list[str],
-    max_selected_skills: int = 8,
 ) -> RouteResult:
-    """Convert a validated SkillPackage to the stable RouteResult contract."""
+    """Convert selection to a route and attach graph relations as non-authoritative evidence."""
 
-    candidates = {item.skill_id: item for item in bundle.selected_skills}
-    selected: list[RouteSelectedSkill] = []
-    for item in package.selected_skills[:max_selected_skills]:
-        candidate = candidates.get(item.skill_id)
-        score = candidate.score if candidate is not None else 0.0
-        name = candidate.name if candidate is not None else item.skill_id.removeprefix("skill:")
-        selected.append(
-            RouteSelectedSkill(
-                skill_id=item.skill_id,
-                name=name,
-                rank=len(selected) + 1,
-                score=score,
-                reason=item.role,
-                evidence=[evidence.path for evidence in item.evidence],
-            )
+    candidates = {item.skill_id: item.name for item in bundle.selected_skills}
+    candidates.update({item.skill_id: item.name for item in bundle.alternatives})
+    selected_ids = {item.skill_id for item in package.selected_skills}
+    selected = tuple(
+        RouteSelectedSkill(
+            skill_id=item.skill_id,
+            name=candidates.get(item.skill_id, item.skill_id.removeprefix("skill:")),
+            reason=item.role,
+            evidence=tuple(evidence.path for evidence in item.evidence),
         )
-    selected_ids = {item.skill_id for item in selected}
-    package_edges = [
-        RouteEdge(
-            before_skill=edge.before,
-            after_skill=edge.after,
-            edge_type=edge.relation_type,
-            confidence=0.0,
-            reason=edge.reason,
-            source="wiki_agent",
+        for item in package.selected_skills
+    )
+    relation_evidence = tuple(
+        _route_relation(edge)
+        for edge in sorted(
+            bundle.graph_edges,
+            key=lambda item: (item.type, item.source, item.target),
         )
-        for edge in package.required_edges
-    ]
-    hint_edges = _edges_from_ordered_skill_ids(
-        [hint.skill_id for hint in package.ordered_hints],
-        selected_ids,
-        source="wiki_agent",
-        warnings=warnings,
+        if edge.type in {"depend_on", "compose_with"}
+        and edge.source in selected_ids
+        and edge.target in selected_ids
     )
-    required_edges = _reconcile_route_edges(
-        _merge_edges([*package_edges, *_edges_from_workflow_hints(bundle, selected_ids)]),
-        hint_edges,
-        warnings=warnings,
-    )
-    ordered_hints = _reconcile_ordered_hints(hint_edges, required_edges, warnings=warnings)
     return RouteResult(
-        query=query,
-        trace_id=trace_id,
-        trace_dir=trace_dir,
         selected_skills=selected,
-        required_edges=required_edges,
-        ordered_hints=ordered_hints,
-        near_misses=[item.to_dict() for item in package.near_misses],
-        wiki_pages_read=[evidence for skill in selected for evidence in skill.evidence],
+        relation_evidence=relation_evidence,
+        near_misses=tuple(
+            RouteNearMiss(skill_id=item.skill_id, reason=item.reason)
+            for item in package.near_misses
+        ),
+        coverage_gaps=package.coverage_gaps,
+        wiki_pages_read=package.wiki_pages_read,
         rationale=package.rationale,
-        provenance="claude_code",
-        warnings=warnings,
     )
 
 
-def _path_is_inside(root: Path, rel_path: str) -> bool:
+def _route_relation(edge: Edge) -> RouteRelationEvidence:
+    return RouteRelationEvidence(
+        relation_type=edge.type,
+        source_skill=edge.source,
+        target_skill=edge.target,
+        confidence=edge.confidence,
+        reason=edge.reason,
+        evidence=tuple(f"{item.skill}:{item.line}" for item in edge.evidence),
+    )
+
+
+def _load_manifest(root: Path) -> dict[str, Any]:
+    path = root / "manifest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "schema_version",
+        "query",
+        "skills",
+        "semantic_edges_path",
+        "alternatives",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected:
+        raise ValueError("query_wiki manifest must use the schema-v2 fields")
+    if payload["schema_version"] != "2.0":
+        raise ValueError("query_wiki manifest schema is obsolete; rebuild the route")
+    if not isinstance(payload["skills"], list):
+        raise ValueError("query_wiki manifest skills must be a list")
+    expected_skill_keys = {
+        "skill_id",
+        "name",
+        "description",
+        "selectable",
+        "origin",
+        "card_path",
+        "source_path",
+        "route",
+        "alternative",
+    }
+    seen_skill_ids: set[str] = set()
+    for index, item in enumerate(payload["skills"]):
+        if not isinstance(item, dict) or set(item) != expected_skill_keys:
+            raise ValueError(f"query_wiki manifest skills[{index}] has invalid fields")
+        skill_id = item["skill_id"]
+        if not isinstance(skill_id, str) or not skill_id.strip():
+            raise ValueError(f"query_wiki manifest skills[{index}] has invalid skill_id")
+        if skill_id in seen_skill_ids:
+            raise ValueError(f"query_wiki manifest contains duplicate skill id: {skill_id}")
+        seen_skill_ids.add(skill_id)
+        if not isinstance(item["selectable"], bool):
+            raise ValueError(f"query_wiki manifest skills[{index}] selectable must be boolean")
+        for field_name in ("card_path", "source_path"):
+            value = item[field_name]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"query_wiki manifest skills[{index}] {field_name} must be non-empty"
+                )
+    return payload
+
+
+def _path_error(root: Path, relative_path: str, *, label: str) -> str | None:
+    path = Path(relative_path)
+    if not relative_path or path.is_absolute():
+        return f"{label} must be a non-empty relative query_wiki path: {relative_path}"
+    candidate = (root / path).resolve()
     try:
-        (root / rel_path).resolve().relative_to(root.resolve())
-        return True
-    except (OSError, ValueError):
-        return False
+        candidate.relative_to(root)
+    except ValueError:
+        return f"{label} escapes query_wiki: {relative_path}"
+    if not candidate.is_file():
+        return f"{label} is missing: {relative_path}"
+    return None
 
 
-def _valid_edge_evidence_path(path: str) -> bool:
-    return (path.startswith("edges/") and path.endswith(".jsonl")) or (
-        path.startswith("workflows/") and path.endswith(".md")
-    ) or (
-        path.startswith("skills/cards/") and path.endswith(".md")
-    )
+__all__ = [
+    "SkillPackageValidationResult",
+    "route_from_skill_package",
+    "validate_skill_package",
+]

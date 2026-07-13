@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 
 from skillfabric.storage import Workspace, atomic_write_text
-from skillfabric.wiki.explorer.search_index import build_wiki_page_index
 from skillfabric.wiki.health import analyze_wiki_health, write_wiki_health_report
 from skillfabric.wiki.indexer import append_log, render_index
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
@@ -25,26 +24,23 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
 
     workspace = Workspace(config.workspace)
     workspace.ensure()
-    _prepare_wiki_dirs(workspace)
     source = load_wiki_source(workspace)
     summarizer = WikiSummarizer(config)
     pages = _entity_pages(source, config, summarizer, workspace)
     page_summaries = _directory_page_summaries(pages)
     pages.extend(_directory_pages(source, page_summaries, workspace))
+    _reset_wiki_output(workspace)
     for page in pages:
         atomic_write_text(page.path, page.text)
-    summarizer.save()
-    health = analyze_wiki_health(workspace, fallback_count=summarizer.fallback_count)
+    health = analyze_wiki_health(workspace)
     write_wiki_health_report(workspace, health)
     result = WikiBuildResult(
         pages_written=len(pages),
         cache_hits=summarizer.cache_hits,
         llm_calls=summarizer.llm_calls,
-        fallback_count=summarizer.fallback_count,
         health=health,
         workspace=workspace.root,
     )
-    build_wiki_page_index(workspace)
     append_log(workspace.reports_dir / "wiki_log.md", result=result, build_id=source.build_id)
     return result
 
@@ -60,8 +56,13 @@ def _entity_pages(
     for _skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         pages.append(_skill_page(source, skill, config, summaries, workspace))
         pages.append(_skill_source_page(skill, workspace))
-    for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
-        pages.append(_workflow_page(source, record, workspace))
+    pages.extend(
+        _workflow_page(source, edge, workspace)
+        for edge in sorted(
+            source.operational_edges,
+            key=lambda item: (item.type, item.source, item.target),
+        )
+    )
     return pages
 
 
@@ -78,7 +79,9 @@ def _directory_page_summaries(pages: list[WikiPage]) -> dict[str, str]:
 
 
 def _is_skill_source_page(page: WikiPage) -> bool:
-    return page.path.parent.name in {"source", "sources"} and page.path.parent.parent.name == "skills"
+    return (
+        page.path.parent.name in {"source", "sources"} and page.path.parent.parent.name == "skills"
+    )
 
 
 def _directory_pages(
@@ -99,59 +102,12 @@ def _directory_pages(
     ]
 
 
-def _prepare_wiki_dirs(workspace: Workspace) -> None:
-    """Remove stale generated pages that no longer belong to the main wiki view."""
+def _reset_wiki_output(workspace: Workspace) -> None:
+    """Replace the generated wiki only after source loading and summaries succeed."""
 
-    for path in _stale_main_wiki_dirs(workspace):
-        if path.exists():
-            shutil.rmtree(path)
-    stale_hot = workspace.wiki_dir / "hot.md"
-    if stale_hot.exists():
-        stale_hot.unlink()
-    stale_resolver = workspace.wiki_dir / "resolver.md"
-    if stale_resolver.exists():
-        stale_resolver.unlink()
-    if workspace.wiki_skills_dir.exists():
-        for stale_card in workspace.wiki_skills_dir.glob("*.md"):
-            stale_card.unlink()
-    for stale_file in (
-        workspace.wiki_dir / "overview.md",
-        workspace.wiki_dir / "deliverables.md",
-        workspace.wiki_dir / "wiki_page_index.jsonl",
-        workspace.wiki_dir / "wiki_health_report.md",
-        workspace.wiki_dir / "log.md",
-        workspace.wiki_skills_dir / "index.md",
-        workspace.wiki_workflows_dir / "index.md",
-        workspace.wiki_references_dir / "index.md",
-    ):
-        if stale_file.exists():
-            stale_file.unlink()
-    stale_reports_debug = workspace.reports_dir / "wiki-debug"
-    if stale_reports_debug.exists():
-        shutil.rmtree(stale_reports_debug)
-    stale_wiki_debug = workspace.wiki_dir / "debug"
-    if stale_wiki_debug.exists():
-        shutil.rmtree(stale_wiki_debug)
-    for path in (
-        workspace.wiki_skill_cards_dir,
-        workspace.wiki_workflows_dir,
-        workspace.wiki_skill_sources_dir,
-    ):
-        if path.exists():
-            for page in path.glob("*.md"):
-                page.unlink()
-        path.mkdir(parents=True, exist_ok=True)
-    workspace.wiki_workflows_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _stale_main_wiki_dirs(workspace: Workspace) -> tuple:
-    return (
-        workspace.wiki_dir / "artifacts",
-        workspace.wiki_dir / "scenarios",
-        workspace.wiki_dir / "references",
-        workspace.wiki_skills_dir / "source",
-        workspace.wiki_dir / "references" / "skill-sources",
-    )
+    if workspace.wiki_dir.exists():
+        shutil.rmtree(workspace.wiki_dir)
+    workspace.wiki_dir.mkdir(parents=True)
 
 
 def _summary_records(
@@ -165,7 +121,7 @@ def _summary_records(
                 "page_type": "skill",
                 "entity_id": skill_id,
                 "content_hash": skill.content_hash,
-                "payload": _skill_summary_payload(skill, source.interfaces.get(skill_id)),
+                "payload": _skill_summary_payload(skill, source.contracts.get(skill_id)),
             }
         )
     return summarizer.summarize_many(requests)

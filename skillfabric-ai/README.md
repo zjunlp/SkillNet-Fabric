@@ -1,53 +1,85 @@
 # skillfabric-ai
 
-`skillfabric-ai` is the Python package behind SkillFabric. It compiles agent
-skill documents into a graph-backed workspace, builds query-local routing
-context, routes tasks to selected skills, and emits execution prompt packages
-for external coding agents.
+`skillfabric-ai` provides the SkillFabric schema-v2 compiler, retrieval router,
+query wiki, and execution-prompt planner.
 
 ```bash
 pip install "skillfabric-ai[claude]"
-```
-
-```bash
 skillfabric init --env-file .env
-skillfabric help workflow
-skillfabric help config
+skillfabric init --check --json --env-file .env
 ```
 
-SkillFabric accepts the project-level `SKILLFABRIC_LLM_*` API namespace while
-keeping the shorter public aliases compatible:
+## Configuration
+
+Project-prefixed settings are preferred; common OpenAI-compatible aliases are
+also accepted:
 
 ```text
-SKILLFABRIC_LLM_API_BASE=<openai-compatible-base-url>
+SKILLFABRIC_LLM_API_BASE=<api-base>
 SKILLFABRIC_LLM_API_KEY=<api-key>
-SKILLFABRIC_LLM_MODEL=openai/responses/gpt-5.4-mini
+SKILLFABRIC_LLM_MODEL=<model>
 SKILLFABRIC_LLM_REASONING_EFFORT=medium
+EMBEDDING_MODEL=<embedding-model>
+EMBEDDING_BASE_URL=<embedding-api-base>
+EMBEDDING_API_KEY=<embedding-api-key>
+EMBEDDING_DIMENSION=<vector-dimension>
 ```
 
-These values are bridged to the OpenAI-compatible LiteLLM path and to Claude
-Code SDK `ANTHROPIC_*` runtime aliases. Keep real keys in a private shell,
-conda, or untracked `.env` configuration.
+Keep credentials in a private shell or untracked env file. CLI diagnostics
+report only presence and source, never values.
 
-Public builds keep LLM-backed skill contracts and wiki summaries, while relation
-and execution validation use selective interface-first checks to avoid sending
-every candidate pair through full `SKILL.md` prompts. Plain route/plan uses
-fallback routing unless you explicitly request the Claude Code explorer.
+## Build
 
 ```bash
-skillfabric build --skill-root /path/to/skills --skip-llm-validation --embedding-provider disabled --wiki-summary-mode off
+skillfabric build \
+  --skill-root /path/to/skills \
+  --workspace .skillfabric \
+  --env-file .env
 ```
+
+The compiler performs these stages:
+
+1. Scan and parse native `SKILL.md` files.
+2. Extract strict, source-grounded skill contracts.
+3. Build BM25 and dense indexes.
+4. Retrieve bounded handoff, similarity, and explicit-reference candidate pairs.
+5. Judge each candidate once as `depend_on`, `compose_with`, `similar_to`, or
+   `none`.
+6. Validate evidence, relation direction, uniqueness, and dependency acyclicity.
+7. Write schema-v2 graph and audit artifacts.
+
+Use `--wiki-summary-mode off` to derive wiki summaries directly from validated
+contracts. This does not skip contract extraction, pair judgment, or embeddings.
+
+## Route And Plan
+
+```bash
+skillfabric route "your task" --workspace .skillfabric --env-file .env
+skillfabric plan "your task" --workspace .skillfabric --env-file .env
+```
+
+Routing uses reciprocal-rank fusion over BM25 and dense retrieval, then bounded
+traversal over `depend_on` and `compose_with`. The explorer must return the exact
+selection-only SkillPackage schema and cite query-wiki paths it read. Graph
+relations remain evidence: they neither force skill selection nor impose final
+execution order. Planning uses one bounded LLM call over the selected contracts
+and full sources, then writes only `execution_prompt.md`.
+
+## Python API
+
+The public facade exposes `build`, `route`, and `plan`. `plan` requires the
+original task even when a route is supplied:
 
 ```python
 from skillfabric import SkillFabric
 
+task = "extract KPIs from the supplied report"
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
-sf.build("/path/to/skills")
-route = sf.route("summarize this repository and identify release risks")
-plan = sf.plan(route=route)
-print(plan.prompt_path)
+route = sf.route(task)
+result = sf.plan(task, route=route, planner_context_max_tokens=100_000)
+print(result.prompt_path)
 ```
 
-The public package uses API embeddings through LiteLLM. Use
-`--embedding-provider disabled` only for deterministic smoke checks that should
-avoid embedding API calls.
+The context limit is checked before the Planner call. Overflow, malformed model
+output, missing credentials, and provider failures stop explicitly; SkillFabric
+does not truncate context or generate a fallback prompt.

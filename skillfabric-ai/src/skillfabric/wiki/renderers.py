@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import hashlib
 
-from skillfabric.compiled_graph.interface.models import InterfaceField, SkillInterface
+from skillfabric.compiled_graph.contracts.models import ContractField, SkillContract
 from skillfabric.compiled_graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 from skillfabric.wiki.indexer import page_path
 from skillfabric.wiki.loader import WikiSource
-from skillfabric.wiki.models import WikiBuildConfig, WikiPage, WikiSummaryRecord
+from skillfabric.wiki.models import (
+    NO_WORKFLOW_GUIDANCE,
+    WikiBuildConfig,
+    WikiPage,
+    WikiSummaryRecord,
+)
 from skillfabric.wiki.pages import bullet_list, frontmatter, wiki_link
 
 
@@ -21,45 +26,48 @@ def _skill_page(
     summaries: dict[tuple[str, str], WikiSummaryRecord],
     workspace: Workspace,
 ) -> WikiPage:
-    interface = source.interfaces.get(skill.id)
+    contract = source.contracts.get(skill.id)
     summary = summaries[("skill", skill.id)]
     core_links = source.skill_core_links(skill.id)
-    execution_links = source.skill_execution_links(skill.id)
     source_slug = f"../sources/{page_path(workspace.wiki_dir, 'skills', skill.id).name}"
-    tags = _skill_tags(interface)
-    text = "\n\n".join(
-        [
-            frontmatter(
-                {
-                    "type": "Skill Card",
-                    "title": skill.name,
-                    "description": _one_line(summary.routing_summary or summary.summary or skill.description),
-                    "skill_id": skill.id,
-                    "selectable": True,
-                    "source": source_slug,
-                    "tags": tags,
-                }
-            ),
-            "# Skill Card",
-            f"Skill: {skill.name}",
-            "## Purpose\n\n" + _one_line(summary.routing_summary or summary.summary or skill.description),
-            "## Use When\n\n" + _render_use_when(interface, summary),
-            "## Do Not Use When\n\n" + _render_do_not_use(interface),
-            "## Inputs\n\n" + _render_field_bullets(interface.requires if interface else []),
-            "## Outputs\n\n" + _render_field_bullets(interface.produces if interface else []),
-            "## Tools And Dependencies\n\n" + _render_field_bullets(interface.uses_tools if interface else []),
-            "## Composition Notes\n\n"
-            + _render_composition_notes(
-                source,
-                core_links,
-                execution_links.get("workflow_hints", []),
-                current_skill_id=skill.id,
-                limit=config.max_neighbors_per_section,
-            ),
-            "## Read Full Source\n\n"
-            + f"Open [full SKILL.md]({source_slug}) when the card is insufficient to decide routing boundaries or execution requirements.",
-        ]
-    ) + "\n"
+    tags = _skill_tags(contract)
+    text = (
+        "\n\n".join(
+            [
+                frontmatter(
+                    {
+                        "type": "Skill Card",
+                        "title": skill.name,
+                        "description": _one_line(summary.summary),
+                        "skill_id": skill.id,
+                        "selectable": True,
+                        "source": source_slug,
+                        "tags": tags,
+                    }
+                ),
+                "# Skill Card",
+                f"Skill: {skill.name}",
+                "## Purpose\n\n" + _one_line(summary.summary),
+                "## Use When\n\n" + _render_use_when(contract, summary),
+                "## Do Not Use When\n\n" + _render_do_not_use(contract),
+                "## Inputs\n\n" + _render_field_bullets(contract.requires if contract else ()),
+                "## Outputs\n\n" + _render_field_bullets(contract.produces if contract else ()),
+                "## Tools And Dependencies\n\n"
+                + _render_field_bullets(contract.tools if contract else ()),
+                "## Composition Notes\n\n"
+                + _render_composition_notes(
+                    source,
+                    core_links,
+                    summary=summary,
+                    current_skill_id=skill.id,
+                    limit=config.max_neighbors_per_section,
+                ),
+                "## Read Full Source\n\n"
+                + f"Open [full SKILL.md]({source_slug}) when the card is insufficient to decide routing boundaries or execution requirements.",
+            ]
+        )
+        + "\n"
+    )
     return WikiPage(
         path=page_path(workspace.wiki_skills_dir, "cards", skill.id),
         page_type="skill",
@@ -71,60 +79,78 @@ def _skill_page(
 
 def _workflow_page(
     source: WikiSource,
-    record,
+    edge: Edge,
     workspace: Workspace,
 ) -> WikiPage:
-    source_skill = source.skills.get(record.source_skill)
-    target_skill = source.skills.get(record.target_skill)
-    source_label = source_skill.name if source_skill else record.source_skill
-    target_label = target_skill.name if target_skill else record.target_skill
-    entity_id = f"{record.source_skill}__{record.target_skill}__{record.relation_type}"
-    title = f"{source_label} -> {target_label}"
-    text = "\n\n".join(
-        [
-            frontmatter(
-                {
-                    "type": "Workflow",
-                    "title": title,
-                    "description": f"{record.relation_type} via {record.canonical_object}.",
-                    "workflow_id": entity_id,
-                    "tags": ["workflow"],
-                }
-            ),
-            f"# {title}",
-            "## Summary\n\n" + f"{record.relation_type} via `{record.canonical_object}`.",
-            "## Skills\n\n" + bullet_list(
-                [
-                    wiki_link("skills", record.source_skill, source_label),
-                    wiki_link("skills", record.target_skill, target_label),
-                ]
-            ),
-            "## Ordering Hint\n\n" + bullet_list([f"{source_label} -> {target_label}"]),
-        ]
-    ) + "\n"
-    return WikiPage(page_path(workspace.wiki_dir, "workflows", entity_id), "workflow", entity_id, title, text)
+    source_skill = source.skills.get(edge.source)
+    target_skill = source.skills.get(edge.target)
+    source_label = source_skill.name if source_skill else edge.source
+    target_label = target_skill.name if target_skill else edge.target
+    entity_id = f"{edge.source}__{edge.target}__{edge.type}"
+    title = (
+        f"{target_label} -> {source_label}"
+        if edge.type == "depend_on"
+        else f"{source_label} + {target_label}"
+    )
+    ordering = (
+        f"{target_label} before {source_label}"
+        if edge.type == "depend_on"
+        else "No hard execution order."
+    )
+    text = (
+        "\n\n".join(
+            [
+                frontmatter(
+                    {
+                        "type": "Workflow",
+                        "title": title,
+                        "description": edge.reason,
+                        "workflow_id": entity_id,
+                        "tags": ["workflow"],
+                    }
+                ),
+                f"# {title}",
+                "## Summary\n\n" + edge.reason,
+                "## Skills\n\n"
+                + bullet_list(
+                    [
+                        wiki_link("skills", edge.source, source_label),
+                        wiki_link("skills", edge.target, target_label),
+                    ]
+                ),
+                "## Ordering Hint\n\n" + bullet_list([ordering]),
+            ]
+        )
+        + "\n"
+    )
+    return WikiPage(
+        page_path(workspace.wiki_dir, "workflows", entity_id), "workflow", entity_id, title, text
+    )
 
 
 def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
     """Render the full original SKILL.md as the authoritative skill source."""
 
     source_filename = page_path(workspace.wiki_dir, "skills", skill.id).name
-    text = "\n\n".join(
-        [
-            frontmatter(
-                {
-                    "type": "Skill Source",
-                    "title": f"{skill.name} Source",
-                    "description": f"Full original SKILL.md for {skill.id}.",
-                    "skill_id": skill.id,
-                    "card": f"../cards/{source_filename}",
-                    "resource": f"skill://{skill.id.removeprefix('skill:')}/SKILL.md",
-                }
-            ),
-            "# Full SKILL.md",
-            skill.raw_text.rstrip() or skill.description,
-        ]
-    ) + "\n"
+    text = (
+        "\n\n".join(
+            [
+                frontmatter(
+                    {
+                        "type": "Skill Source",
+                        "title": f"{skill.name} Source",
+                        "description": f"Full original SKILL.md for {skill.id}.",
+                        "skill_id": skill.id,
+                        "card": f"../cards/{source_filename}",
+                        "resource": f"skill://{skill.id.removeprefix('skill:')}/SKILL.md",
+                    }
+                ),
+                "# Full SKILL.md",
+                skill.raw_text.rstrip() or skill.description,
+            ]
+        )
+        + "\n"
+    )
     return WikiPage(
         path=workspace.wiki_skill_sources_dir / source_filename,
         page_type="skill",
@@ -134,21 +160,23 @@ def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
     )
 
 
-def _render_use_when(interface: SkillInterface | None, summary: WikiSummaryRecord) -> str:
+def _render_use_when(contract: SkillContract | None, summary: WikiSummaryRecord) -> str:
     values = []
-    if interface is not None and interface.when_to_use:
-        values.append(interface.when_to_use)
-    values.append(summary.workflow_summary or summary.routing_summary or summary.summary)
-    return bullet_list([_one_line(value) for value in values if value])
+    if contract is not None and contract.when_to_use:
+        values.append(contract.when_to_use)
+    values.append(summary.routing_summary)
+    return bullet_list(list(dict.fromkeys(_one_line(value) for value in values if value)))
 
 
-def _render_do_not_use(interface: SkillInterface | None) -> str:
-    if interface is None:
+def _render_do_not_use(contract: SkillContract | None) -> str:
+    if contract is None:
         return "- When the task does not match this skill's inputs, outputs, or declared tools."
-    return "- When the task requires unrelated inputs, outputs, tools, or execution responsibilities."
+    return (
+        "- When the task requires unrelated inputs, outputs, tools, or execution responsibilities."
+    )
 
 
-def _render_field_bullets(fields: list[InterfaceField]) -> str:
+def _render_field_bullets(fields: tuple[ContractField, ...]) -> str:
     values = []
     for field in fields:
         if field.name and field.description:
@@ -161,12 +189,14 @@ def _render_field_bullets(fields: list[InterfaceField]) -> str:
 def _render_composition_notes(
     source: WikiSource,
     core_links: list[Edge],
-    workflow_hints: list,
     *,
+    summary: WikiSummaryRecord,
     current_skill_id: str,
     limit: int,
 ) -> str:
     values: list[str] = []
+    if summary.workflow_summary != NO_WORKFLOW_GUIDANCE:
+        values.append(f"- {_one_line(summary.workflow_summary)}")
     relation_text = _render_core_links(
         source,
         [edge for edge in core_links if edge.type in {"compose_with", "depend_on"}],
@@ -175,30 +205,17 @@ def _render_composition_notes(
     )
     if relation_text != "- None":
         values.extend(relation_text.splitlines())
-    workflow_text = _render_workflow_hints(source, workflow_hints)
-    if workflow_text != "- None":
-        values.extend(workflow_text.splitlines())
     return "\n".join(dict.fromkeys(values)) if values else "- None"
 
 
-def _render_workflow_hints(source: WikiSource, records: list) -> str:
-    items = []
-    for record in sorted(records, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
-        source_label = source.skills[record.source_skill].name if record.source_skill in source.skills else record.source_skill
-        target_label = source.skills[record.target_skill].name if record.target_skill in source.skills else record.target_skill
-        if record.source_skill in source.skills and record.target_skill in source.skills:
-            items.append(
-                f"{wiki_link('skills', record.source_skill, source_label)} -> "
-                f"{wiki_link('skills', record.target_skill, target_label)} "
-                f"({record.relation_type}: `{record.canonical_object}`)"
-            )
-    return bullet_list(items)
-
-
-def _render_core_links(source: WikiSource, edges: list[Edge], *, current_skill_id: str, limit: int) -> str:
+def _render_core_links(
+    source: WikiSource, edges: list[Edge], *, current_skill_id: str, limit: int
+) -> str:
     items: list[str] = []
     seen: set[tuple[str, str]] = set()
-    for edge in sorted(edges, key=lambda item: (item.type, -item.confidence, -item.weight, item.source, item.target)):
+    for edge in sorted(
+        edges, key=lambda item: (item.type, -item.confidence, item.source, item.target)
+    ):
         if len(items) >= limit:
             break
         if current_skill_id:
@@ -222,7 +239,11 @@ def _render_core_links(source: WikiSource, edges: list[Edge], *, current_skill_i
         if other in source.skills:
             key = (label, other)
             if key not in seen:
-                items.append(_format_core_link(label, edge, wiki_link("skills", other, source.skills[other].name)))
+                items.append(
+                    _format_core_link(
+                        label, edge, wiki_link("skills", other, source.skills[other].name)
+                    )
+                )
                 seen.add(key)
     return bullet_list(items)
 
@@ -232,22 +253,23 @@ def _format_core_link(label: str, edge: Edge, target: str) -> str:
     return f"{label}: {target}{suffix}"
 
 
-def _skill_summary_payload(skill: SkillNode, interface: SkillInterface | None) -> dict[str, object]:
+def _skill_summary_payload(skill: SkillNode, contract: SkillContract | None) -> dict[str, object]:
     return {
         "name": skill.name,
         "description": skill.description,
-        "when_to_use": interface.when_to_use if interface else "",
-        "requires": _field_names(interface.requires) if interface else [],
-        "produces": _field_names(interface.produces) if interface else [],
-        "uses_tools": _field_names(interface.uses_tools) if interface else [],
+        "capability": contract.capability if contract else "",
+        "when_to_use": contract.when_to_use if contract else "",
+        "requires": _field_names(contract.requires) if contract else [],
+        "produces": _field_names(contract.produces) if contract else [],
+        "tools": _field_names(contract.tools) if contract else [],
     }
 
 
-def _skill_tags(interface: SkillInterface | None) -> list[str]:
+def _skill_tags(contract: SkillContract | None) -> list[str]:
     tags = ["skill"]
-    if interface is not None:
-        tags.extend(name for name in _field_names(interface.produces)[:4] if name)
-        tags.extend(name for name in _field_names(interface.uses_tools)[:4] if name)
+    if contract is not None:
+        tags.extend(name for name in _field_names(contract.produces)[:4] if name)
+        tags.extend(name for name in _field_names(contract.tools)[:4] if name)
     return list(dict.fromkeys(_safe_tag(item) for item in tags if item))
 
 
@@ -267,7 +289,7 @@ def _short_text(value: str, *, limit: int = 240) -> str:
     return f"{clipped}..." if clipped else text[:limit]
 
 
-def _field_names(fields: list[InterfaceField]) -> list[str]:
+def _field_names(fields: tuple[ContractField, ...]) -> list[str]:
     return [field.name for field in fields if field.name]
 
 
@@ -309,6 +331,11 @@ def _first_paragraph(text: str) -> str:
         "tags:",
     )
     for line in text.splitlines():
-        if line and not line.startswith("---") and not line.startswith("#") and not line.startswith(skipped_keys):
+        if (
+            line
+            and not line.startswith("---")
+            and not line.startswith("#")
+            and not line.startswith(skipped_keys)
+        ):
             return _short_text(line)
     return ""

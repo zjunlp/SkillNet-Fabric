@@ -2,185 +2,116 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
-import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from unittest.mock import patch
+
+import pytest
 
 from skillfabric.cli import main as cli_main
 from skillfabric.runtime.defaults import default_build_options, default_router_options
 from skillfabric.runtime.progress import ProgressReporter
 
-ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
+
+def test_public_defaults_have_no_removed_switches_or_unused_wiki_llm_calls() -> None:
+    build = default_build_options()
+    router = default_router_options()
+
+    assert build.wiki_summary_mode == "off"
+    assert not hasattr(build, "embedding_provider")
+    assert not hasattr(build, "llm_concurrency")
+    assert not hasattr(build, "llm_batch_size")
+    assert not hasattr(router, "use_llm_router")
+    assert not hasattr(router, "explorer_backend")
+    assert router.max_depth == 2
 
 
-class RuntimeControlsTests(unittest.TestCase):
-    def test_public_defaults_use_llm_router(self) -> None:
-        build = default_build_options()
-        router = default_router_options()
+def test_wiki_llm_summaries_remain_an_explicit_opt_in(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_WIKI_SUMMARY_MODE", "all")
 
-        self.assertEqual(build.embedding_provider, "api")
-        self.assertEqual(build.wiki_summary_mode, "all")
-        self.assertTrue(router.use_llm_router)
-        self.assertEqual(router.explorer_backend, "claude-code")
-
-    def test_build_help_does_not_expose_cost_estimation_flags(self) -> None:
-        stdout = io.StringIO()
-        with self.assertRaises(SystemExit) as raised:
-            with contextlib.redirect_stdout(stdout):
-                cli_main(["build", "--help"])
-
-        self.assertEqual(raised.exception.code, 0)
-        help_text = stdout.getvalue()
-        self.assertNotIn("--estimate-only", help_text)
-        self.assertNotIn("--budget-usd", help_text)
-        self.assertNotIn("--skip-llm-validation", help_text)
-
-    def test_build_rejects_removed_skip_llm_validation_flag(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_file = Path(tmp) / ".env"
-            env_file.write_text(
-                "API_KEY=sk-test\n"
-                "BASE_URL=https://api.example.test/v1\n"
-                "EMBEDDING_MODEL=openai/text-embedding-3-small\n",
-                encoding="utf-8",
-            )
-            workspace = Path(tmp) / ".skillfabric"
-
-            with patch("skillfabric.cli.build_graph") as build_graph_mock:
-                with self.assertRaises(SystemExit):
-                    with contextlib.redirect_stderr(io.StringIO()):
-                        cli_main(
-                            [
-                                "build",
-                                "--skill-root",
-                                str(FIXTURE_SKILLS),
-                                "--workspace",
-                                str(workspace),
-                                "--env-file",
-                                str(env_file),
-                                "--skip-llm-validation",
-                                "--embedding-provider",
-                                "api",
-                                "--skip-wiki",
-                            ]
-                        )
-
-            self.assertFalse(build_graph_mock.called)
-
-    def test_build_rejects_unknown_embedding_provider_from_shell(self) -> None:
-        with TemporaryDirectory() as tmp:
-            env_file = Path(tmp) / ".env"
-            env_file.write_text(
-                "API_KEY=sk-test\n"
-                "BASE_URL=https://api.example.test/v1\n"
-                "MODEL=openai/test-model\n"
-                "EMBEDDING_MODEL=openai/text-embedding-3-small\n",
-                encoding="utf-8",
-            )
-            workspace = Path(tmp) / ".skillfabric"
-
-            with patch.dict("os.environ", {"EMBEDDING_PROVIDER": "custom-provider"}, clear=False):
-                with patch("skillfabric.cli.build_graph") as build_graph_mock:
-                    with self.assertRaisesRegex(SystemExit, "unsupported embedding provider"):
-                        cli_main(
-                            [
-                                "build",
-                                "--skill-root",
-                                str(FIXTURE_SKILLS),
-                                "--workspace",
-                                str(workspace),
-                                "--env-file",
-                                str(env_file),
-                            ]
-                        )
-
-            self.assertFalse(build_graph_mock.called)
-
-    def test_build_failure_writes_status_for_plugin_diagnostics(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            checkpoint = workspace / "checkpoint.json"
-            workspace.mkdir(parents=True)
-            checkpoint.write_text(
-                json.dumps({"stage": "interface", "build_id": "build-1", "config_digest": "digest-1"}) + "\n",
-                encoding="utf-8",
-            )
-
-            with patch("skillfabric.cli.build_graph", side_effect=RuntimeError("provider returned html")):
-                with self.assertRaisesRegex(RuntimeError, "provider returned html"):
-                    cli_main(
-                        [
-                            "build",
-                            "--skill-root",
-                            str(FIXTURE_SKILLS),
-                            "--workspace",
-                            str(workspace),
-                            "--embedding-provider",
-                            "disabled",
-                            "--skip-wiki",
-                        ]
-                    )
-
-            status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
-            self.assertEqual(status["status"], "failed")
-            self.assertEqual(status["stage"], "interface")
-            self.assertEqual(status["build_id"], "build-1")
-            self.assertEqual(status["error_type"], "RuntimeError")
-            self.assertIn("provider returned html", status["error"])
-            self.assertNotIn("sk-", json.dumps(status))
-
-    def test_progress_json_writes_jsonl_to_stderr_not_stdout(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                cli_main(
-                        [
-                            "build",
-                            "--skill-root",
-                            str(FIXTURE_SKILLS),
-                            "--workspace",
-                            str(workspace),
-                            "--embedding-provider",
-                            "disabled",
-                            "--wiki-summary-mode",
-                            "off",
-                            "--progress-json",
-                        ]
-                )
-
-            json.loads(stdout.getvalue())
-            events = [json.loads(line) for line in stderr.getvalue().splitlines() if line.strip()]
-            self.assertTrue(any(event["event"] == "start" and event["phase"] == "build" for event in events))
-            self.assertTrue(any(event["event"] == "finish" and event["phase"] == "build" for event in events))
-
-    def test_progress_reporter_quiet_suppresses_events(self) -> None:
-        stderr = io.StringIO()
-        reporter = ProgressReporter(enabled=True, json_mode=True, quiet=True, stream=stderr)
-
-        with reporter.phase("test.phase"):
-            pass
-
-        self.assertEqual(stderr.getvalue(), "")
-
-    def test_build_help_exposes_api_only_embedding_options(self) -> None:
-        stdout = io.StringIO()
-        with self.assertRaises(SystemExit) as raised:
-            with contextlib.redirect_stdout(stdout):
-                cli_main(["build", "--help"])
-
-        self.assertEqual(raised.exception.code, 0)
-        help_text = stdout.getvalue()
-        self.assertIn("--embedding-provider", help_text)
-        self.assertIn("--embedding-model", help_text)
-        self.assertIn("{api,disabled}", help_text)
-        self.assertIn("api", help_text)
-        self.assertIn("disabled", help_text)
+    assert default_build_options().wiki_summary_mode == "all"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_build_defaults_do_not_parse_unrelated_llm_job_environment(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_LLM_CONCURRENCY", "not-an-integer")
+
+    assert default_build_options().wiki_summary_mode == "off"
+
+
+def test_router_defaults_reject_nonfinite_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS", "nan")
+
+    with pytest.raises(ValueError, match="SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS"):
+        default_router_options()
+
+
+def test_router_defaults_preserve_explicit_zero_budgets(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_MAX_SELECTED_SKILLS", "0")
+    monkeypatch.setenv("SKILLFABRIC_SEED_LIMIT", "0")
+    monkeypatch.setenv("SKILLFABRIC_EXPANDED_LIMIT", "0")
+
+    router = default_router_options()
+
+    assert router.max_selected_skills == 0
+    assert router.seed_limit == 0
+    assert router.expanded_limit == 0
+
+
+def test_router_defaults_reject_expanded_limit_below_seed_limit(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_SEED_LIMIT", "3")
+    monkeypatch.setenv("SKILLFABRIC_EXPANDED_LIMIT", "2")
+
+    with pytest.raises(ValueError, match="expanded_limit"):
+        default_router_options()
+
+
+@pytest.mark.parametrize(
+    "command,removed_flag",
+    [
+        ("build", "--embedding-provider"),
+        ("build", "--skip-llm-validation"),
+        ("route", "--skip-llm-router"),
+        ("route", "--explorer-backend"),
+        ("route", "--strict-explorer"),
+        ("route", "--workflow-confidence-threshold"),
+    ],
+)
+def test_removed_cli_flags_are_rejected(command: str, removed_flag: str) -> None:
+    argv = [command]
+    if command == "build":
+        argv.extend(["--skill-root", "skills"])
+    else:
+        argv.append("test query")
+    argv.append(removed_flag)
+    if removed_flag in {
+        "--embedding-provider",
+        "--explorer-backend",
+        "--workflow-confidence-threshold",
+    }:
+        argv.append("removed")
+
+    with pytest.raises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+        cli_main(argv)
+
+
+def test_help_exposes_only_useful_embedding_and_route_controls() -> None:
+    build_help = io.StringIO()
+    with pytest.raises(SystemExit) as build_exit, contextlib.redirect_stdout(build_help):
+        cli_main(["build", "--help"])
+    route_help = io.StringIO()
+    with pytest.raises(SystemExit) as route_exit, contextlib.redirect_stdout(route_help):
+        cli_main(["route", "--help"])
+
+    assert build_exit.value.code == 0
+    assert route_exit.value.code == 0
+    assert "--embedding-model" in build_help.getvalue()
+    assert "--embedding-provider" not in build_help.getvalue()
+    assert "--max-depth" in route_help.getvalue()
+    assert "fallback" not in route_help.getvalue().lower()
+
+
+def test_progress_reporter_quiet_suppresses_events() -> None:
+    stream = io.StringIO()
+    reporter = ProgressReporter(enabled=True, json_mode=True, quiet=True, stream=stream)
+
+    with reporter.phase("test.phase"):
+        pass
+
+    assert stream.getvalue() == ""

@@ -26,9 +26,11 @@ class WorkspaceLockTests(unittest.TestCase):
             workspace.root.mkdir(parents=True)
             workspace.lock_path.write_text(str(os.getpid()), encoding="utf-8")
 
-            with self.assertRaisesRegex(RuntimeError, "build lock already exists"):
-                with workspace.lock():
-                    pass
+            with (
+                self.assertRaisesRegex(RuntimeError, "build lock already exists"),
+                workspace.lock(),
+            ):
+                pass
 
             self.assertEqual(workspace.lock_path.read_text(encoding="utf-8"), str(os.getpid()))
 

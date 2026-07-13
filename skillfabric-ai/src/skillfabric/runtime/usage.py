@@ -13,6 +13,27 @@ from typing import Any
 
 _PATH_LOCKS: dict[Path, threading.Lock] = {}
 _PATH_LOCKS_GUARD = threading.Lock()
+_USAGE_RECORD_KEYS = frozenset(
+    {
+        "timestamp",
+        "call_id",
+        "operation",
+        "model",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cached_prompt_tokens",
+        "billable_prompt_tokens",
+        "cost_usd",
+        "estimated",
+        "pricing_known",
+        "pricing_source",
+        "duration_ms",
+        "status",
+        "error",
+        "metadata",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,34 +105,41 @@ class LLMUsageRecord:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> LLMUsageRecord:
+        if set(payload) != _USAGE_RECORD_KEYS:
+            raise ValueError("usage record must use the exact schema")
+        metadata = payload["metadata"]
+        if not isinstance(metadata, dict):
+            raise ValueError("usage record metadata must be an object")
+        error = payload["error"]
+        if error is not None and not isinstance(error, str):
+            raise ValueError("usage record error must be a string or null")
         return cls(
-            timestamp=str(payload.get("timestamp", "")),
-            call_id=str(payload.get("call_id", "")),
-            operation=str(payload.get("operation", "")),
-            model=str(payload.get("model", "")),
-            prompt_tokens=int(payload.get("prompt_tokens", 0) or 0),
-            completion_tokens=int(payload.get("completion_tokens", 0) or 0),
-            total_tokens=int(payload.get("total_tokens", 0) or 0),
-            cached_prompt_tokens=max(0, int(payload.get("cached_prompt_tokens", 0) or 0)),
-            billable_prompt_tokens=max(
-                0,
-                int(
-                    payload.get(
-                        "billable_prompt_tokens",
-                        int(payload.get("prompt_tokens", 0) or 0)
-                        - int(payload.get("cached_prompt_tokens", 0) or 0),
-                    )
-                    or 0
-                ),
+            timestamp=_usage_string(payload["timestamp"], label="timestamp"),
+            call_id=_usage_string(payload["call_id"], label="call_id"),
+            operation=_usage_string(payload["operation"], label="operation"),
+            model=_usage_string(payload["model"], label="model"),
+            prompt_tokens=_nonnegative_int(payload["prompt_tokens"], label="prompt_tokens"),
+            completion_tokens=_nonnegative_int(
+                payload["completion_tokens"],
+                label="completion_tokens",
             ),
-            cost_usd=_optional_float(payload.get("cost_usd")),
-            estimated=bool(payload.get("estimated", False)),
-            pricing_known=bool(payload.get("pricing_known", False)),
-            pricing_source=str(payload.get("pricing_source", "unknown") or "unknown"),
-            duration_ms=int(payload.get("duration_ms", 0) or 0),
-            status=str(payload.get("status", "")),
-            error=str(payload["error"]) if payload.get("error") is not None else None,
-            metadata=dict(payload.get("metadata", {}) or {}),
+            total_tokens=_nonnegative_int(payload["total_tokens"], label="total_tokens"),
+            cached_prompt_tokens=_nonnegative_int(
+                payload["cached_prompt_tokens"],
+                label="cached_prompt_tokens",
+            ),
+            billable_prompt_tokens=_nonnegative_int(
+                payload["billable_prompt_tokens"],
+                label="billable_prompt_tokens",
+            ),
+            cost_usd=_nonnegative_float_or_none(payload["cost_usd"], label="cost_usd"),
+            estimated=_usage_bool(payload["estimated"], label="estimated"),
+            pricing_known=_usage_bool(payload["pricing_known"], label="pricing_known"),
+            pricing_source=_usage_string(payload["pricing_source"], label="pricing_source"),
+            duration_ms=_nonnegative_int(payload["duration_ms"], label="duration_ms"),
+            status=_usage_string(payload["status"], label="status"),
+            error=error,
+            metadata=dict(metadata),
         )
 
 
@@ -176,8 +204,10 @@ class LLMUsageTracker:
         payload = _to_jsonable(response)
         usage = _extract_usage(payload)
         if usage is None:
-            prompt_tokens = _count_messages(model, messages)
-            completion_tokens = 0 if status == "failed" else _count_text(model, _extract_response_text(payload))
+            prompt_tokens = count_message_tokens(messages, model=model)
+            completion_tokens = (
+                0 if status == "failed" else _count_text(model, _extract_response_text(payload))
+            )
             total_tokens = prompt_tokens + completion_tokens
             cached_prompt_tokens = 0
             estimated = True
@@ -226,7 +256,9 @@ class LLMUsageTracker:
         with lock:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with self.log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+                handle.write(
+                    json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True) + "\n"
+                )
 
 
 def load_usage_records(path: str | Path) -> list[LLMUsageRecord]:
@@ -240,19 +272,33 @@ def load_usage_records(path: str | Path) -> list[LLMUsageRecord]:
         if not line.strip():
             continue
         payload = json.loads(line)
-        if isinstance(payload, dict):
-            records.append(LLMUsageRecord.from_dict(payload))
+        if not isinstance(payload, dict):
+            raise ValueError("usage record must be a JSON object")
+        records.append(LLMUsageRecord.from_dict(payload))
     return records
 
 
-def summarize_usage(records: list[LLMUsageRecord]) -> LLMUsageTotals:
-    """Summarize usage records into run-level totals."""
+def summarize_usage(
+    records: list[LLMUsageRecord],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> LLMUsageTotals:
+    """Summarize usage records, optionally scoped by exact metadata values."""
 
     totals = LLMUsageTotals()
     known_cost = 0.0
     has_known_cost = False
     by_operation_records: dict[str, list[LLMUsageRecord]] = {}
-    for record in records:
+    selected_records = (
+        records
+        if not metadata
+        else [
+            record
+            for record in records
+            if all(record.metadata.get(key) == value for key, value in metadata.items())
+        ]
+    )
+    for record in selected_records:
         totals.total_calls += 1
         if record.status == "failed":
             totals.failed_calls += 1
@@ -369,13 +415,21 @@ def _extract_response_text(payload: Any) -> str:
     return ""
 
 
-def _count_messages(model: str, messages: list[dict[str, Any]]) -> int:
+def count_message_tokens(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+) -> int:
+    """Count message tokens with LiteLLM when a model is known, otherwise locally."""
+
+    if not model:
+        return _estimate_token_count(_messages_to_text(messages))
     try:
         import litellm
 
         return max(0, int(litellm.token_counter(model=model, messages=messages)))
     except Exception:  # noqa: BLE001 - usage accounting must not break LLM calls.
-        return _fallback_count(_messages_to_text(messages))
+        return _estimate_token_count(_messages_to_text(messages))
 
 
 def _count_text(model: str, text: str) -> int:
@@ -386,7 +440,7 @@ def _count_text(model: str, text: str) -> int:
 
         return max(0, int(litellm.token_counter(model=model, text=text)))
     except Exception:  # noqa: BLE001 - usage accounting must not break LLM calls.
-        return _fallback_count(text)
+        return _estimate_token_count(text)
 
 
 def _extract_cached_prompt_tokens(raw_usage: dict[str, Any]) -> int:
@@ -473,7 +527,7 @@ def _normalize_model_name(model: str) -> str:
     return normalized
 
 
-def _fallback_count(text: str) -> int:
+def _estimate_token_count(text: str) -> int:
     stripped = text.strip()
     if not stripped:
         return 0
@@ -551,13 +605,33 @@ def _first_int(payload: dict[str, Any], *keys: str) -> int | None:
     return None
 
 
-def _optional_float(value: Any) -> float | None:
+def _usage_string(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"usage record {label} must be a non-empty string")
+    return value
+
+
+def _nonnegative_int(value: Any, *, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"usage record {label} must be a non-negative integer")
+    return value
+
+
+def _nonnegative_float_or_none(value: Any, *, label: str) -> float | None:
     if value is None:
         return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"usage record {label} must be a non-negative number or null")
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"usage record {label} must be a non-negative number or null")
+    return result
+
+
+def _usage_bool(value: Any, *, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"usage record {label} must be a boolean")
+    return value
 
 
 def _path_lock(path: Path) -> threading.Lock:

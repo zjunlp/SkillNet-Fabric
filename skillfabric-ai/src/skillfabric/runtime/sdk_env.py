@@ -46,7 +46,9 @@ def build_claude_code_sdk_env(
     )
     if llm_api_key:
         env["OPENAI_API_KEY"] = llm_api_key
-        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"):
+        if _env_file_has_any(
+            env_file_values, "SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"
+        ):
             env["ANTHROPIC_AUTH_TOKEN"] = llm_api_key
             env["ANTHROPIC_API_KEY"] = llm_api_key
         elif not env.get("ANTHROPIC_AUTH_TOKEN"):
@@ -62,15 +64,13 @@ def build_claude_code_sdk_env(
             "BASE_URL",
             "OPENAI_BASE_URL",
             "OPENAI_API_BASE",
-        ):
-            env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
-        elif not env.get("ANTHROPIC_BASE_URL"):
+        ) or not env.get("ANTHROPIC_BASE_URL"):
             env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
     if llm_model:
         model_name = _claude_model_name(llm_model)
-        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL"):
-            env["ANTHROPIC_MODEL"] = model_name
-        elif not env.get("ANTHROPIC_MODEL"):
+        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL") or not env.get(
+            "ANTHROPIC_MODEL"
+        ):
             env["ANTHROPIC_MODEL"] = model_name
         env.setdefault("ANTHROPIC_SMALL_FAST_MODEL", env["ANTHROPIC_MODEL"])
         env.setdefault("ANTHROPIC_DEFAULT_SONNET_MODEL", env["ANTHROPIC_MODEL"])
@@ -136,5 +136,5 @@ def _anthropic_base_url(base_url: str) -> str:
 def _claude_model_name(model: str) -> str:
     for prefix in ("openai/responses/", "openai/"):
         if model.startswith(prefix):
-            return model[len(prefix):]
+            return model[len(prefix) :]
     return model

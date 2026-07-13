@@ -6,6 +6,7 @@ import hashlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from skillfabric.compiled_graph.contracts.models import SkillContract
     from skillfabric.registry.models import SkillNode
 
 
@@ -21,7 +22,45 @@ def canonical_skill_text(skill: SkillNode) -> str:
     ).strip()
 
 
+def contract_skill_text(
+    skill: SkillNode,
+    contract: SkillContract,
+    *,
+    source_char_limit: int = 2_000,
+) -> str:
+    """Build the canonical retrieval document for a validated contract."""
+
+    sections = [
+        f"Name: {skill.name}",
+        f"Description: {skill.description}",
+        f"Capability: {contract.capability}",
+        f"When to use: {contract.when_to_use}",
+        f"Requires: {_contract_fields_text(contract.requires)}",
+        f"Produces: {_contract_fields_text(contract.produces)}",
+        f"Tools: {_contract_fields_text(contract.tools)}",
+    ]
+    source = _bounded_source(skill.raw_text, source_char_limit)
+    if source:
+        sections.append(f"Source:\n{source}")
+    return "\n".join(sections).strip()
+
+
 def hash_text(text: str) -> str:
     """Compute a stable text hash."""
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _contract_fields_text(fields) -> str:
+    return "; ".join(
+        f"{field.name}: {field.description}" if field.description else field.name
+        for field in fields
+    )
+
+
+def _bounded_source(text: str, limit: int) -> str:
+    if limit <= 0 or len(text) <= limit:
+        return text.strip()
+    head = limit * 2 // 3
+    tail = limit - head
+    return f"{text[:head].rstrip()}\n...\n{text[-tail:].lstrip()}"

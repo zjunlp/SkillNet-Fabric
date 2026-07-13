@@ -14,12 +14,9 @@ from skillfabric.wiki.pages import slug
 def render_index(
     source: WikiSource,
     page_summaries: dict[str, str],
-    *,
-    section: str = "root",
 ) -> str:
     """Render the root LLM-readable wiki catalog."""
 
-    del section
     return _root_index(source, page_summaries)
 
 
@@ -32,7 +29,7 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         "",
         "## Corpus",
         f"- skills: {len(source.skills)}",
-        f"- workflows: {len(source.execution_index)}",
+        f"- workflows: {len(source.operational_edges)}",
         "",
         "## Skill Cards",
     ]
@@ -44,12 +41,14 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         if description:
             lines.append(f"  summary: {description}")
         lines.append(f"  source: [full SKILL.md]({source_path})")
-    if source.execution_index:
+    if source.operational_edges:
         lines.extend(["", "## Workflows"])
-        for record in sorted(source.execution_index, key=lambda item: (item.source_skill, item.target_skill, item.relation_type)):
-            entity_id = f"{record.source_skill}__{record.target_skill}__{record.relation_type}"
-            title = f"{record.source_skill} -> {record.target_skill}"
-            lines.append(f"- [{title}](workflows/{slug(entity_id)}.md): {record.relation_type} via {record.canonical_object}.")
+        for edge in sorted(
+            source.operational_edges, key=lambda item: (item.type, item.source, item.target)
+        ):
+            entity_id = f"{edge.source}__{edge.target}__{edge.type}"
+            title = f"{edge.source} -> {edge.target}"
+            lines.append(f"- [{title}](workflows/{slug(entity_id)}.md): {edge.type}. {edge.reason}")
     lines.extend(["", "## Full Skill Sources"])
     for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         lines.append(f"- [{skill.name}](skills/sources/{slug(skill_id)}.md)")
@@ -74,8 +73,7 @@ def append_log(path: Path, *, result: WikiBuildResult, build_id: str) -> None:
         f"- pages_written: {result.pages_written}\n"
         f"- cache_hits: {result.cache_hits}\n"
         f"- llm_calls: {result.llm_calls}\n"
-        f"- fallback_count: {result.fallback_count}\n"
-        f"- health_warnings: {sum(value for key, value in result.health.summary.items() if key != 'summary_fallback_count')}\n\n"
+        f"- health_warnings: {sum(result.health.summary.values())}\n\n"
     )
     atomic_write_text(path, existing.rstrip() + "\n\n" + entry)
 

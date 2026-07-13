@@ -19,6 +19,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev,claude]"
       - run: ruff check .
+      - run: ruff format --check .
       - run: pytest
       - run: python -m build
       - run: skillfabric --help

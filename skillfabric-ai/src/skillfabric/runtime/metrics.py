@@ -16,10 +16,15 @@ def merge_wiki_metrics(workspace: Workspace, wiki_result: WikiBuildResult) -> No
         payload = {}
     payload["wiki_summary"] = {
         "llm_calls": wiki_result.llm_calls,
-        "fallback_count": wiki_result.fallback_count,
         "cache_hits": wiki_result.cache_hits,
         "pages_written": wiki_result.pages_written,
     }
     usage_path = workspace.reports_dir / "llm_usage.jsonl"
-    payload["llm_usage"] = summarize_usage(load_usage_records(usage_path)).to_dict() if usage_path.exists() else {}
+    build_id = payload.get("build_id")
+    metadata = {"build_id": build_id} if isinstance(build_id, str) and build_id else None
+    payload["llm_usage"] = (
+        summarize_usage(load_usage_records(usage_path), metadata=metadata).to_dict()
+        if usage_path.exists()
+        else {}
+    )
     workspace.write_json(metrics_path, payload)

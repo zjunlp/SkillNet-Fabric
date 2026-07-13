@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import threading
@@ -12,6 +13,8 @@ from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
+
+from skillfabric.runtime.llm import read_env_file
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -40,8 +43,8 @@ class LLMJobOptions:
         progress_every: int | None = None,
         batch_size: int | None = None,
     ) -> LLMJobOptions:
-        values = _read_env_file(Path(env_path) if env_path is not None else None)
-        return cls(
+        values = read_env_file(env_path)
+        options = cls(
             concurrency=_int_value(values, "SKILLFABRIC_LLM_CONCURRENCY", concurrency, 4),
             rate_limit_per_minute=_float_value(
                 values,
@@ -57,19 +60,46 @@ class LLMJobOptions:
                 1.0,
             ),
             progress_every=_int_value(values, "SKILLFABRIC_LLM_PROGRESS_EVERY", progress_every, 10),
-            batch_size=_int_value(values, "SKILLFABRIC_LLM_BATCH_SIZE", batch_size, 0),
+            batch_size=_optional_int_value(
+                values,
+                "SKILLFABRIC_LLM_BATCH_SIZE",
+                batch_size,
+            ),
         )
+        return options.normalized()
 
     def normalized(self) -> LLMJobOptions:
-        concurrency = max(1, int(self.concurrency))
-        batch_size = int(self.batch_size or 0)
+        concurrency = _require_int(self.concurrency, name="concurrency", minimum=1)
+        rate_limit = _require_float(
+            self.rate_limit_per_minute,
+            name="rate_limit_per_minute",
+            minimum=0.0,
+        )
+        max_retries = _require_int(self.max_retries, name="max_retries", minimum=0)
+        retry_backoff = _require_float(
+            self.retry_backoff_seconds,
+            name="retry_backoff_seconds",
+            minimum=0.0,
+        )
+        progress_every = _require_int(
+            self.progress_every,
+            name="progress_every",
+            minimum=0,
+        )
+        batch_size = (
+            concurrency * 4
+            if self.batch_size is None
+            else _require_int(self.batch_size, name="batch_size", minimum=1)
+        )
+        if batch_size < concurrency:
+            raise ValueError("batch_size must be at least concurrency")
         return LLMJobOptions(
             concurrency=concurrency,
-            rate_limit_per_minute=max(0.0, float(self.rate_limit_per_minute)),
-            max_retries=max(0, int(self.max_retries)),
-            retry_backoff_seconds=max(0.0, float(self.retry_backoff_seconds)),
-            progress_every=max(0, int(self.progress_every)),
-            batch_size=max(concurrency, batch_size) if batch_size > 0 else max(concurrency * 4, concurrency),
+            rate_limit_per_minute=rate_limit,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff,
+            progress_every=progress_every,
+            batch_size=batch_size,
         )
 
 
@@ -132,7 +162,9 @@ def run_llm_jobs(
                 value = worker(item)
                 if retry_on_result is not None and retry_on_result(value):
                     raise _RetryableResult(value)
-                return LLMJobOutcome(index=index, item=item, ok=True, value=value, attempts=attempts)
+                return LLMJobOutcome(
+                    index=index, item=item, ok=True, value=value, attempts=attempts
+                )
             except _RetryableResult as exc:
                 if attempts > job_options.max_retries:
                     return LLMJobOutcome(
@@ -143,11 +175,11 @@ def run_llm_jobs(
                         attempts=attempts,
                     )
                 _sleep_before_retry(job_options.retry_backoff_seconds, attempts)
-            except TimeoutError as exc:
-                return LLMJobOutcome(index=index, item=item, ok=False, error=exc, attempts=attempts)
             except Exception as exc:  # noqa: BLE001 - caller normalizes final failures.
                 if attempts > job_options.max_retries:
-                    return LLMJobOutcome(index=index, item=item, ok=False, error=exc, attempts=attempts)
+                    return LLMJobOutcome(
+                        index=index, item=item, ok=False, error=exc, attempts=attempts
+                    )
                 _sleep_before_retry(job_options.retry_backoff_seconds, attempts)
 
     with ThreadPoolExecutor(max_workers=job_options.concurrency) as executor:
@@ -203,22 +235,9 @@ def _log_progress(label: str, completed: int, total: int, progress_every: int) -
     sys.stderr.flush()
 
 
-def _read_env_file(path: Path | None) -> dict[str, str]:
-    if path is None or not path.exists():
-        return {}
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
-
-
 def _int_value(values: dict[str, str], key: str, override: int | None, default: int) -> int:
     if override is not None:
-        return int(override)
+        return override
     if os.environ.get(key):
         return int(os.environ[key])
     if values.get(key):
@@ -228,9 +247,38 @@ def _int_value(values: dict[str, str], key: str, override: int | None, default: 
 
 def _float_value(values: dict[str, str], key: str, override: float | None, default: float) -> float:
     if override is not None:
-        return float(override)
+        return override
     if os.environ.get(key):
         return float(os.environ[key])
     if values.get(key):
         return float(values[key])
     return default
+
+
+def _optional_int_value(
+    values: dict[str, str],
+    key: str,
+    override: int | None,
+) -> int | None:
+    if override is not None:
+        return override
+    if os.environ.get(key):
+        return int(os.environ[key])
+    if values.get(key):
+        return int(values[key])
+    return None
+
+
+def _require_int(value: object, *, name: str, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{name} must be an integer greater than or equal to {minimum}")
+    return value
+
+
+def _require_float(value: object, *, name: str, minimum: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number greater than or equal to {minimum}")
+    resolved = float(value)
+    if not math.isfinite(resolved) or resolved < minimum:
+        raise ValueError(f"{name} must be a finite number greater than or equal to {minimum}")
+    return resolved

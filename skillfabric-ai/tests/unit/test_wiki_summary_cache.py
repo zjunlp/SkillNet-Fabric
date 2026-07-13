@@ -6,9 +6,11 @@ import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.wiki.models import WikiBuildConfig
-from skillfabric.wiki.summarizer import LiteLLMSummaryProvider, WikiSummarizer
+from skillfabric.wiki.summarizer import LiteLLMSummaryProvider, WikiSummarizer, WikiSummaryError
 
 
 class CountingSummaryProvider:
@@ -17,7 +19,10 @@ class CountingSummaryProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    def summarize(self, *, page_type: str, entity_id: str, payload: dict[str, object]) -> dict[str, str]:
+    def summarize(
+        self, *, page_type: str, entity_id: str, payload: dict[str, object]
+    ) -> dict[str, str]:
+        del page_type, payload
         self.calls += 1
         return {
             "routing_summary": f"{entity_id} routing",
@@ -32,7 +37,10 @@ class FlakySummaryProvider:
     def __init__(self) -> None:
         self.calls: dict[str, int] = {}
 
-    def summarize(self, *, page_type: str, entity_id: str, payload: dict[str, object]) -> dict[str, str]:
+    def summarize(
+        self, *, page_type: str, entity_id: str, payload: dict[str, object]
+    ) -> dict[str, str]:
+        del page_type, payload
         self.calls[entity_id] = self.calls.get(entity_id, 0) + 1
         if self.calls[entity_id] == 1:
             raise RuntimeError("transient")
@@ -43,7 +51,99 @@ class FlakySummaryProvider:
         }
 
 
+class StaticSummaryProvider:
+    model_id = "static-model"
+
+    def __init__(self, response: dict[str, object] | BaseException) -> None:
+        self.response = response
+        self.calls = 0
+
+    def summarize(
+        self, *, page_type: str, entity_id: str, payload: dict[str, object]
+    ) -> dict[str, str]:
+        del page_type, entity_id, payload
+        self.calls += 1
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return self.response  # type: ignore[return-value]
+
+
 class WikiSummaryCacheTests(unittest.TestCase):
+    def test_summary_cache_record_contains_only_rendered_fields(self) -> None:
+        with TemporaryDirectory() as tmp:
+            record = WikiSummarizer(
+                WikiBuildConfig(
+                    workspace=Path(tmp) / ".skillfabric",
+                    use_llm_summaries=False,
+                )
+            ).summarize_skill(
+                entity_id="skill:test",
+                content_hash="hash-test",
+                payload={"capability": "Test tasks."},
+            )
+
+            self.assertEqual(
+                set(record.to_dict()),
+                {
+                    "page_type",
+                    "entity_id",
+                    "content_hash",
+                    "routing_summary",
+                    "workflow_summary",
+                    "summary",
+                },
+            )
+
+    def test_wiki_config_rejects_invalid_runtime_values(self) -> None:
+        invalid = (
+            ({"workspace": ""}, "workspace"),
+            ({"env_file": ""}, "env_file"),
+            ({"use_llm_summaries": 1}, "use_llm_summaries"),
+            ({"max_neighbors_per_section": True}, "max_neighbors_per_section"),
+            ({"max_neighbors_per_section": 0}, "max_neighbors_per_section"),
+            ({"llm_options": object()}, "llm_options"),
+        )
+
+        for kwargs, message in invalid:
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(
+                    (TypeError, ValueError),
+                    message,
+                ),
+            ):
+                WikiBuildConfig(**kwargs)
+
+    def test_wiki_config_normalizes_shared_llm_job_options(self) -> None:
+        config = WikiBuildConfig(
+            llm_options=LLMJobOptions(concurrency=2, batch_size=None),
+        )
+
+        self.assertEqual(config.llm_options, LLMJobOptions(concurrency=2, batch_size=8))
+
+    def test_disabled_summary_mode_does_not_parse_llm_job_configuration(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "SKILLFABRIC_LLM_CONCURRENCY=not-an-integer\n",
+                encoding="utf-8",
+            )
+            summarizer = WikiSummarizer(
+                WikiBuildConfig(
+                    workspace=Path(tmp) / ".skillfabric",
+                    env_file=env_file,
+                    use_llm_summaries=False,
+                )
+            )
+
+            record = summarizer.summarize_skill(
+                entity_id="skill:test",
+                content_hash="hash-test",
+                payload={"capability": "Test tasks."},
+            )
+
+            self.assertEqual(record.summary, "Test tasks.")
+
     def test_litellm_summary_provider_uses_env_max_tokens(self) -> None:
         calls: list[dict[str, object]] = []
         fake_litellm = types.SimpleNamespace()
@@ -94,15 +194,54 @@ class WikiSummaryCacheTests(unittest.TestCase):
                 sys.modules["litellm"] = original
 
         self.assertEqual(calls[0]["max_tokens"], 32768)
-        prompt_payload = json.loads(calls[0]["messages"][1]["content"])
         prompt_text = json.dumps(calls[0]["messages"], ensure_ascii=False)
-        self.assertEqual(prompt_payload["prompt_id"], "skillcontract_summary_routing_guidance")
-        for field in ("todo", "input", "output", "workflow", "rules", "constraints"):
-            self.assertIn(field, prompt_payload)
+        self.assertIn("wiki_summary_v2", prompt_text)
+        self.assertIn("<output_schema>", prompt_text)
+        self.assertIn("<source_data>", prompt_text)
+        self.assertIn("untrusted data", prompt_text)
         self.assertIn("routing_summary", prompt_text)
         self.assertIn("workflow_summary", prompt_text)
-        self.assertIn("coverage-gap", prompt_text)
-        self.assertIn("Do not solve", prompt_text)
+        self.assertNotIn('"todo"', prompt_text)
+        self.assertNotIn('"constraints"', prompt_text)
+        user_prompt = calls[0]["messages"][1]["content"]
+        self.assertLess(user_prompt.index("<source_data>"), user_prompt.index("<task>"))
+        self.assertLess(user_prompt.index("<task>"), user_prompt.index("<output_schema>"))
+
+    def test_llm_summary_requires_exact_nonempty_string_fields(self) -> None:
+        invalid_responses = [
+            {"summary": "summary", "routing_summary": "routing"},
+            {
+                "summary": "summary",
+                "routing_summary": "routing",
+                "workflow_summary": "workflow",
+                "extra": "unexpected",
+            },
+            {
+                "summary": " ",
+                "routing_summary": "routing",
+                "workflow_summary": "workflow",
+            },
+            {
+                "summary": "summary",
+                "routing_summary": ["routing"],
+                "workflow_summary": "workflow",
+            },
+        ]
+        for response in invalid_responses:
+            with self.subTest(response=response), TemporaryDirectory() as tmp:
+                provider = StaticSummaryProvider(response)
+                config = WikiBuildConfig(
+                    workspace=Path(tmp) / ".skillfabric",
+                    use_llm_summaries=True,
+                    llm_options=LLMJobOptions(max_retries=0, progress_every=0),
+                )
+
+                with self.assertRaisesRegex(WikiSummaryError, "summary generation failed"):
+                    WikiSummarizer(config, provider=provider).summarize_skill(
+                        entity_id="skill:test",
+                        content_hash="hash-1",
+                        payload={"name": "test"},
+                    )
 
     def test_summary_cache_reuses_content_hash_and_model_id(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -131,9 +270,11 @@ class WikiSummaryCacheTests(unittest.TestCase):
             config = WikiBuildConfig(
                 workspace=Path(tmp) / ".skillfabric",
                 use_llm_summaries=True,
-                llm_concurrency=2,
-                llm_max_retries=1,
-                llm_progress_every=0,
+                llm_options=LLMJobOptions(
+                    concurrency=2,
+                    max_retries=1,
+                    progress_every=0,
+                ),
             )
             summarizer = WikiSummarizer(config, provider=provider)
 
@@ -159,35 +300,90 @@ class WikiSummaryCacheTests(unittest.TestCase):
             self.assertEqual(provider.calls["skill:a"], 2)
             self.assertEqual(provider.calls["skill:b"], 2)
 
-    def test_cached_fallback_records_are_counted_as_fallbacks(self) -> None:
+    def test_llm_batch_failure_does_not_generate_contract_summary(self) -> None:
+        with TemporaryDirectory() as tmp:
+            provider = StaticSummaryProvider(RuntimeError("provider unavailable"))
+            config = WikiBuildConfig(
+                workspace=Path(tmp) / ".skillfabric",
+                use_llm_summaries=True,
+                llm_options=LLMJobOptions(max_retries=0, progress_every=0),
+            )
+            summarizer = WikiSummarizer(config, provider=provider)
+
+            with self.assertRaisesRegex(WikiSummaryError, "skill:a"):
+                summarizer.summarize_many(
+                    [
+                        {
+                            "page_type": "skill",
+                            "entity_id": "skill:a",
+                            "content_hash": "hash-a",
+                            "payload": {"name": "a"},
+                        }
+                    ]
+                )
+
+            self.assertFalse(summarizer.cache_path.exists())
+
+    def test_llm_provider_initialization_failure_is_not_silenced(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = WikiBuildConfig(
+                workspace=Path(tmp) / ".skillfabric",
+                use_llm_summaries=True,
+            )
+            with (
+                patch(
+                    "skillfabric.wiki.summarizer.LiteLLMSummaryProvider",
+                    side_effect=ValueError("missing model"),
+                ),
+                self.assertRaisesRegex(WikiSummaryError, "provider initialization failed"),
+            ):
+                WikiSummarizer(config).summarize_many([])
+
+    def test_disabled_llm_mode_caches_contract_derived_records(self) -> None:
         with TemporaryDirectory() as tmp:
             config = WikiBuildConfig(workspace=Path(tmp) / ".skillfabric", use_llm_summaries=False)
             first = WikiSummarizer(config)
-            first.summarize_many(
+            first_records = first.summarize_many(
                 [
                     {
                         "page_type": "skill",
                         "entity_id": "skill:a",
                         "content_hash": "hash-a",
-                        "payload": {"name": "a"},
+                        "payload": {
+                            "name": "a",
+                            "capability": "Parse normalized tables.",
+                            "when_to_use": "Use for tabular documents.",
+                            "requires": ["document"],
+                            "produces": ["normalized table"],
+                        },
                     }
                 ]
             )
 
             second = WikiSummarizer(config)
-            second.summarize_many(
+            second_records = second.summarize_many(
                 [
                     {
                         "page_type": "skill",
                         "entity_id": "skill:a",
                         "content_hash": "hash-a",
-                        "payload": {"name": "a"},
+                        "payload": {
+                            "name": "a",
+                            "capability": "Parse normalized tables.",
+                            "when_to_use": "Use for tabular documents.",
+                            "requires": ["document"],
+                            "produces": ["normalized table"],
+                        },
                     }
                 ]
             )
 
+            record = first_records[("skill", "skill:a")]
+            self.assertEqual(record.summary, "Parse normalized tables.")
+            self.assertEqual(record.routing_summary, "Use for tabular documents.")
+            self.assertEqual(second_records[("skill", "skill:a")].to_dict(), record.to_dict())
             self.assertEqual(second.cache_hits, 1)
-            self.assertEqual(second.fallback_count, 1)
+            self.assertFalse(hasattr(second, "fallback_count"))
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
-"""Load compiled graph artifacts into a wiki-oriented view."""
+"""Load canonical schema-v2 graph artifacts for wiki generation."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.execution.models import ExecutionIndexRecord
-from skillfabric.compiled_graph.interface.models import SkillInterface
+from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
@@ -15,111 +15,92 @@ from skillfabric.storage import Workspace
 
 @dataclass(slots=True)
 class WikiSource:
-    """Compiled graph data reshaped for wiki generation."""
+    """Canonical graph data consumed by wiki renderers."""
 
     build_id: str
     skills: dict[str, SkillNode]
-    interfaces: dict[str, SkillInterface]
+    contracts: dict[str, SkillContract]
     core_edges: list[Edge]
-    execution_index: list[ExecutionIndexRecord]
-    evidence_lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
-    stats: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def operational_edges(self) -> list[Edge]:
+        return [edge for edge in self.core_edges if edge.type in {"depend_on", "compose_with"}]
 
     def skill_core_links(self, skill_id: str) -> list[Edge]:
         return [
-            edge
-            for edge in self.core_edges
-            if edge.source == skill_id or edge.target == skill_id
+            edge for edge in self.core_edges if edge.source == skill_id or edge.target == skill_id
         ]
-
-    def skill_execution_links(self, skill_id: str) -> dict[str, list[ExecutionIndexRecord]]:
-        return {
-            "workflow_hints": [
-                record
-                for record in self.execution_index
-                if record.source_skill == skill_id or record.target_skill == skill_id
-            ],
-        }
 
 
 def load_wiki_source(workspace: Workspace) -> WikiSource:
-    """Read compiled graph artifacts and return a wiki-oriented view."""
+    """Read the canonical graph, registry, and contract artifacts directly."""
 
-    compiled_path = workspace.graph_dir / "compiled.json"
-    if not compiled_path.exists():
-        raise FileNotFoundError(f"compiled skill graph not found: {compiled_path}; run `skillfabric build` first")
-    payload = json.loads(compiled_path.read_text(encoding="utf-8"))
-    core_graph = GraphDocument.from_dict(payload.get("core_graph", {}))
-    skills = {
-        node.id: node
-        for node in core_graph.nodes
-        if isinstance(node, SkillNode)
-    }
-    _merge_raw_skills(workspace, skills)
-    interfaces = {
-        interface.skill_id: interface
-        for interface in (
-            SkillInterface.from_dict(item)
-            for item in payload.get("interfaces", [])
-            if isinstance(item, dict)
+    status_path = _required_path(workspace.status_path)
+    graph_path = _required_path(workspace.graph_dir / "graph.json")
+    registry_path = _required_path(workspace.graph_dir / "registry.jsonl")
+    contracts_path = _required_path(workspace.graph_dir / "contracts.jsonl")
+    status = _read_json_object(status_path)
+    if status.get("schema_version") != "2.0" or status.get("state") != "ready":
+        raise ValueError("SkillFabric workspace is not ready; complete a successful rebuild")
+    graph = GraphDocument.from_dict(json.loads(graph_path.read_text(encoding="utf-8")))
+    if status.get("build_id") != graph.build_id:
+        raise ValueError("workspace status and graph build ids differ; rebuild the workspace")
+    skills: dict[str, SkillNode] = {}
+    for row in _read_jsonl(registry_path):
+        skill = SkillNode.from_dict(row)
+        if skill.id in skills:
+            raise ValueError(f"registry contains duplicate skill id: {skill.id}")
+        skills[skill.id] = skill
+    contracts: dict[str, SkillContract] = {}
+    for row in _read_jsonl(contracts_path):
+        contract = SkillContract.from_dict(row)
+        if contract.skill_id in contracts:
+            raise ValueError(f"contracts contain duplicate skill id: {contract.skill_id}")
+        contracts[contract.skill_id] = contract
+    graph_skill_ids = {skill.id for skill in graph.nodes}
+    if graph_skill_ids != set(skills) or graph_skill_ids != set(contracts):
+        raise ValueError(
+            "schema-v2 graph, registry, and contract ids differ; rebuild the workspace"
         )
-    }
-    execution = payload.get("execution_graph", {})
-    execution_index = [
-        ExecutionIndexRecord.from_dict(item)
-        for item in execution.get("execution_index", [])
-        if isinstance(item, dict)
-    ]
+    for skill_id, contract in contracts.items():
+        if contract.content_hash != skills[skill_id].content_hash:
+            raise ValueError(f"contract content hash differs for {skill_id}; rebuild the workspace")
     return WikiSource(
-        build_id=core_graph.build_id,
+        build_id=graph.build_id,
         skills=skills,
-        interfaces=interfaces,
-        core_edges=core_graph.edges,
-        execution_index=execution_index,
-        evidence_lookup=_load_evidence_lookup(workspace),
-        stats=dict(payload.get("stats", {})),
+        contracts=contracts,
+        core_edges=graph.edges,
     )
 
 
-def _merge_raw_skills(workspace: Workspace, skills: dict[str, SkillNode]) -> None:
-    registry_path = workspace.graph_dir / "registry.jsonl"
-    if not registry_path.exists():
-        return
-    for line in registry_path.read_text(encoding="utf-8").splitlines():
+def _required_path(path: Path) -> Path:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"required semantic artifact not found: {path}; run `skillfabric build`"
+        )
+    return path
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON in {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return payload
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
-        skill = SkillNode.from_dict(json.loads(line))
-        if skill.id in skills:
-            skills[skill.id] = skill
-
-
-def _load_evidence_lookup(workspace: Workspace) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
-    lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for path in (
-        workspace.graph_dir / "edge_evidence.jsonl",
-        workspace.graph_dir / "interface_evidence.jsonl",
-        workspace.graph_dir / "execution_evidence.jsonl",
-    ):
-        if not path.exists():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            key = _evidence_key(row)
-            lookup.setdefault(key, []).append(row)
-    return lookup
-
-
-def _evidence_key(row: dict[str, Any]) -> tuple[str, str, str]:
-    candidate = row.get("candidate")
-    if isinstance(candidate, dict):
-        return (
-            str(candidate.get("source_skill", candidate.get("source", row.get("skill_id", "")))),
-            str(candidate.get("target_skill", candidate.get("target", ""))),
-            str(candidate.get("flow_type", candidate.get("edge_type", "execution"))),
-        )
-    edge = row.get("edge")
-    if isinstance(edge, dict):
-        return (str(edge.get("source", "")), str(edge.get("target", "")), str(edge.get("type", "")))
-    return (str(row.get("skill_id", "")), "", "interface")
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON in {path} line {line_number}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"{path} line {line_number} must be a JSON object")
+        rows.append(payload)
+    return rows

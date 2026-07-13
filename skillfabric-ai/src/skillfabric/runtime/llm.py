@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing as mp
 import os
 import queue
@@ -65,9 +66,29 @@ class LLMConfig:
     usage_operation: str = "llm"
     usage_metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        _require_string(self.api_base, name="api_base")
+        _require_string(self.api_key, name="api_key")
+        _require_string(self.model, name="model")
+        if self.credential_source not in {
+            "api_key",
+            "anthropic_api_key",
+            "anthropic_auth_token",
+        }:
+            raise ValueError("credential_source is unsupported")
+        if not isinstance(self.reasoning_effort, str):
+            raise ValueError("reasoning_effort must be a string")
+        _require_positive_int(self.max_tokens, name="max_tokens")
+        _require_positive_float(self.timeout, name="timeout")
+        if not isinstance(self.usage_enabled, bool):
+            raise ValueError("usage_enabled must be a boolean")
+        _require_string(self.usage_operation, name="usage_operation")
+        if not isinstance(self.usage_metadata, dict):
+            raise ValueError("usage_metadata must be an object")
+
     @classmethod
     def from_env(cls, *, env_path: str | Path | None = None) -> LLMConfig:
-        """Read LiteLLM configuration from an env file, with shell fallback."""
+        """Read LiteLLM configuration from an env file and process environment."""
 
         values = read_env_file(env_path)
         api_base, api_base_key = _first_config_entry(
@@ -81,7 +102,12 @@ class LLMConfig:
             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         )
         model = _normalize_litellm_model(
-            _first_config_value(values, ("SKILLFABRIC_LLM_MODEL", "MODEL"), ("ANTHROPIC_MODEL",), default=DEFAULT_MODEL),
+            _first_config_value(
+                values,
+                ("SKILLFABRIC_LLM_MODEL", "MODEL"),
+                ("ANTHROPIC_MODEL",),
+                default=DEFAULT_MODEL,
+            ),
             values=values,
             credential_key=credential_key,
             api_base_key=api_base_key,
@@ -92,13 +118,26 @@ class LLMConfig:
             "SKILLFABRIC_LLM_REASONING_EFFORT",
             default=DEFAULT_REASONING_EFFORT,
         )
-        max_tokens = int(_first_value(values, "SKILLFABRIC_LLM_MAX_TOKENS", "MAX_TOKENS", default=str(DEFAULT_MAX_TOKENS)))
-        timeout = float(_first_value(values, "SKILLFABRIC_LLM_TIMEOUT", "TIMEOUT", default=str(DEFAULT_TIMEOUT)))
-        usage_enabled = _parse_bool(_first_value(values, "SKILLFABRIC_USAGE_ENABLED", "USAGE_ENABLED", default="1"), default=True)
+        max_tokens = int(
+            _first_value(
+                values, "SKILLFABRIC_LLM_MAX_TOKENS", "MAX_TOKENS", default=str(DEFAULT_MAX_TOKENS)
+            )
+        )
+        timeout = float(
+            _first_value(values, "SKILLFABRIC_LLM_TIMEOUT", "TIMEOUT", default=str(DEFAULT_TIMEOUT))
+        )
+        usage_enabled = _parse_bool(
+            _first_value(values, "SKILLFABRIC_USAGE_ENABLED", "USAGE_ENABLED", default="1"),
+            default=True,
+        )
         usage_log_value = _first_value(values, "SKILLFABRIC_USAGE_LOG_PATH", "USAGE_LOG_PATH")
         usage_log_path = _resolve_optional_path(usage_log_value, env_path=env_path)
-        usage_operation = _first_value(values, "SKILLFABRIC_USAGE_OPERATION", "USAGE_OPERATION", default="llm")
-        usage_metadata = _parse_json_object(_first_value(values, "SKILLFABRIC_USAGE_METADATA", "USAGE_METADATA", default=""))
+        usage_operation = _first_value(
+            values, "SKILLFABRIC_USAGE_OPERATION", "USAGE_OPERATION", default="llm"
+        )
+        usage_metadata = _parse_json_object(
+            _first_value(values, "SKILLFABRIC_USAGE_METADATA", "USAGE_METADATA", default="")
+        )
         usage_context = _current_usage_context()
         usage_enabled = usage_enabled if usage_context.enabled is None else usage_context.enabled
         usage_log_path = usage_context.log_path or usage_log_path
@@ -161,7 +200,9 @@ def load_llm_env(*, env_path: str | Path = ".env", override: bool = False) -> di
 def read_env_file(env_path: str | Path | None = ".env") -> dict[str, str]:
     """Read simple KEY=VALUE env files without mutating the process environment."""
 
-    return _read_env_file(Path(env_path) if env_path is not None else Path(".env"))
+    if env_path is None:
+        return {}
+    return _read_env_file(Path(env_path))
 
 
 def litellm_completion(
@@ -178,14 +219,19 @@ def litellm_completion(
     """Call litellm.completion with project env configuration."""
 
     resolved = config or LLMConfig.from_env(env_path=env_path)
-    resolved_model = model or resolved.model
+    resolved_model = resolved.model if model is None else _require_string(model, name="model")
+    resolved_max_tokens = (
+        resolved.max_tokens
+        if max_tokens is None
+        else _require_positive_int(max_tokens, name="max_tokens")
+    )
     provider_messages = _provider_messages(resolved_model, messages)
     _ensure_provider_env(resolved, resolved_model)
     call_kwargs = {
         **kwargs,
         "model": resolved_model,
         "messages": provider_messages,
-        "max_tokens": max_tokens or resolved.max_tokens,
+        "max_tokens": resolved_max_tokens,
         "api_base": resolved.api_base,
         "api_key": _provider_api_key(resolved, resolved_model),
         "timeout": resolved.timeout,
@@ -197,7 +243,9 @@ def litellm_completion(
     usage_context = _current_usage_context()
     operation = usage_operation or usage_context.operation or resolved.usage_operation
     metadata = {**resolved.usage_metadata, **usage_context.metadata, **(usage_metadata or {})}
-    usage_enabled = resolved.usage_enabled if usage_context.enabled is None else usage_context.enabled
+    usage_enabled = (
+        resolved.usage_enabled if usage_context.enabled is None else usage_context.enabled
+    )
     usage_log_path = usage_context.log_path or resolved.usage_log_path
     started = time.monotonic()
     try:
@@ -346,7 +394,7 @@ def _record_usage(
             error=error,
             metadata=metadata,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - usage accounting must not break LLM calls.
         return
 
 
@@ -369,7 +417,7 @@ def _first_value(values: dict[str, str], *keys: str, default: str = "") -> str:
         if values.get(key):
             return values[key]
     for key in keys:
-        if key in os.environ and os.environ[key]:
+        if os.environ.get(key):
             return os.environ[key]
     return default
 
@@ -377,7 +425,7 @@ def _first_value(values: dict[str, str], *keys: str, default: str = "") -> str:
 def _first_config_value(
     values: dict[str, str],
     primary_keys: tuple[str, ...],
-    fallback_keys: tuple[str, ...],
+    provider_keys: tuple[str, ...],
     *,
     default: str = "",
 ) -> str:
@@ -385,13 +433,13 @@ def _first_config_value(
         if values.get(key):
             return values[key]
     for key in primary_keys:
-        if key in os.environ and os.environ[key]:
+        if os.environ.get(key):
             return os.environ[key]
-    for key in fallback_keys:
+    for key in provider_keys:
         if values.get(key):
             return values[key]
-    for key in fallback_keys:
-        if key in os.environ and os.environ[key]:
+    for key in provider_keys:
+        if os.environ.get(key):
             return os.environ[key]
     return default
 
@@ -399,19 +447,19 @@ def _first_config_value(
 def _first_config_entry(
     values: dict[str, str],
     primary_keys: tuple[str, ...],
-    fallback_keys: tuple[str, ...],
+    provider_keys: tuple[str, ...],
 ) -> tuple[str, str]:
     for key in primary_keys:
         if values.get(key):
             return values[key], key
     for key in primary_keys:
-        if key in os.environ and os.environ[key]:
+        if os.environ.get(key):
             return os.environ[key], key
-    for key in fallback_keys:
+    for key in provider_keys:
         if values.get(key):
             return values[key], key
-    for key in fallback_keys:
-        if key in os.environ and os.environ[key]:
+    for key in provider_keys:
+        if os.environ.get(key):
             return os.environ[key], key
     return "", ""
 
@@ -438,7 +486,11 @@ def _normalize_litellm_model(
         return normalized
     anthropic_model = _first_value(values, "ANTHROPIC_MODEL")
     anthropic_base = _first_value(values, "ANTHROPIC_BASE_URL")
-    primary_config = credential_key in {"SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"} or api_base_key in {
+    primary_config = credential_key in {
+        "SKILLFABRIC_LLM_API_KEY",
+        "API_KEY",
+        "OPENAI_API_KEY",
+    } or api_base_key in {
         "SKILLFABRIC_LLM_API_BASE",
         "BASE_URL",
         "OPENAI_BASE_URL",
@@ -446,7 +498,11 @@ def _normalize_litellm_model(
     }
     if primary_config:
         return f"openai/{normalized}"
-    if anthropic_base and credential_key.startswith("ANTHROPIC_") and _looks_like_anthropic_model(normalized):
+    if (
+        anthropic_base
+        and credential_key.startswith("ANTHROPIC_")
+        and _looks_like_anthropic_model(normalized)
+    ):
         return f"anthropic/{normalized}"
     openai_model = _first_value(values, "MODEL")
     if anthropic_model and not openai_model and anthropic_base:
@@ -500,9 +556,12 @@ def _provider_api_key(config: LLMConfig, model: str) -> str | None:
 def _ensure_provider_env(config: LLMConfig, model: str) -> None:
     """Expose env-only credentials required by provider adapters."""
 
-    if model.startswith("anthropic/") and config.credential_source == "anthropic_auth_token":
-        if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-            os.environ["ANTHROPIC_AUTH_TOKEN"] = config.api_key
+    if (
+        model.startswith("anthropic/")
+        and config.credential_source == "anthropic_auth_token"
+        and not os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    ):
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = config.api_key
 
 
 def _provider_messages(model: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -538,7 +597,7 @@ def _parse_bool(value: str, *, default: bool) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    return default
+    raise ValueError("boolean configuration must be one of: 1, true, yes, on, 0, false, no, off")
 
 
 def _parse_json_object(value: str) -> dict[str, Any]:
@@ -546,9 +605,32 @@ def _parse_json_object(value: str) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return dict(payload) if isinstance(payload, dict) else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError("usage metadata must be a valid JSON object") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("usage metadata must be a JSON object")
+    return dict(payload)
+
+
+def _require_string(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_positive_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _require_positive_float(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite positive number")
+    resolved = float(value)
+    if not math.isfinite(resolved) or resolved <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return resolved
 
 
 def _resolve_optional_path(value: str, *, env_path: str | Path | None) -> Path | None:

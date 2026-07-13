@@ -14,21 +14,20 @@ from skillfabric.wiki.pages import slug
 WIKILINK_RE = re.compile(r"\[\[([^]|]+)(?:\|[^]]+)?]]")
 
 
-def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> WikiHealthReport:
+def analyze_wiki_health(workspace: Workspace) -> WikiHealthReport:
     """Analyze wiki page consistency."""
 
     source = load_wiki_source(workspace)
-    report = WikiHealthReport(fallback_count=fallback_count)
+    report = WikiHealthReport()
     wiki_dir = workspace.wiki_dir
     expected_skill_pages = {
-        str(workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md")
-        for skill_id in source.skills
+        str(workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md") for skill_id in source.skills
     }
     for path in expected_skill_pages:
         if not Path(path).exists():
             report.missing_skill_pages.append(path)
 
-    inbound: dict[str, int] = {skill_id: 0 for skill_id in source.skills}
+    inbound: dict[str, int] = dict.fromkeys(source.skills, 0)
     for page in wiki_dir.rglob("*.md"):
         text = page.read_text(encoding="utf-8")
         rel = page.relative_to(wiki_dir).as_posix()
@@ -38,7 +37,7 @@ def analyze_wiki_health(workspace: Workspace, *, fallback_count: int = 0) -> Wik
         if "raw_output" in generated_text:
             report.raw_llm_output_leaks.append(str(page))
         if page.parent == workspace.wiki_skill_cards_dir and "## Inputs" not in text:
-            report.skills_without_interface.append(page.stem)
+            report.skills_without_contract_sections.append(page.stem)
         if page.parent == workspace.wiki_skill_cards_dir and "## Composition Notes" not in text:
             report.skills_without_graph_links.append(page.stem)
         for target in WIKILINK_RE.findall(_strip_fenced_code_blocks(generated_text)):
@@ -109,7 +108,7 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
         "Missing Skill Pages": report.missing_skill_pages,
         "Broken Links": report.broken_links,
         "Orphan Skill Pages": report.orphan_skill_pages,
-        "Skills Without Interface": report.skills_without_interface,
+        "Skills Without Contract Sections": report.skills_without_contract_sections,
         "Skills Without Graph Links": report.skills_without_graph_links,
         "Raw LLM Output Leaks": report.raw_llm_output_leaks,
     }
@@ -142,7 +141,9 @@ def read_wiki_health_summary(path: str | Path) -> dict[str, int]:
 def write_wiki_health_report(workspace: Workspace, report: WikiHealthReport) -> None:
     """Write wiki health markdown report."""
 
-    atomic_write_text(workspace.reports_dir / "wiki_health_report.md", render_wiki_health_report(report))
+    atomic_write_text(
+        workspace.reports_dir / "wiki_health_report.md", render_wiki_health_report(report)
+    )
 
 
 def _int_value(value: Any) -> int:

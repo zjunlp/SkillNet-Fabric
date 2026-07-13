@@ -16,7 +16,7 @@ Build or refresh the SkillFabric workspace from native `SKILL.md` files.
 
 1. Load and follow the `skillfabric-build` skill instructions.
 2. Resolve the skill root, workspace, env file, and supported build flags.
-3. Check API configuration unless the user explicitly requested a local smoke check.
+3. Check API configuration without reading or printing the env file.
 4. Run the build command required by the skill.
 5. Parse the CLI JSON and verify returned artifact paths are under the workspace.
 
@@ -28,7 +28,7 @@ Build or refresh the SkillFabric workspace from native `SKILL.md` files.
 
 ## Completion Criteria
 
-Finish only after reporting the workspace, skill count, graph/wiki/status
-artifacts, warnings, cache counts, and the next useful SkillFabric command.
+Finish only after reporting the workspace, build id, skill count, graph edge
+counts, canonical artifact paths, and the next useful SkillFabric command.
 Loading the skill or describing the build is not completion; the CLI build must
 have run or failed with a concrete non-secret error.

@@ -32,7 +32,7 @@ SDK_ENV_KEYS = (
 
 
 def _cleared_sdk_env() -> dict[str, str]:
-    return {key: "" for key in SDK_ENV_KEYS}
+    return dict.fromkeys(SDK_ENV_KEYS, "")
 
 
 class ClaudeCodeSdkEnvTests(unittest.TestCase):

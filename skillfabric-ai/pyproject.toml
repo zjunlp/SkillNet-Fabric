@@ -22,17 +22,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-  "graspologic>=3.4.4; python_version < '3.13'",
+  "faiss-cpu>=1.8",
   "litellm>=1.63.8",
-  "networkx>=3.2",
-  "python-dotenv>=1.0",
+  "numpy>=1.26",
   "pyyaml>=6.0",
-  "rapidfuzz>=3.9",
 ]
 
 [project.optional-dependencies]
 claude = [
-  "claude-agent-sdk>=0.1.50",
+  "claude-agent-sdk>=0.2.110",
 ]
 dev = [
   "build>=1.2",
@@ -40,7 +38,7 @@ dev = [
   "ruff>=0.8",
 ]
 all = [
-  "claude-agent-sdk>=0.1.50",
+  "claude-agent-sdk>=0.2.110",
   "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.8",
@@ -50,9 +48,9 @@ all = [
 skillfabric = "skillfabric.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/SkillFabric/skillfabric"
-Source = "https://github.com/SkillFabric/skillfabric"
-Issues = "https://github.com/SkillFabric/skillfabric/issues"
+Homepage = "https://github.com/Icarus-Chen/SkillFabric_public"
+Source = "https://github.com/Icarus-Chen/SkillFabric_public"
+Issues = "https://github.com/Icarus-Chen/SkillFabric_public/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skillfabric"]
@@ -81,9 +79,10 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["ARG", "B", "BLE", "C4", "E", "F", "I", "PERF", "PIE", "RET", "RUF", "SIM", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
 testpaths = ["tests"]
 pythonpath = ["src"]

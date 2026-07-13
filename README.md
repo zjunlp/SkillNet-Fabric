@@ -1,19 +1,15 @@
 # SkillFabric
 
-SkillFabric turns a directory of agent skills into a graph-backed routing
-workspace. It scans `SKILL.md` files, builds retrieval indexes, compiles skill
-relationships, materializes a query wiki, routes user tasks to the right skill
-set, and generates execution prompt packages for Claude Code or Codex.
+SkillFabric compiles native agent skills into an evidence-grounded semantic
+graph, retrieves a bounded candidate set for each task, and generates one
+validated execution prompt.
 
 ```bash
 pip install "skillfabric-ai[claude]"
+skillfabric init --env-file .env
 ```
 
-```bash
-skillfabric init --env-file .env
-skillfabric help workflow
-skillfabric help config
-```
+## Workflow
 
 ```bash
 skillfabric build \
@@ -32,51 +28,62 @@ skillfabric plan \
   --env-file .env
 ```
 
-The public defaults keep LLM-backed skill contracts, canonicalization,
-execution validation, and wiki summaries. Plain route/plan uses the Claude Code explorer by default;
-pass `--skip-llm-router --explorer-backend fallback` only for deterministic
-local smoke checks.
+Build extracts one strict `SkillContract` per skill, retrieves bounded candidate
+pairs with contract-aware embeddings, and asks one semantic judge to assign
+exactly one of `depend_on`, `compose_with`, `similar_to`, or `none`. Every
+accepted edge requires source evidence. `depend_on` is stored from dependent to
+prerequisite; `compose_with` is symmetric operational context; `similar_to` is
+used only to present close alternatives.
 
-```bash
-skillfabric build --skill-root /path/to/skills --env-file .env --embedding-provider disabled --wiki-summary-mode off
-```
+The build writes schema-v2 artifacts under `.skillfabric`:
+
+- `graph/registry.jsonl`
+- `graph/contracts.jsonl`
+- `graph/relation_decisions.jsonl`
+- `graph/graph.json`
+- `graph/bm25.sqlite`
+- `graph/embeddings.json`
+- `reports/build_summary.json`
+- `reports/llm_usage.jsonl`
+- `status.json`
+
+Routing fuses BM25 and dense ranks, expands only validated operational edges,
+materializes a bounded query wiki, and lets the explorer return one strict
+selection-only SkillPackage. Graph relations provide task-time evidence; they do
+not force prerequisite closure or expand the selected set. Invalid explorer or
+planner output stops the workflow.
 
 ## Python SDK
 
 ```python
 from skillfabric import SkillFabric
 
+task = "summarize this repository and identify release risks"
 sf = SkillFabric(workspace=".skillfabric", env_file=".env")
 sf.build("/path/to/skills")
-route = sf.route("summarize this repository and identify release risks")
-package = sf.prepare_plan(route=route)
-plan = sf.finalize_plan(
-    package_root=package.root,
-    planner_output={"execution_prompt": "Summarize the repository and verify the result."},
-)
-print(plan.prompt_path)
+route = sf.route(task)
+result = sf.plan(task, route=route)
+print(result.prompt_path)
 ```
 
-## Claude Code Plugin
+The Planner receives every selected contract and full skill source in one
+bounded LLM call. It decides whether graph relation evidence matters for the
+task and writes only `execution_prompt.md`; no intermediate workflow DAG is
+created.
 
-The Claude Code plugin uses the installed `skillfabric` CLI for stable
-artifacts, then uses the main Claude Code session for bounded route-time wiki
-exploration and plan-time prompt planning. The CLI remains the only component
-that writes SkillFabric workspace artifacts.
+## Claude Code Plugin
 
 ```bash
 claude --plugin-dir plugins/claude-code/skillfabric
 ```
 
-Use `/skillfabric:prepare` to stop at a plan, or `/skillfabric:run` to route,
-plan, and continue with the final task in the current Claude Code session.
+Use `/skillfabric:prepare` to stop after a validated execution prompt. Use
+`/skillfabric:run` to continue into task execution. The CLI remains the sole
+writer of SkillFabric artifacts.
 
 ## Package Layout
 
 ```text
-skillfabric-ai/                  # PyPI package
-plugins/claude-code/skillfabric/ # Claude Code plugin skeleton
+skillfabric-ai/                  # Python package and CLI
+plugins/claude-code/skillfabric/ # Claude Code plugin
 ```
-
-The CLI does not run a background executor. The Claude Code plugin can
-explicitly continue into task execution through `/skillfabric:run`.

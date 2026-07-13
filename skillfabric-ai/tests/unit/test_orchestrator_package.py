@@ -1,294 +1,249 @@
 from __future__ import annotations
 
+import inspect
 import json
-import unittest
 from importlib import import_module
-from pathlib import Path
-from tempfile import TemporaryDirectory
+
+import pytest
 
 import skillfabric.orchestrator.package as package_module
-from skillfabric.orchestrator.agent_run_spec import agent_run_spec_from_route
 from skillfabric.orchestrator.package import (
-    PLANNER_PROMPT_ID,
-    finalize_execution_package,
+    plan_execution_package,
     planner_output_json_schema,
-    prepare_execution_package,
+    validate_planner_output,
 )
 from skillfabric.router.models import (
-    RouteEdge,
+    RouteRelationEvidence,
     RouteResult,
     RouteSelectedSkill,
 )
-from skillfabric.storage import Workspace
-from skillfabric.wiki.pages import slug
+from tests.unit.wiki_helpers import build_fixture_workspace
 
 
-def _route(workspace: Path) -> RouteResult:
-    query = "Generate PNG figures and write report.docx from analyzed data."
-    return RouteResult(
-        query=query,
-        trace_id="exec-test",
-        trace_dir=workspace / "runs" / "exec-test",
-        selected_skills=[
-            RouteSelectedSkill(
-                skill_id="skill:data-visualization",
-                name="data-visualization",
-                rank=1,
-                reason="Create requested PNG figures.",
-                evidence=["skills/data-visualization.md"],
-            ),
-            RouteSelectedSkill(
-                skill_id="skill:docx",
-                name="docx",
-                rank=2,
-                reason="Write the requested Word report.",
-                evidence=["skills/docx.md"],
-            ),
-        ],
-        required_edges=[
-            RouteEdge(
-                before_skill="skill:data-visualization",
-                after_skill="skill:docx",
-                edge_type="depend_on",
-                reason="The report should include generated figures.",
-                source="execution_index",
-            )
-        ],
-        provenance="test",
+@pytest.fixture(autouse=True)
+def _planner_config(monkeypatch):
+    config = package_module.LLMConfig(
+        api_base="https://example.test/v1",
+        api_key="test-key",
+        model="openai/test-model",
+    )
+    monkeypatch.setattr(
+        package_module.LLMConfig,
+        "from_env",
+        lambda **_kwargs: config,
     )
 
 
-def _valid_planner_output(route: RouteResult) -> dict[str, str]:
-    return {
-        "execution_prompt": (
-            "# Execution Prompt\n\n"
-            "## Objective\n"
-            f"{route.query}\n\n"
-            "## Selected Skills\n"
-            "- skill:data-visualization: Create requested PNG figures.\n"
-            "- skill:docx: Write the requested Word report.\n\n"
-            "## Final Report\n"
-            "Briefly summarize deliverables, checks, and blockers."
+def _route() -> RouteResult:
+    return RouteResult(
+        selected_skills=(
+            RouteSelectedSkill(
+                skill_id="skill:pdf-table-parser",
+                name="pdf-table-parser",
+                reason="Parse PDF tables.",
+                evidence=("skills/cards/pdf-table-parser.md",),
+            ),
+            RouteSelectedSkill(
+                skill_id="skill:financial-kpi-extractor",
+                name="financial-kpi-extractor",
+                reason="Extract financial KPI values.",
+                evidence=("skills/cards/financial-kpi-extractor.md",),
+            ),
         ),
-    }
+        relation_evidence=(
+            RouteRelationEvidence(
+                relation_type="depend_on",
+                source_skill="skill:financial-kpi-extractor",
+                target_skill="skill:pdf-table-parser",
+                confidence=0.94,
+                reason="Normalized tables may be useful before KPI extraction.",
+                evidence=("skill:financial-kpi-extractor:12", "skill:pdf-table-parser:9"),
+            ),
+        ),
+        near_misses=(),
+        coverage_gaps=("Narrative report writing is outside this route.",),
+        wiki_pages_read=(
+            "skills/cards/pdf-table-parser.md",
+            "skills/cards/financial-kpi-extractor.md",
+            "edges/semantic_edges.jsonl",
+        ),
+        rationale="These skills cover parsing and KPI extraction.",
+    )
 
 
-class OrchestratorPackageTests(unittest.TestCase):
-    def test_agent_run_spec_from_route_contains_phases_and_execution_strategy(self) -> None:
-        with TemporaryDirectory() as tmp:
-            route = _route(Path(tmp) / ".skillfabric")
-
-            spec = agent_run_spec_from_route(route)
-
-            payload = spec.to_dict()
-            self.assertEqual(payload["objective"], route.query)
-            self.assertEqual(
-                [item["skill_id"] for item in payload["selected_skills"]],
-                ["skill:data-visualization", "skill:docx"],
+def _planner_response() -> str:
+    return json.dumps(
+        {
+            "execution_prompt": (
+                "Parse the PDF tables, extract the requested KPIs, and verify every value "
+                "against the source. Use independent extraction checks in parallel only when "
+                "they do not share mutable state."
             )
-            self.assertEqual(
-                [item["native_skill_name"] for item in payload["selected_skills"]],
-                ["data-visualization", "docx"],
-            )
-            self.assertEqual(payload["phases"][0]["skill_ids"], ["skill:data-visualization"])
-            self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
-            self.assertEqual(payload["required_order"][0]["before_skill"], "skill:data-visualization")
-            self.assertEqual(payload["acceptance_criteria"], [])
-            self.assertNotIn("completion_report", payload)
-            operation_names = [item["operation"] for item in payload["execution_strategy"]["operations"]]
-            self.assertEqual(operation_names[:2], ["orient", "inspect"])
-            self.assertIn("apply_skill", operation_names)
-            self.assertIn("verify", operation_names)
-            self.assertEqual(operation_names[-1], "report")
-            docx_operation = next(
-                item
-                for item in payload["execution_strategy"]["operations"]
-                if item["operation"] == "apply_skill" and item["skill_ids"] == ["skill:docx"]
-            )
-            self.assertEqual(docx_operation["control"], "serial")
-            self.assertIn("op_apply_skill_1", docx_operation["depends_on"])
-            self.assertTrue(
-                any(
-                    item["operation"] == "aggregate"
-                    for item in payload["execution_strategy"]["operations"]
-                )
-            )
-            self.assertIn("main Claude Code session", payload["execution_strategy"]["delegation_policy"])
-            self.assertNotIn("subagent", payload["execution_strategy"]["delegation_policy"].lower())
+        }
+    )
 
-    def test_agent_run_spec_phases_are_topologically_ordered(self) -> None:
-        with TemporaryDirectory() as tmp:
-            route = _route(Path(tmp) / ".skillfabric")
-            route.selected_skills = list(reversed(route.selected_skills))
 
-            spec = agent_run_spec_from_route(route)
+def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    calls: list[dict[str, object]] = []
 
-            payload = spec.to_dict()
-            phase_skills = [phase["skill_ids"][0] for phase in payload["phases"]]
-            self.assertEqual(phase_skills, ["skill:data-visualization", "skill:docx"])
-            self.assertEqual(payload["phases"][1]["depends_on"], ["phase_1"])
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return _planner_response()
 
-    def test_agent_run_spec_adds_parallel_guidance_for_independent_skills(self) -> None:
-        with TemporaryDirectory() as tmp:
-            route = _route(Path(tmp) / ".skillfabric")
-            route.required_edges = []
+    counted_models: list[str | None] = []
 
-            spec = agent_run_spec_from_route(route)
+    def count_tokens(_messages, *, model=None):
+        counted_models.append(model)
+        return 1200
 
-            operations = spec.to_dict()["execution_strategy"]["operations"]
-            parallelize = next(item for item in operations if item["operation"] == "parallelize")
-            self.assertEqual(parallelize["control"], "parallel")
-            self.assertCountEqual(parallelize["skill_ids"], ["skill:data-visualization", "skill:docx"])
+    monkeypatch.setattr(package_module, "litellm_completion", completion)
+    monkeypatch.setattr(package_module, "count_message_tokens", count_tokens)
+    package_root = workspace / "runs" / "planner-test" / "execution_package"
 
-    def test_prepare_execution_package_contains_selected_context_and_planner_artifacts_only(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            for skill_id in ["skill:data-visualization", "skill:docx", "skill:outside"]:
-                path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
-                path.write_text(f"# {skill_id}\n", encoding="utf-8")
+    result = plan_execution_package(
+        workspace,
+        _route(),
+        query="extract financial KPIs from a PDF report",
+        env_file=tmp_path / "unused.env",
+        package_root=package_root,
+        planner_context_max_tokens=10_000,
+    )
 
-            result = prepare_execution_package(workspace, route)
+    assert len(calls) == 1
+    messages = calls[0]["messages"]
+    prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
+    assert "skill:pdf-table-parser" in prompt
+    assert "skill:financial-kpi-extractor" in prompt
+    assert "&lt;untrusted_skill_source" in prompt
+    assert "relation_evidence" in prompt
+    assert counted_models == ["openai/test-model"]
+    assert result.estimated_prompt_tokens == 1200
+    assert result.prompt_path.read_text().startswith("Parse the PDF tables")
+    assert not (package_root / "workflow_plan.json").exists()
+    assert not (package_root / "PLANNER.md").exists()
+    assert json.loads(result.planner_output_path.read_text()) == json.loads(_planner_response())
+    request = json.loads((package_root / "planner_request.json").read_text())
+    assert request["expected_schema"] == planner_output_json_schema()
+    assert request["estimated_prompt_tokens"] == 1200
 
-            root = result.root
-            self.assertFalse((root / "execution_prompt.md").exists())
-            self.assertFalse((root / "agent_run_spec.json").exists())
-            self.assertFalse((root / "agent_run_spec_draft.json").exists())
-            self.assertFalse((root / "workflow_plan.json").exists())
-            self.assertTrue((root / "planner_request.json").exists())
-            self.assertTrue((root / "PLANNER.md").exists())
-            self.assertTrue((root / "evidence" / "route_summary.json").exists())
-            self.assertTrue((root / "evidence" / "selected_skill_evidence.json").exists())
-            self.assertTrue((root / "evidence" / "required_edges.json").exists())
-            copied = sorted(path.name for path in (root / "selected_skills").glob("*.md"))
-            self.assertEqual(copied, ["data-visualization.md", "docx.md"])
-            self.assertFalse((root / "selected_skills" / "outside.md").exists())
-            self.assertEqual(result.renderer, "claude-code")
-            self.assertFalse(hasattr(result, "draft_spec"))
 
-            planner_request = json.loads((root / "planner_request.json").read_text(encoding="utf-8"))
-            self.assertEqual(planner_request["expected_output"], str(root / "planner_output.json"))
-            self.assertEqual(planner_request["expected_schema"], planner_output_json_schema())
-            self.assertEqual(planner_request["expected_schema"]["required"], ["execution_prompt"])
-            self.assertNotIn("workflow_plan", planner_request["expected_schema"]["properties"])
-            self.assertEqual(planner_request["final_artifacts"], {"execution_prompt": str(root / "execution_prompt.md")})
-            self.assertEqual(planner_request["prompt_id"], PLANNER_PROMPT_ID)
-            self.assertNotIn("draft_agent_run_spec", planner_request)
-            self.assertNotIn("agent_run_spec", json.dumps(planner_request, ensure_ascii=False))
+def test_plan_rejects_context_overflow_before_creating_package(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    package_root = workspace / "runs" / "overflow" / "execution_package"
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 5001)
 
-            planner_prompt = (root / "PLANNER.md").read_text(encoding="utf-8")
-            for section in (
-                "# Prompt Contract",
-                "# Role",
-                "# Authority",
-                "# Inputs",
-                "# Success Criteria",
-                "# Reading Order",
-                "# Planning Policy",
-                "# Claude Code Execution Capabilities",
-                "# Output Contract",
-                "# Final Prompt Requirements",
-                "# Self-Check",
-            ):
-                self.assertIn(section, planner_prompt)
-            self.assertIn("Return one strict JSON object with exactly one top-level key", planner_prompt)
-            self.assertIn("Read `planner_request.json` first", planner_prompt)
-            self.assertIn("Do not execute the task", planner_prompt)
-            self.assertIn("required_edges are hard ordering constraints", planner_prompt)
-            self.assertIn("ordered_hints are soft ordering guidance", planner_prompt)
-            self.assertIn("main Claude Code session should execute the task directly", planner_prompt)
-            self.assertNotIn("subagent", planner_prompt.lower())
-            self.assertNotIn("workflow_plan", planner_prompt)
-            self.assertNotIn("Skill tool", planner_prompt)
+    def unexpected_completion(**_kwargs):
+        raise AssertionError("planner must not be called after context overflow")
 
-    def test_finalize_execution_package_writes_prompt_only_artifacts(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            for skill_id in ["skill:data-visualization", "skill:docx"]:
-                path = workspace.wiki_skill_cards_dir / f"{slug(skill_id)}.md"
-                path.write_text(f"# {skill_id}\n", encoding="utf-8")
-            prepared = prepare_execution_package(workspace, route)
-            planner_output = _valid_planner_output(route)
+    monkeypatch.setattr(package_module, "litellm_completion", unexpected_completion)
 
-            result = finalize_execution_package(prepared.root, planner_output)
+    with pytest.raises(ValueError, match="planner context requires 5001 tokens"):
+        plan_execution_package(
+            workspace,
+            _route(),
+            query="extract financial KPIs",
+            package_root=package_root,
+            planner_context_max_tokens=5000,
+        )
 
-            root = result.root
-            self.assertTrue((root / "planner_output.json").exists())
-            self.assertTrue((root / "planner_validation.json").exists())
-            self.assertFalse((root / "workflow_plan.json").exists())
-            self.assertFalse((root / "agent_run_spec.json").exists())
-            self.assertTrue((root / "execution_prompt.md").exists())
-            self.assertEqual(result.prompt_path, root / "execution_prompt.md")
-            self.assertFalse(hasattr(result, "workflow_plan_path"))
-            self.assertFalse(hasattr(result, "spec"))
-            prompt = (root / "execution_prompt.md").read_text(encoding="utf-8")
-            self.assertIn("Execution Prompt", prompt)
-            self.assertIn("Selected Skills", prompt)
-            self.assertIn("Final Report", prompt)
-            self.assertNotIn("Skill tool", prompt)
-            self.assertNotIn("SkillFabric", prompt)
-            self.assertNotIn("selected_skills/", prompt)
-            validation = json.loads((root / "planner_validation.json").read_text(encoding="utf-8"))
-            self.assertTrue(validation["valid"])
+    assert not package_root.exists()
 
-    def test_finalize_execution_package_normalizes_escaped_newlines(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            prepared = prepare_execution_package(workspace, route)
-            planner_output = {
-                "execution_prompt": "# Execution Prompt\\n\\n## Objective\\nExecute the selected task.\\n\\n## Final Report\\nReport checks.",
-            }
 
-            finalize_execution_package(prepared.root, planner_output)
-
-            prompt = (prepared.root / "execution_prompt.md").read_text(encoding="utf-8")
-            saved_output = json.loads((prepared.root / "planner_output.json").read_text(encoding="utf-8"))
-            self.assertIn("# Execution Prompt\n\n## Objective", prompt)
-            self.assertNotIn("\\n\\n", prompt)
-            self.assertEqual(saved_output["execution_prompt"], prompt.rstrip())
-
-    def test_finalize_execution_package_rejects_invalid_planner_outputs(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace_path = Path(tmp) / ".skillfabric"
-            workspace = Workspace(workspace_path)
-            workspace.ensure()
-            route = _route(workspace_path)
-            prepared = prepare_execution_package(workspace, route)
-
-            with self.assertRaisesRegex(ValueError, "execution_prompt must be a non-empty string"):
-                finalize_execution_package(prepared.root, {})
-
-            extra_key = {
-                "workflow_plan": {"objective": route.query},
+def test_plan_rejects_invalid_planner_output_without_prompt(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 100)
+    monkeypatch.setattr(
+        package_module,
+        "litellm_completion",
+        lambda **_kwargs: json.dumps(
+            {
+                "workflow_plan": {"steps": []},
                 "execution_prompt": "Do the task.",
             }
-            with self.assertRaisesRegex(ValueError, "planner output keys must be exactly"):
-                finalize_execution_package(prepared.root, extra_key)
+        ),
+    )
+    package_root = workspace / "runs" / "invalid" / "execution_package"
 
-            polluted_prompt = _valid_planner_output(route)
-            polluted_prompt["execution_prompt"] = "Use the Skill tool and selected_skills/docx.md."
-            with self.assertRaisesRegex(ValueError, "forbidden runtime-mechanism wording"):
-                finalize_execution_package(prepared.root, polluted_prompt)
-            self.assertTrue((prepared.root / "planner_validation.json").exists())
+    with pytest.raises(ValueError, match="exactly execution_prompt"):
+        plan_execution_package(
+            workspace,
+            _route(),
+            query="extract financial KPIs",
+            package_root=package_root,
+        )
 
-    def test_deterministic_planner_fallback_is_not_available(self) -> None:
-        self.assertFalse(hasattr(package_module, "deterministic_planner_output"))
-        self.assertFalse(hasattr(package_module, "build_execution_package"))
-
-    def test_direct_execution_prompt_renderer_modules_are_removed(self) -> None:
-        with self.assertRaises(ModuleNotFoundError):
-            import_module("skillfabric.orchestrator.renderers.claude_code")
-        with self.assertRaises(ModuleNotFoundError):
-            import_module("skillfabric.orchestrator.renderers.codex")
+    assert not (package_root / "execution_prompt.md").exists()
+    validation = json.loads((package_root / "planner_validation.json").read_text())
+    assert validation["valid"] is False
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_plan_refuses_to_overwrite_an_existing_package(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    package_root = workspace / "runs" / "existing-package"
+    package_root.mkdir(parents=True)
+    marker = package_root / "preserve.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 100)
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        plan_execution_package(
+            workspace,
+            _route(),
+            query="extract financial KPIs",
+            package_root=package_root,
+        )
+
+    assert marker.read_text() == "keep"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"execution_prompt": ""},
+        {"execution_prompt": "Run it.", "workflow_plan": {}},
+        ["not", "an", "object"],
+    ],
+)
+def test_planner_output_schema_is_exact(payload) -> None:
+    assert validate_planner_output(payload)
+
+
+def test_planner_schema_contains_only_execution_prompt() -> None:
+    schema = planner_output_json_schema()
+
+    assert schema["required"] == ["execution_prompt"]
+    assert set(schema["properties"]) == {"execution_prompt"}
+    assert schema["additionalProperties"] is False
+
+
+def test_planner_has_no_renderer_or_prepare_finalize_api() -> None:
+    assert "renderer" not in inspect.signature(plan_execution_package).parameters
+    assert not hasattr(package_module, "prepare_execution_package")
+    assert not hasattr(package_module, "finalize_execution_package")
+
+
+def test_agent_run_spec_module_is_removed() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        import_module("skillfabric.orchestrator.agent_run_spec")
+
+
+def test_route_loader_rejects_removed_nested_fields() -> None:
+    payload = _route().to_dict()
+    payload["selected_skills"][0]["rank"] = 1
+
+    with pytest.raises(ValueError, match="selected route skill"):
+        RouteResult.from_dict(payload)
+
+
+def test_route_loader_rejects_non_object_items() -> None:
+    payload = _route().to_dict()
+    payload["relation_evidence"] = ["not-an-object"]
+
+    with pytest.raises(ValueError, match=r"relation_evidence\[0\] must be an object"):
+        RouteResult.from_dict(payload)

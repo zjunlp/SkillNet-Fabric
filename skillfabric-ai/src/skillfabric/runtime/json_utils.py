@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 
@@ -32,28 +31,10 @@ def extract_response_text(response: Any) -> str:
 
 
 def parse_json_response(response: Any) -> dict[str, Any]:
-    """Parse a JSON object from a strict or fenced LLM response."""
+    """Parse one exact JSON object from an LLM response."""
 
     text = extract_response_text(response).strip()
-    text = _strip_fence(text)
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match is None:
-            raise
-        payload = json.loads(match.group(0))
+    payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("LLM response must be a JSON object")
     return payload
-
-
-def _strip_fence(text: str) -> str:
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        return "\n".join(lines).strip()
-    return text

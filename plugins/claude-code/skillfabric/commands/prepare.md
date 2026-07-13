@@ -21,9 +21,9 @@ executing that task.
 1. Load and follow the `skillfabric-prepare` skill instructions.
 2. Resolve workspace, env file, optional skill root, and forwarded flags.
 3. Build the workspace only when the skill instructions say it is needed.
-4. Run SkillFabric route prepare and route finalize.
-5. Run SkillFabric plan prepare and plan finalize.
-6. Confirm that the finalized package contains `execution_prompt.md`.
+4. Run the SkillFabric plan command, which performs route selection and one
+   prompt-planner call.
+5. Confirm that the finalized package contains `execution_prompt.md`.
 
 ## Boundaries
 
@@ -35,6 +35,6 @@ executing that task.
 ## Completion Criteria
 
 Finish only after reporting the execution package root, `execution_prompt.md`,
-planner validation path, selected skills, warnings, coverage gaps, and blockers.
+planner validation path, selected skills, coverage gaps, and blockers.
 Loading the skill, restating the task, or producing route artifacts alone is not
-completion; route finalization and plan finalization must both have run.
+completion; prompt generation must have completed.

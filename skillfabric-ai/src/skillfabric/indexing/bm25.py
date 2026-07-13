@@ -1,104 +1,99 @@
-"""SQLite FTS5 and BM25 index wrappers."""
+"""SQLite FTS5 indexing with explicit raw BM25 ranks."""
 
 from __future__ import annotations
 
+import re
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from skillfabric.indexing.canonical import canonical_skill_text
+from skillfabric.indexing.canonical import canonical_skill_text, contract_skill_text
 from skillfabric.registry.models import SkillNode
 
-_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "in",
-    "into",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "that",
-    "the",
-    "then",
-    "this",
-    "to",
-    "with",
-}
+if TYPE_CHECKING:
+    from skillfabric.compiled_graph.contracts.models import SkillContract
 
 
-def build_bm25_index(skills: list[SkillNode], db_path: str | Path) -> None:
-    """Write a SQLite FTS5 index."""
+@dataclass(frozen=True, slots=True)
+class BM25Hit:
+    """One FTS result with rank order and unmodified SQLite BM25 score."""
 
+    skill_id: str
+    rank: int
+    raw_score: float
+
+
+def build_bm25_index(
+    skills: list[SkillNode],
+    db_path: str | Path,
+    *,
+    contracts: dict[str, SkillContract] | None = None,
+) -> None:
+    """Build the canonical contract-aware FTS5 index."""
+
+    if contracts is not None and set(contracts) != {skill.id for skill in skills}:
+        raise ValueError("BM25 contracts must exactly match indexed skills")
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.execute("DROP TABLE IF EXISTS skills_fts")
-        conn.execute(
-            "CREATE VIRTUAL TABLE skills_fts USING fts5(skill_id UNINDEXED, name, description, body)"
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE IF EXISTS skills_fts")
+        connection.execute(
+            "CREATE VIRTUAL TABLE skills_fts USING "
+            "fts5(skill_id UNINDEXED, name, description, body, tokenize='unicode61')"
         )
-        conn.executemany(
+        connection.executemany(
             "INSERT INTO skills_fts(skill_id, name, description, body) VALUES (?, ?, ?, ?)",
             [
                 (
                     skill.id,
                     skill.name,
                     skill.description,
-                    canonical_skill_text(skill),
+                    contract_skill_text(skill, contracts[skill.id])
+                    if contracts is not None
+                    else canonical_skill_text(skill),
                 )
                 for skill in skills
             ],
         )
-        conn.commit()
+        connection.commit()
 
 
-def search_bm25(db_path: str | Path, query: str, *, limit: int = 10) -> list[tuple[str, float]]:
-    """Query BM25 and return skill ids with normalized scores."""
+def search_bm25(
+    db_path: str | Path,
+    query: str,
+    *,
+    limit: int = 10,
+) -> list[BM25Hit]:
+    """Return ordered FTS matches without converting rank into confidence."""
 
-    if not query.strip():
+    if not query.strip() or limit <= 0:
         return []
     path = Path(db_path)
     if not path.exists():
-        return []
+        raise FileNotFoundError(f"BM25 index not found: {path}; rebuild the workspace")
     safe_query = _fts_query(query)
     if not safe_query:
         return []
-    with sqlite3.connect(path) as conn:
-        try:
-            rows = conn.execute(
-                """
-                SELECT skill_id, bm25(skills_fts) AS rank
-                FROM skills_fts
-                WHERE skills_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (safe_query, limit),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return []
-    if not rows:
-        return []
-    raw_scores = [1.0 / (1.0 + abs(float(rank))) for _, rank in rows]
-    max_score = max(raw_scores) or 1.0
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            """
+            SELECT skill_id, bm25(skills_fts) AS score
+            FROM skills_fts
+            WHERE skills_fts MATCH ?
+            ORDER BY score, skill_id
+            LIMIT ?
+            """,
+            (safe_query, int(limit)),
+        ).fetchall()
     return [
-        (str(skill_id), score / max_score)
-        for (skill_id, _), score in zip(rows, raw_scores, strict=False)
+        BM25Hit(skill_id=str(skill_id), rank=rank, raw_score=float(score))
+        for rank, (skill_id, score) in enumerate(rows, start=1)
     ]
 
 
 def _fts_query(query: str) -> str:
-    tokens = []
-    for token in query.replace("-", " ").replace("_", " ").split():
-        cleaned = "".join(ch for ch in token.lower() if ch.isalnum())
-        if cleaned and cleaned not in _STOPWORDS:
-            tokens.append(cleaned)
-    return " OR ".join(tokens[:24])
+    """Escape query tokens for a high-recall OR expression."""
+
+    tokens = list(dict.fromkeys(re.findall(r"[^\W_]+", query.lower(), flags=re.UNICODE)))
+    return " OR ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens[:64])

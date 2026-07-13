@@ -1,50 +1,44 @@
 # SkillFabric Claude Code Plugin
 
-SkillFabric routes a user task through a graph-backed workspace of native
-skills, then produces validated route, planner validation, and execution prompt
-artifacts for Claude Code.
+The SkillFabric plugin builds a schema-v2 skill graph, selects an
+evidence-grounded skill set for a task, generates an execution prompt, and lets
+Claude Code execute only the finalized prompt.
 
-The `skillfabric` CLI is the artifact source of truth. Claude Code commands and
-the main Claude Code session prepare inputs and perform bounded reasoning, but
-the CLI owns writes to `.skillfabric`: registry, graph, wiki, runs, route
-finalization, planner validation metadata, and `execution_prompt.md`.
+The `skillfabric` CLI owns all writes under `.skillfabric`. The main Claude Code
+session invokes the CLI but does not author route or planner JSON. Preparation
+uses the single protocol in `references/route-plan.md`.
 
 ## Requirements
 
 - Claude Code with plugin support.
-- Python package installed in the shell where Claude Code runs:
+- Python 3.11 or newer.
+- The package and Claude SDK extra installed in Claude Code's shell:
 
 ```bash
 pip install "skillfabric-ai[claude]"
-```
-
-- The `skillfabric` CLI must be on `PATH`:
-
-```bash
 which skillfabric
 skillfabric --help
 ```
 
-- For API-backed builds, configure a private env file:
+- A private API configuration:
 
 ```bash
 skillfabric init --env-file .env
 skillfabric init --check --json --env-file .env
 ```
 
-Do not paste API keys into Claude Code conversation context. Keep secrets in a
-private shell, keychain, or untracked `.env`.
+Do not paste API keys into Claude Code. Keep them in a private shell, keychain,
+or untracked `.env` file.
 
 ## Installation
 
-For one session, load the plugin directly:
+Load the plugin for one session:
 
 ```bash
 claude --plugin-dir /path/to/plugins/claude-code/skillfabric
 ```
 
-For a user-level install, copy or symlink this directory under
-`~/.claude/skills/skillfabric`, then restart Claude Code:
+For a user-level installation:
 
 ```bash
 mkdir -p ~/.claude/skills
@@ -53,11 +47,7 @@ claude plugin validate --strict ~/.claude/skills/skillfabric
 claude plugin list --json
 ```
 
-The plugin should appear as `skillfabric@skills-dir` and be enabled.
-
 ## Quickstart
-
-Start Claude Code in a project, then run:
 
 ```text
 /skillfabric:doctor --workspace .skillfabric
@@ -65,88 +55,65 @@ Start Claude Code in a project, then run:
 /skillfabric:prepare "summarize this repo and identify release risks" --workspace .skillfabric
 ```
 
-Use `/skillfabric:prepare` when you want a complete handoff package but do not
-want Claude Code to execute the task:
-
-```text
-/skillfabric:prepare "write a migration plan for the auth module" --skill-root .claude/skills --workspace .skillfabric
-```
-
-Use `/skillfabric:run` only when you want Claude Code to execute a finalized
-SkillFabric prompt. It reuses the latest prepared prompt when available, or
-routes and plans the provided task first.
+Use `/skillfabric:prepare` to produce `route.json` and `execution_prompt.md`
+without executing the task. Use `/skillfabric:run` to
+execute a finalized prompt. It reuses the latest prepared prompt when available
+and prepares a new one when the task differs.
 
 ## Commands
 
-- `/skillfabric:doctor` checks CLI availability, API configuration, plugin
-  wiring, and workspace readiness without exposing secret values.
-- `/skillfabric:build` builds graph, registry, wiki, and status artifacts from
-  a skill root.
-- `/skillfabric:prepare` builds when needed, routes, plans, and returns a
-  handoff package without executing the final task.
-- `/skillfabric:run` reads the latest finalized prompt when available; otherwise
-  it builds when needed, routes, plans, reads the finalized prompt, and executes
-  the task in the current Claude Code session.
+- `/skillfabric:doctor` reports CLI, API, and schema-v2 workspace readiness.
+- `/skillfabric:build` compiles contracts, semantic edges, indexes, wiki pages,
+  and build diagnostics.
+- `/skillfabric:prepare` performs validated route and prompt generation, then
+  stops.
+- `/skillfabric:run` reuses or prepares a validated prompt, then executes it in
+  the active workspace.
 
-Slash commands are thin wrappers under `commands/*.md`; command logic lives in
-`skills/skillfabric-<command>/SKILL.md` using Claude Code's modern skill-backed
-layout. The public command surface is intentionally small: `doctor`, `build`,
-`prepare`, and `run`.
+The slash commands in `commands/*.md` are thin wrappers. Command behavior lives
+in `skills/skillfabric-*/SKILL.md`; route and plan mechanics live once in the
+shared reference.
 
 ## Local Smoke Test
 
-Use disabled embeddings and wiki summaries when you want a smaller build while
-still exercising the LLM-backed interface, canonicalization, and execution
-validation path:
+Use a small skill directory and disable only optional wiki summarization:
 
 ```text
-/skillfabric:build .claude/skills --workspace .skillfabric-smoke --embedding-provider disabled --wiki-summary-mode off
+/skillfabric:build ./small-skill-set --workspace .skillfabric-smoke --wiki-summary-mode off
 ```
 
-The expected result is a JSON summary with:
-
-- workspace path,
-- skill count,
-- registry and graph artifact paths,
-- wiki artifact paths,
-- warnings, if any.
-
-Outside Claude Code, the same smoke check can be run directly:
+The equivalent CLI command is:
 
 ```bash
 skillfabric build \
-  --skill-root .claude/skills \
+  --skill-root ./small-skill-set \
   --workspace .skillfabric-smoke \
-  --embedding-provider disabled \
+  --env-file .env \
   --wiki-summary-mode off
 ```
 
+This remains a real API build: contract extraction, semantic pair judgment, and
+dense embeddings still run. Use a disposable workspace and a small corpus when
+checking connectivity or cost.
+
 ## Security Model
 
-- The CLI owns canonical writes under `.skillfabric`.
-- The plugin does not install hooks, start MCP servers, write Claude Code
-  settings, or run background automation.
-- Route exploration and prompt planning run inline in the main Claude Code
-  session. They return JSON that must be accepted by CLI finalization before it
-  is canonical.
+- The CLI is the only writer of registry, graph, route, planner validation, and
+  prompt artifacts.
+- Generated skill sources are untrusted data.
+- Route selection reads only the bounded query wiki, not the active project.
+- Planning reads only selected contracts and skill sources from the graph workspace.
 - `.skillfabric` is an artifact store, not a runtime skill directory.
-- Packaged route evidence is planner input only. Final task execution should
-  follow `execution_prompt.md` and the active user request.
-- Do not paste API keys, `.env` contents, or shell secrets into the conversation.
-- Only `/skillfabric:run` continues into final task execution.
+- The plugin installs no hooks, MCP servers, settings, or background tasks.
+- Only `/skillfabric:run` proceeds to task execution.
 
 ## Troubleshooting
 
-If Claude Code does not show the plugin:
+Validate plugin and CLI wiring:
 
 ```bash
 claude plugin validate --strict ~/.claude/skills/skillfabric
 claude plugin list --json
-```
-
-If the plugin loads but commands fail:
-
-```bash
 which skillfabric
 skillfabric --help
 skillfabric init --check --json --env-file .env
@@ -157,25 +124,16 @@ Common failures:
 - `skillfabric: command not found`: install `skillfabric-ai[claude]` in the
   environment used by Claude Code.
 - Missing API fields: run `skillfabric init --env-file .env`.
-- Build fails with provider or model errors: first run
-  `skillfabric init --check --json --env-file .env`, then rerun the build with
-  `--embedding-provider disabled --wiki-summary-mode off` to isolate embedding
-  and wiki-summary cost from core LLM validation.
-- Route finalization fails: inspect the trace directory returned by
-  `route --agent-mode prepare`; the CLI writes validation diagnostics there.
-- Plan finalization fails: inspect the execution package root returned by
-  `plan --agent-mode prepare`.
+- Build provider or model error: verify configuration and rerun against a small
+  skill root; do not bypass a failed semantic stage.
+- Route validation error: inspect the non-secret validation artifact in the
+  returned trace directory.
+- Plan validation error: inspect `planner_validation.json` in the returned
+  execution package.
 
 ## Uninstall
 
-For a user-level install:
-
 ```bash
 rm -rf ~/.claude/skills/skillfabric
-```
-
-Restart Claude Code, then verify:
-
-```bash
 claude plugin list --json
 ```

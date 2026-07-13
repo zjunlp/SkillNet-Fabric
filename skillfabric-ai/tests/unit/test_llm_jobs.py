@@ -8,6 +8,26 @@ from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 
 
 class LLMJobRunnerTests(unittest.TestCase):
+    def test_job_options_reject_invalid_runtime_limits(self) -> None:
+        invalid_options = [
+            LLMJobOptions(concurrency=0),
+            LLMJobOptions(concurrency=True),
+            LLMJobOptions(rate_limit_per_minute=-1),
+            LLMJobOptions(rate_limit_per_minute=float("nan")),
+            LLMJobOptions(max_retries=-1),
+            LLMJobOptions(retry_backoff_seconds=-1),
+            LLMJobOptions(progress_every=-1),
+            LLMJobOptions(batch_size=0),
+        ]
+
+        for options in invalid_options:
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                options.normalized()
+
+    def test_job_options_reject_batch_smaller_than_concurrency(self) -> None:
+        with self.assertRaisesRegex(ValueError, "batch_size"):
+            LLMJobOptions(concurrency=3, batch_size=2).normalized()
+
     def test_retries_failed_jobs_and_preserves_input_order(self) -> None:
         attempts: dict[str, int] = {}
 
@@ -29,7 +49,33 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertEqual(attempts["alpha"], 2)
         self.assertEqual(attempts["beta"], 1)
 
-    def test_timeout_errors_do_not_retry(self) -> None:
+    def test_timeout_errors_retry_within_configured_limit(self) -> None:
+        attempts = 0
+
+        def worker(_item: str) -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError("stuck LLM request")
+            return "recovered"
+
+        outcomes = run_llm_jobs(
+            ["alpha"],
+            worker,
+            options=LLMJobOptions(
+                concurrency=1,
+                max_retries=1,
+                retry_backoff_seconds=0,
+                progress_every=0,
+            ),
+            label="test",
+        )
+
+        self.assertEqual(attempts, 2)
+        self.assertTrue(outcomes[0].ok)
+        self.assertEqual(outcomes[0].value, "recovered")
+
+    def test_timeout_errors_stop_after_configured_retries(self) -> None:
         attempts = 0
 
         def worker(_item: str) -> str:
@@ -40,11 +86,16 @@ class LLMJobRunnerTests(unittest.TestCase):
         outcomes = run_llm_jobs(
             ["alpha"],
             worker,
-            options=LLMJobOptions(concurrency=1, max_retries=3, progress_every=0),
+            options=LLMJobOptions(
+                concurrency=1,
+                max_retries=2,
+                retry_backoff_seconds=0,
+                progress_every=0,
+            ),
             label="test",
         )
 
-        self.assertEqual(attempts, 1)
+        self.assertEqual(attempts, 3)
         self.assertFalse(outcomes[0].ok)
         self.assertIsInstance(outcomes[0].error, TimeoutError)
 

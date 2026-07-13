@@ -20,15 +20,18 @@ class WikiHealthTests(unittest.TestCase):
 
             page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(
-                page.read_text(encoding="utf-8") + "\n[[skills/missing-skill]]\nraw_output should not be present\n",
+                page.read_text(encoding="utf-8")
+                + "\n[[skills/missing-skill]]\nraw_output should not be present\n",
                 encoding="utf-8",
             )
 
-            report = analyze_wiki_health(Workspace(workspace), fallback_count=0)
+            report = analyze_wiki_health(Workspace(workspace))
 
             self.assertTrue(report.broken_links)
             self.assertTrue(report.raw_llm_output_leaks)
             self.assertGreaterEqual(report.summary["broken_link_count"], 1)
+            self.assertIn("skill_without_contract_sections_count", report.summary)
+            self.assertNotIn("skill_without_interface_count", report.summary)
 
     def test_health_ignores_source_excerpt_and_fenced_code_wikilinks(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -38,7 +41,8 @@ class WikiHealthTests(unittest.TestCase):
 
             page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(
-                page.read_text(encoding="utf-8") + "\n```markdown\n[[skills/not-a-generated-link]]\n```\n",
+                page.read_text(encoding="utf-8")
+                + "\n```markdown\n[[skills/not-a-generated-link]]\n```\n",
                 encoding="utf-8",
             )
             source_page = workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
@@ -47,7 +51,7 @@ class WikiHealthTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            report = analyze_wiki_health(Workspace(workspace), fallback_count=0)
+            report = analyze_wiki_health(Workspace(workspace))
 
             self.assertFalse(report.broken_links)
 

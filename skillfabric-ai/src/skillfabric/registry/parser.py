@@ -7,15 +7,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from skillfabric.registry.models import SkillNode
 
-try:  # pragma: no cover - fall back when PyYAML is unavailable
-    import yaml
-except Exception:  # pragma: no cover
-    yaml = None
-
-
-_NAME_RE = re.compile(r"[^a-z0-9]+")
+_NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_MAX_NAME_LENGTH = 64
 
 
 def parse_skill_file(path: str | Path) -> SkillNode:
@@ -23,14 +20,19 @@ def parse_skill_file(path: str | Path) -> SkillNode:
 
     skill_path = Path(path)
     raw_text = skill_path.read_text(encoding="utf-8")
-    frontmatter, body, warnings = _split_frontmatter(raw_text)
-    fallback_name = _slugify(skill_path.parent.name)
-    name = _slugify(str(frontmatter.get("name") or fallback_name))
-    description = str(frontmatter.get("description") or _first_useful_paragraph(body))
-    if not frontmatter.get("name"):
-        warnings.append("missing frontmatter name; used directory name")
-    if not frontmatter.get("description"):
-        warnings.append("missing frontmatter description; used first paragraph")
+    frontmatter = _parse_frontmatter(raw_text)
+    name = frontmatter.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"{skill_path} frontmatter name must be a non-empty string")
+    name = name.strip()
+    if len(name) > _MAX_NAME_LENGTH or _NAME_RE.fullmatch(name) is None:
+        raise ValueError(
+            f"{skill_path} frontmatter name must contain at most {_MAX_NAME_LENGTH} "
+            "lowercase letters, numbers, and single hyphens"
+        )
+    description = frontmatter.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"{skill_path} frontmatter description must be a non-empty string")
 
     content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
 
@@ -41,59 +43,20 @@ def parse_skill_file(path: str | Path) -> SkillNode:
         description=description.strip(),
         content_hash=content_hash,
         raw_text=raw_text,
-        warnings=warnings,
     )
 
 
-def _split_frontmatter(raw_text: str) -> tuple[dict[str, Any], str, list[str]]:
-    warnings: list[str] = []
-    if not raw_text.startswith("---"):
-        return {}, raw_text, warnings
+def _parse_frontmatter(raw_text: str) -> dict[str, Any]:
+    if not raw_text.startswith("---\n"):
+        raise ValueError("SKILL.md requires YAML frontmatter")
     end = raw_text.find("\n---", 3)
     if end == -1:
-        warnings.append("frontmatter start found but closing delimiter missing")
-        return {}, raw_text, warnings
+        raise ValueError("frontmatter start found but closing delimiter is missing")
     block = raw_text[3:end].strip()
-    body = raw_text[raw_text.find("\n", end + 1) + 1 :]
-    parsed: Any = None
-    if yaml is not None:
-        try:
-            parsed = yaml.safe_load(block) or {}
-        except Exception as exc:
-            warnings.append(f"failed to parse yaml frontmatter: {exc}")
+    try:
+        parsed: Any = yaml.safe_load(block) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid YAML frontmatter: {exc}") from exc
     if not isinstance(parsed, dict):
-        parsed = _parse_simple_frontmatter(block)
-    return parsed, body, warnings
-
-
-def _parse_simple_frontmatter(block: str) -> dict[str, Any]:
-    data: dict[str, Any] = {}
-    current_key: str | None = None
-    for line in block.splitlines():
-        if ":" in line and not line.startswith((" ", "\t", "-")):
-            key, _, value = line.partition(":")
-            current_key = key.strip()
-            data[current_key] = value.strip().strip('"').strip("'")
-        elif current_key and line.strip().startswith("-"):
-            existing = data.get(current_key)
-            if not isinstance(existing, list):
-                existing = []
-                data[current_key] = existing
-            existing.append(line.strip()[1:].strip())
-    return data
-
-
-def _first_useful_paragraph(body: str) -> str:
-    for paragraph in re.split(r"\n\s*\n", body):
-        text = " ".join(line.strip() for line in paragraph.splitlines() if line.strip())
-        if not text or text.startswith("#"):
-            continue
-        text = re.sub(r"^#+\s*", "", text).strip()
-        if text:
-            return text
-    return "No description provided."
-
-
-def _slugify(value: str) -> str:
-    slug = _NAME_RE.sub("-", value.strip().lower()).strip("-")
-    return slug or "unnamed-skill"
+        raise ValueError("YAML frontmatter must be a mapping")
+    return parsed

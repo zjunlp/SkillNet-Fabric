@@ -1,652 +1,90 @@
 from __future__ import annotations
 
-import contextlib
-import io
-import json
-import os
-import sys
-import types
-import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from unittest.mock import patch
+import inspect
 
-from skillfabric.cli import main as cli_main
-from skillfabric.compiled_graph.builder import (
-    BuildConfig,
-    _BuildDependencies,
-    build_graph,
-)
-from skillfabric.compiled_graph.health import analyze_health
-from skillfabric.compiled_graph.models import Edge, GraphDocument
+import pytest
+
+from skillfabric.compiled_graph.builder import _BuildDependencies
+from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.indexing.canonical import canonical_skill_text
-from skillfabric.registry.models import SkillNode
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root
-from tests.unit.fake_canonicalization import FixtureCanonicalizationProvider
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.fixture_interfaces import FixtureInterfaceExtractor
 
-ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
+FIXTURE_SKILLS = pytest.importorskip("tests.unit.wiki_helpers").FIXTURE_SKILLS
 
 
-def _build_test_graph(
-    *,
-    skill_root: Path = FIXTURE_SKILLS,
-    workspace: Path,
-    canonicalization_provider: FixtureCanonicalizationProvider | None = None,
-    interface_extractor: FixtureInterfaceExtractor | None = None,
-    execution_validator: object | None = None,
-    embedding_provider: FakeEmbeddingProvider | None = None,
-    build_id: str | None = None,
-    llm_env_path: Path | str = ".env",
-):
-    return build_graph(
-        BuildConfig(
-            skill_root=skill_root,
-            workspace=workspace,
-            llm_env_path=llm_env_path,
-        ),
-        dependencies=_BuildDependencies(
-            canonicalization_provider=canonicalization_provider,
-            interface_extractor=interface_extractor,
-            execution_validator=execution_validator,
-            embedding_provider=embedding_provider,
-            build_id=build_id,
-        ),
+def test_parser_uses_frontmatter_and_keeps_source_out_of_canonical_node() -> None:
+    skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
+
+    assert skill.id == "skill:pdf-table-parser"
+    assert skill.name == "pdf-table-parser"
+    assert "Extract tables" in skill.description
+    assert "pdf-table-parser" in canonical_skill_text(skill)
+    payload = skill.to_dict(include_raw_text=False)
+    assert set(payload) == {"id", "type", "name", "description", "content_hash"}
+    assert "raw_text" not in payload
+
+
+def test_parser_rejects_a_skill_without_required_frontmatter(tmp_path) -> None:
+    skill_file = tmp_path / "missing-frontmatter" / "SKILL.md"
+    skill_file.parent.mkdir()
+    skill_file.write_text("# Missing frontmatter\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="YAML frontmatter"):
+        parse_skill_file(skill_file)
+
+
+def test_parser_rejects_invalid_yaml_instead_of_using_a_partial_parser(tmp_path) -> None:
+    skill_file = tmp_path / "invalid-yaml" / "SKILL.md"
+    skill_file.parent.mkdir()
+    skill_file.write_text(
+        "---\nname: [unterminated\n---\n\n# Invalid\n",
+        encoding="utf-8",
     )
 
-
-class AcceptingExecutionValidator:
-    model_id = "accepting-execution"
-
-    def validate(self, candidate, source_skill, target_skill, *, interfaces):
-        del source_skill, target_skill, interfaces
-        return {
-            "accepted": bool(candidate.evidence),
-            "flow_type": candidate.flow_type if candidate.evidence else "none",
-            "projected_edge_type": "depend_on" if candidate.evidence else "none",
-            "confidence": 0.91 if candidate.evidence else 0.0,
-            "evidence": [item.to_dict() for item in candidate.evidence],
-        }
+    with pytest.raises(ValueError, match="invalid YAML frontmatter"):
+        parse_skill_file(skill_file)
 
 
-def fake_litellm_embedding(**kwargs):
-    inputs = kwargs.get("input", [])
-    if isinstance(inputs, str):
-        inputs = [inputs]
-    return {
-        "data": [
-            {"index": index, "embedding": [1.0, 0.0] if index % 2 == 0 else [0.0, 1.0]}
-            for index, _text in enumerate(inputs)
-        ]
+def test_skill_node_loader_rejects_unknown_serialized_fields() -> None:
+    payload = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md").to_dict(
+        include_raw_text=True
+    )
+    payload["unused"] = True
+
+    with pytest.raises(ValueError, match="skill node fields"):
+        type(parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")).from_dict(payload)
+
+
+def test_scan_returns_all_skill_documents_in_stable_order() -> None:
+    paths = scan_skill_root(FIXTURE_SKILLS)
+
+    assert len(paths) == 7
+    assert paths == sorted(paths)
+
+
+def test_graph_document_rejects_obsolete_or_extra_schema_fields() -> None:
+    valid = {
+        "schema_version": "2.0",
+        "build_id": "build",
+        "nodes": [],
+        "edges": [],
     }
 
-
-def _health_skill(skill_id: str, name: str, description: str) -> SkillNode:
-    return SkillNode(
-        id=skill_id,
-        type="skill",
-        name=name,
-        description=description,
-        content_hash=f"hash-{name}",
-    )
+    assert GraphDocument.from_dict(valid).schema_version == "2.0"
+    with pytest.raises(ValueError, match="obsolete"):
+        GraphDocument.from_dict({**valid, "schema_version": "1.0"})
+    with pytest.raises(ValueError, match="schema-v2"):
+        GraphDocument.from_dict({**valid, "communities": []})
 
 
-class KGBuildTests(unittest.TestCase):
-    def test_parser_uses_frontmatter_without_removed_metadata_field(self) -> None:
-        skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
-        removed_field = "routing_" + "metadata"
+def test_build_dependencies_expose_only_semantic_compiler_providers() -> None:
+    parameters = set(inspect.signature(_BuildDependencies).parameters)
 
-        self.assertEqual(skill.id, "skill:pdf-table-parser")
-        self.assertEqual(skill.name, "pdf-table-parser")
-        self.assertIn("Extract tables", skill.description)
-        self.assertIn("pdf-table-parser", canonical_skill_text(skill))
-        self.assertFalse(hasattr(skill, removed_field))
-        self.assertNotIn(removed_field, skill.to_dict(include_raw_text=True))
-        self.assertTrue(skill.content_hash)
-
-    def test_skill_node_serialization_excludes_audit_only_fields(self) -> None:
-        skill = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md")
-
-        payload = skill.to_dict(include_raw_text=True)
-
-        self.assertLessEqual(
-            set(payload),
-            {"id", "type", "name", "description", "content_hash", "warnings", "raw_text"},
-        )
-        self.assertNotIn("source_path", payload)
-        self.assertNotIn("wiki_path", payload)
-        self.assertNotIn("token_count", payload)
-        self.assertNotIn("canonical_skill_text_hash", payload)
-
-    def test_parser_falls_back_without_frontmatter(self) -> None:
-        skill = parse_skill_file(FIXTURE_SKILLS / "no-frontmatter" / "SKILL.md")
-
-        self.assertEqual(skill.name, "no-frontmatter")
-        self.assertIn("Fallback description", skill.description)
-
-    def test_scan_finds_all_skill_documents(self) -> None:
-        skills = scan_skill_root(FIXTURE_SKILLS)
-
-        self.assertGreaterEqual(len(skills), 8)
-        self.assertEqual(skills, sorted(skills))
-
-    def test_build_graph_outputs_expected_artifacts_and_edges(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            result = _build_test_graph(
-                workspace=workspace,
-                canonicalization_provider=FixtureCanonicalizationProvider(),
-                interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=AcceptingExecutionValidator(),
-                embedding_provider=FakeEmbeddingProvider(),
-                build_id="test-build",
-            )
-
-            self.assertEqual(result.graph.schema_version, "1.0")
-            self.assertEqual(result.stats["skill_count"], 8)
-            self.assertTrue((workspace / "graph" / "registry.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "skill_sources.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "bm25.sqlite").exists())
-            self.assertTrue((workspace / "graph" / "embeddings.json").exists())
-            self.assertFalse((workspace / "graph" / "embedding_meta.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "graph.json").exists())
-            self.assertFalse((workspace / "graph" / "communities.json").exists())
-            self.assertFalse((workspace / "graph" / "edge_evidence.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "relation_validation_audit.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "relation_validation_summary.json").exists())
-            self.assertTrue((workspace / "graph" / "graph_health_report.md").exists())
-            self.assertTrue((workspace / "graph" / "contracts.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "interface_evidence.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "interface_health_report.md").exists())
-            self.assertTrue((workspace / "graph" / "canonical_objects.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "canonical_aliases.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "canonicalization_pair_features.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "canonicalization_blocking_stats.json").exists())
-            self.assertFalse((workspace / "graph" / "canonicalization_review_queue.json").exists())
-            self.assertFalse((workspace / "graph" / "canonicalization_decision_stats.json").exists())
-            self.assertFalse((workspace / "graph" / "canonicalization_evidence.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "canonicalization_health_report.md").exists())
-            self.assertTrue((workspace / "cache" / "interface_cache.json").exists())
-            self.assertTrue((workspace / "cache" / "canonicalization_cache.json").exists())
-            self.assertTrue((workspace / "graph" / "execution_index.jsonl").exists())
-            self.assertFalse((workspace / "execution_graph").exists())
-            self.assertFalse((workspace / "interfaces").exists())
-            self.assertFalse((workspace / "registry").exists())
-            self.assertFalse((workspace / "index").exists())
-            self.assertTrue((workspace / "graph" / "execution_evidence.jsonl").exists())
-            self.assertFalse((workspace / "graph" / "execution_validation_audit.jsonl").exists())
-            self.assertTrue((workspace / "graph" / "execution_validation_summary.json").exists())
-            self.assertTrue((workspace / "graph" / "execution_health_report.md").exists())
-            self.assertTrue((workspace / "graph" / "compiled.json").exists())
-            self.assertTrue((workspace / "reports" / "build_summary.json").exists())
-            self.assertEqual(result.stats["interface_count"], 8)
-            self.assertEqual(len(result.interfaces), 8)
-            self.assertGreater(result.stats["execution_candidate_count"], 0)
-            self.assertGreater(result.stats["execution_accepted_flow_count"], 0)
-            self.assertNotIn("relation_validation", result.stats)
-            self.assertIn("execution_validation", result.stats)
-            self.assertIn("stage_wall_time_seconds", result.stats)
-
-            graph_data = json.loads((workspace / "graph" / "graph.json").read_text())
-            node_types = {node["type"] for node in graph_data["nodes"]}
-            edge_types = {edge["type"] for edge in graph_data["edges"]}
-            node_keys = set().union(*(node.keys() for node in graph_data["nodes"]))
-            self.assertEqual(node_types, {"skill"})
-            self.assertLessEqual(edge_types, {"similar_to", "compose_with", "depend_on"})
-            self.assertNotIn("member_of", edge_types)
-            self.assertTrue(all("candidate_sources" not in edge for edge in graph_data["edges"]))
-            self.assertTrue(all("raw_output" not in edge for edge in graph_data["edges"]))
-            self.assertNotIn("inputs", node_keys)
-            self.assertNotIn("outputs", node_keys)
-            self.assertNotIn("source_path", node_keys)
-            self.assertNotIn("wiki_path", node_keys)
-            self.assertNotIn("token_count", node_keys)
-            self.assertNotIn("canonical_skill_text_hash", node_keys)
-            self.assertNotIn("artifact", node_types)
-            self.assertNotIn("scenario", node_types)
-            self.assertIn("depend_on", edge_types)
-            self.assertGreater(result.stats["execution_projected_edge_count"], 0)
-            self.assertTrue(any(edge["provenance"] == "execution_projected" for edge in graph_data["edges"]))
-            compiled_graph = json.loads((workspace / "graph" / "compiled.json").read_text())
-            self.assertIn("core_graph", compiled_graph)
-            self.assertIn("interfaces", compiled_graph)
-            self.assertIn("canonicalization", compiled_graph)
-            self.assertIn("execution_graph", compiled_graph)
-            self.assertTrue(compiled_graph["canonicalization"]["objects"])
-            self.assertTrue(compiled_graph["canonicalization"]["aliases"])
-            execution_index = compiled_graph["execution_graph"]["execution_index"]
-            self.assertEqual(len(execution_index), result.stats["execution_accepted_flow_count"])
-            self.assertTrue(all(row["projected_edge_type"] in {"depend_on", "compose_with"} for row in execution_index))
-            build_metrics = json.loads((workspace / "reports" / "build_summary.json").read_text())
-            self.assertEqual(build_metrics["skill_count"], 8)
-            self.assertNotIn("relation_validation", build_metrics)
-            self.assertIn("execution_validation", build_metrics)
-            self.assertIn("policy_digest", build_metrics["execution_validation"])
-            self.assertNotIn("canonical_merge_audit_count", build_metrics)
-            self.assertIn("llm_usage", build_metrics)
-            self.assertIn("embedding", build_metrics)
-            self.assertEqual(
-                set(build_metrics["canonicalization"]),
-                {
-                    "cluster_count",
-                    "llm_call_count",
-                    "assignment_count",
-                    "omitted_term_count",
-                    "cache_hit_count",
-                    "semantic_threshold",
-                    "semantic_top_k",
-                    "max_group_size",
-                },
-            )
-            self.assertEqual(build_metrics["canonicalization"]["semantic_threshold"], 0.76)
-            self.assertEqual(build_metrics["canonicalization"]["semantic_top_k"], 8)
-            self.assertEqual(build_metrics["canonicalization"]["max_group_size"], 16)
-            self.assertEqual(build_metrics["embedding"]["model_id"], "test-fake-embedding")
-            self.assertGreater(build_metrics["embedding"]["estimated_input_tokens"], 0)
-            embedding_store = json.loads((workspace / "graph" / "embeddings.json").read_text(encoding="utf-8"))
-            self.assertEqual(set(embedding_store), {"model_id", "dimension", "embeddings"})
-            self.assertTrue(all("canonical_skill_text_hash" not in row for row in embedding_store["embeddings"]))
-            self.assertTrue(all(row["canonical_object"] for row in execution_index))
-            self.assertNotIn("artifact_nodes", compiled_graph["execution_graph"])
-            self.assertNotIn("scenario_nodes", compiled_graph["execution_graph"])
-            self.assertNotIn("skill_artifact_edges", compiled_graph["execution_graph"])
-            self.assertNotIn("skill_scenario_edges", compiled_graph["execution_graph"])
-            self.assertNotIn("debug_extraction", compiled_graph["execution_graph"])
-            status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
-            self.assertEqual(status["canonical_object_count"], result.stats["canonical_object_count"])
-            self.assertEqual(status["execution_compatibility_count"], result.stats["execution_compatibility_count"])
-            self.assertNotIn("canonical_merge_audit_count", status)
-            self.assertNotIn("community_count", status)
-            self.assertNotIn("community_refinement_model_id", status)
-            self.assertNotIn("community_clustering_algorithm", status)
-            self.assertNotIn("community_projection_similar_to_count", status)
-            self.assertNotIn("community_projection_compose_with_count", status)
-            self.assertNotIn("community_projection_depend_on_ignored_count", status)
-            self.assertNotIn("community_oversize_split_count", status)
-            self.assertNotIn("community_assignment_provenance", status)
-            self.assertNotIn("community_assignment_warning", status)
-            self.assertNotIn("communities", status["artifacts"])
-            self.assertNotIn("community_refinement_cache", status["artifacts"])
-            self.assertNotIn("artifact_node_count", status)
-            self.assertNotIn("scenario_node_count", status)
-            self.assertNotIn("artifact_nodes", status["artifacts"])
-            self.assertNotIn("scenario_nodes", status["artifacts"])
-            self.assertNotIn("skill_artifact_edges", status["artifacts"])
-            self.assertNotIn("skill_scenario_edges", status["artifacts"])
-            self.assertNotIn("compose_depend_candidate_count", result.stats)
-            self.assertNotIn("compose_depend_edge_count", result.stats)
-            canonical_health = (workspace / "graph" / "canonicalization_health_report.md").read_text(encoding="utf-8")
-            self.assertNotIn("merge audit", canonical_health)
-
-            neighbors = result.neighbors("skill:financial-kpi-extractor")
-            neighbor_ids = {item["skill_id"] for item in neighbors}
-            self.assertIn("skill:pdf-table-parser", neighbor_ids)
-
-            stale_obsolete_artifact = workspace / "graph" / "artifact_nodes.jsonl"
-            stale_obsolete_artifact.write_text("{}\n", encoding="utf-8")
-            stale_predicate_inventory = workspace / "graph" / "predicate_inventory.json"
-            stale_predicate_inventory.write_text("{}\n", encoding="utf-8")
-            stale_workflow_compatibility = workspace / "graph" / "workflow_compatibility.jsonl"
-            stale_workflow_compatibility.write_text("{}\n", encoding="utf-8")
-
-            second = _build_test_graph(
-                workspace=workspace,
-                canonicalization_provider=FixtureCanonicalizationProvider(),
-                interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=AcceptingExecutionValidator(),
-                embedding_provider=FakeEmbeddingProvider(),
-                build_id="test-build-2",
-            )
-            self.assertEqual(second.stats["skipped_unchanged"], 8)
-            self.assertFalse(stale_obsolete_artifact.exists())
-            self.assertFalse(stale_predicate_inventory.exists())
-            self.assertFalse(stale_workflow_compatibility.exists())
-
-    def test_config_digest_tracks_effective_embedding_model(self) -> None:
-        def build_with_embedding_model(tmp: str, model_id: str) -> tuple[str, dict[str, object], dict[str, object]]:
-            provider = FakeEmbeddingProvider()
-            provider.model_id = model_id
-            workspace = Path(tmp) / model_id.replace("/", "-")
-            result = _build_test_graph(
-                workspace=workspace,
-                canonicalization_provider=FixtureCanonicalizationProvider(),
-                interface_extractor=FixtureInterfaceExtractor(),
-                execution_validator=AcceptingExecutionValidator(),
-                embedding_provider=provider,
-                build_id=f"build-{model_id}",
-            )
-            status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
-            summary = json.loads((workspace / "reports" / "build_summary.json").read_text(encoding="utf-8"))
-            compiled = json.loads((workspace / "graph" / "compiled.json").read_text(encoding="utf-8"))
-            self.assertEqual(status["config_digest"], result.graph.config_digest)
-            self.assertEqual(summary["config_digest"], result.graph.config_digest)
-            self.assertEqual(compiled["config_digest"], result.graph.config_digest)
-            return result.graph.config_digest, summary, status
-
-        with TemporaryDirectory() as tmp:
-            digest_a, summary_a, status_a = build_with_embedding_model(tmp, "fake-embedding-a")
-            digest_b, summary_b, status_b = build_with_embedding_model(tmp, "fake-embedding-b")
-
-        self.assertNotEqual(digest_a, digest_b)
-        self.assertEqual(summary_a["models"]["embedding"], "fake-embedding-a")
-        self.assertEqual(summary_b["models"]["embedding"], "fake-embedding-b")
-        self.assertEqual(status_a["embedding_model_id"], "fake-embedding-a")
-        self.assertEqual(status_b["embedding_model_id"], "fake-embedding-b")
-
-    def test_health_report_detects_cycles_and_missing_evidence(self) -> None:
-        graph = GraphDocument(
-            schema_version="1.0",
-            build_id="health",
-            nodes=[],
-            edges=[
-                Edge(source="skill:a", target="skill:b", type="depend_on", confidence=0.9),
-                Edge(source="skill:b", target="skill:a", type="depend_on", confidence=0.9),
-                Edge(source="skill:a", target="skill:c", type="compose_with", confidence=0.8),
-            ],
-            stats={},
-            config_digest="x",
-        )
-        report = analyze_health(graph)
-
-        self.assertTrue(report.depend_on_cycles)
-        self.assertEqual(report.edges_missing_evidence, 3)
-
-    def test_graph_document_rejects_removed_or_invalid_schema_fields(self) -> None:
-        skill_payload = _health_skill("skill:a", "alpha", "A skill.").to_dict()
-
-        with self.assertRaisesRegex(ValueError, "unsupported node type"):
-            GraphDocument.from_dict(
-                {
-                    "schema_version": "1.0",
-                    "build_id": "bad-node",
-                    "nodes": [{**skill_payload, "type": "community"}],
-                    "edges": [],
-                    "stats": {},
-                    "config_digest": "x",
-                }
-            )
-
-        with self.assertRaisesRegex(ValueError, "missing edge type"):
-            Edge.from_dict({"source": "skill:a", "target": "skill:b", "confidence": 0.5})
-
-        with self.assertRaisesRegex(ValueError, "unsupported edge type"):
-            Edge.from_dict(
-                {"source": "skill:a", "target": "skill:b", "type": "member_of", "confidence": 0.5}
-            )
-
-    def test_build_uses_litellm_validator_by_default_and_reuses_cache(self) -> None:
-        calls: list[dict[str, object]] = []
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**kwargs):
-            calls.append(kwargs)
-            messages = kwargs.get("messages", [])
-            user_content = messages[-1].get("content", "") if messages else ""
-            if "SkillFabric interface analyst" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "capability_summary": "Interface extracted for cache testing.",
-                                        "uses_tools": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            if "Validate whether an execution-level flow exists" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "accepted": False,
-                                        "flow_type": "none",
-                                        "projected_edge_type": "none",
-                                        "confidence": 0.0,
-                                        "evidence": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            if "interface_term_canonicalization_v2" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "canonical_objects": [],
-                                        "omitted_term_ids": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            if "interface_term_canonicalization_v2" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "canonical_objects": [],
-                                        "omitted_term_ids": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "accepted": False,
-                                    "flow_type": "none",
-                                    "projected_edge_type": "none",
-                                    "confidence": 0.0,
-                                    "evidence": [],
-                                }
-                            )
-                        }
-                    }
-                ]
-            }
-
-        fake_litellm.completion = fake_completion
-
-        fake_litellm.embedding = fake_litellm_embedding
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                workspace = Path(tmp) / ".skillfabric"
-                env_path = Path(tmp) / ".env"
-                env_path.write_text(
-                    "\n".join(
-                        [
-                            "BASE_URL=https://example.test/api",
-                            "API_KEY=sk-test",
-                            "MODEL=openai/test-model",
-                            "EMBEDDING_MODEL=openai/test-embedding",
-                        ]
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-
-                _build_test_graph(
-                    workspace=workspace,
-                    embedding_provider=FakeEmbeddingProvider(),
-                    llm_env_path=env_path,
-                    build_id="llm-build-1",
-                )
-                first_call_count = len(calls)
-                self.assertGreater(first_call_count, 0)
-
-                _build_test_graph(
-                    workspace=workspace,
-                    embedding_provider=FakeEmbeddingProvider(),
-                    llm_env_path=env_path,
-                    build_id="llm-build-2",
-                )
-                self.assertEqual(len(calls), first_call_count)
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-    def test_cli_build_accepts_env_file_for_default_litellm(self) -> None:
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**kwargs):
-            messages = kwargs.get("messages", [])
-            user_content = messages[-1].get("content", "") if messages else ""
-            if "SkillFabric interface analyst" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "capability_summary": "Interface extracted for CLI test.",
-                                        "uses_tools": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            if "Validate whether an execution-level flow exists" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "accepted": False,
-                                        "flow_type": "none",
-                                        "projected_edge_type": "none",
-                                        "confidence": 0.0,
-                                        "evidence": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            if "interface_term_canonicalization_v2" in user_content:
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "canonical_objects": [],
-                                        "omitted_term_ids": [],
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "accepted": False,
-                                    "flow_type": "none",
-                                    "projected_edge_type": "none",
-                                    "confidence": 0.0,
-                                    "evidence": [],
-                                }
-                            )
-                        }
-                    }
-                ]
-            }
-
-        fake_litellm.completion = fake_completion
-
-        fake_litellm.embedding = fake_litellm_embedding
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                workspace = Path(tmp) / ".skillfabric"
-                env_path = Path(tmp) / ".env"
-                env_path.write_text(
-                    "BASE_URL=https://example.test/api\n"
-                    "API_KEY=sk-test\n"
-                    "MODEL=openai/test-model\n"
-                    "EMBEDDING_MODEL=openai/test-embedding\n",
-                    encoding="utf-8",
-                )
-                stdout = io.StringIO()
-                with contextlib.redirect_stdout(stdout):
-                    cli_main(
-                        [
-                            "build",
-                            "--skill-root",
-                            str(FIXTURE_SKILLS),
-                            "--workspace",
-                            str(workspace),
-                            "--env-file",
-                            str(env_path),
-                            "--skip-wiki",
-                        ]
-                    )
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(payload["skill_count"], 8)
-                self.assertIn("graph", payload["artifacts"])
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-    def test_cli_build_without_env_file_fails_fast_when_llm_enabled(self) -> None:
-        with TemporaryDirectory() as tmp:
-            missing_env = Path(tmp) / "missing.env"
-            cleared_llm_env = {
-                "API_KEY": "",
-                "BASE_URL": "",
-                "MODEL": "",
-                "EMBEDDING_MODEL": "",
-                "OPENAI_API_BASE": "",
-                "OPENAI_BASE_URL": "",
-                "OPENAI_API_KEY": "",
-            }
-            with patch.dict(os.environ, cleared_llm_env, clear=False):
-                with self.assertRaisesRegex(SystemExit, "missing API configuration"):
-                    cli_main(
-                        [
-                            "build",
-                            "--skill-root",
-                            str(FIXTURE_SKILLS),
-                            "--workspace",
-                            str(Path(tmp) / ".skillfabric"),
-                            "--env-file",
-                            str(missing_env),
-                        ]
-                    )
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert parameters == {
+        "contract_extractor",
+        "relation_judge",
+        "cycle_adjudicator",
+        "embedding_provider",
+        "build_id",
+    }

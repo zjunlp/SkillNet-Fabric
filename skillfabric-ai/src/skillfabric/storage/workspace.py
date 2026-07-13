@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -45,20 +45,12 @@ class Workspace:
         return self.wiki_dir / "workflows"
 
     @property
-    def wiki_references_dir(self) -> Path:
-        return self.wiki_dir / "references"
-
-    @property
     def wiki_skill_sources_dir(self) -> Path:
         return self.wiki_skills_dir / "sources"
 
     @property
     def runs_dir(self) -> Path:
         return self.root / "runs"
-
-    @property
-    def checkpoint_path(self) -> Path:
-        return self.root / "checkpoint.json"
 
     @property
     def status_path(self) -> Path:
@@ -113,10 +105,8 @@ class Workspace:
                 handle.write(str(os.getpid()))
             yield
         finally:
-            try:
+            with suppress(FileNotFoundError):
                 self.lock_path.unlink()
-            except FileNotFoundError:
-                pass
 
     def _reclaim_stale_lock(self) -> bool:
         """Remove a lock file if it does not point at a live process."""
@@ -128,10 +118,8 @@ class Workspace:
             pid = -1
         if _pid_is_running(pid):
             return False
-        try:
+        with suppress(FileNotFoundError):
             self.lock_path.unlink()
-        except FileNotFoundError:
-            pass
         return True
 
 
