@@ -10,7 +10,13 @@ from unittest.mock import patch
 
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.wiki.models import WikiBuildConfig
-from skillfabric.wiki.summarizer import LiteLLMSummaryProvider, WikiSummarizer, WikiSummaryError
+from skillfabric.wiki.summarizer import (
+    CONTRACT_SUMMARY_MODEL_ID,
+    WIKI_SUMMARY_PROMPT_ID,
+    LiteLLMSummaryProvider,
+    WikiSummarizer,
+    WikiSummaryError,
+)
 
 
 class CountingSummaryProvider:
@@ -195,7 +201,9 @@ class WikiSummaryCacheTests(unittest.TestCase):
 
         self.assertEqual(calls[0]["max_tokens"], 32768)
         prompt_text = json.dumps(calls[0]["messages"], ensure_ascii=False)
-        self.assertIn("wiki_summary_v2", prompt_text)
+        self.assertEqual(WIKI_SUMMARY_PROMPT_ID, "wiki_summary")
+        self.assertEqual(CONTRACT_SUMMARY_MODEL_ID, "contract-derived")
+        self.assertIn(WIKI_SUMMARY_PROMPT_ID, prompt_text)
         self.assertIn("<output_schema>", prompt_text)
         self.assertIn("<source_data>", prompt_text)
         self.assertIn("untrusted data", prompt_text)
@@ -263,6 +271,27 @@ class WikiSummaryCacheTests(unittest.TestCase):
 
             self.assertEqual(first.routing_summary, second.routing_summary)
             self.assertEqual(provider.calls, 1)
+
+    def test_summary_cache_key_includes_prompt_fingerprint(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = WikiBuildConfig(
+                workspace=Path(tmp) / ".skillfabric",
+                use_llm_summaries=False,
+            )
+            summarizer = WikiSummarizer(config)
+
+            summarizer.summarize_skill(
+                entity_id="skill:test",
+                content_hash="hash-1",
+                payload={"capability": "Test tasks."},
+            )
+
+            self.assertEqual(len(summarizer.cache), 1)
+            cache_key = next(iter(summarizer.cache))
+            prompt_id, fingerprint, *_parts = cache_key.split("|")
+            self.assertEqual(prompt_id, WIKI_SUMMARY_PROMPT_ID)
+            self.assertEqual(len(fingerprint), 64)
+            self.assertTrue(all(character in "0123456789abcdef" for character in fingerprint))
 
     def test_summary_batch_retries_and_preserves_records(self) -> None:
         with TemporaryDirectory() as tmp:

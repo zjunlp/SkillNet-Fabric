@@ -20,7 +20,7 @@ FIXTURE_SKILLS = Path(__file__).resolve().parents[1] / "fixtures" / "skills"
     os.environ.get("SKILLFABRIC_REAL_CC_SDK") != "1",
     reason="set SKILLFABRIC_REAL_CC_SDK=1 to run the real Claude Agent SDK smoke test",
 )
-def test_real_claude_sdk_routes_from_schema_v2_query_wiki(tmp_path) -> None:
+def test_real_claude_sdk_routes_from_semantic_query_wiki(tmp_path) -> None:
     env_file_value = os.environ.get("SKILLFABRIC_REAL_ENV_FILE", "")
     if not env_file_value:
         pytest.skip("set SKILLFABRIC_REAL_ENV_FILE to a configured env-file path")

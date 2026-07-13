@@ -6,6 +6,7 @@ import pytest
 
 import skillfabric.orchestrator.package as package_module
 from skillfabric.orchestrator.package import (
+    PLANNER_PROMPT_ID,
     plan_execution_package,
     planner_output_json_schema,
     validate_planner_output,
@@ -110,6 +111,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner"
     messages = calls[0]["messages"]
     prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
     assert "skill:pdf-table-parser" in prompt

@@ -9,7 +9,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-EXPLORER_PROMPT_ID = "query_wiki_explorer_semantic_v2"
+EXPLORER_PROMPT_ID = "query_wiki_explorer_semantic"
 DEFAULT_ALLOWED_TOOLS = ("Read", "LS", "Glob", "Grep")
 
 
