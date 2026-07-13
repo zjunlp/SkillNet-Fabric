@@ -484,6 +484,8 @@ def _select_candidate_hits(
                 key=lambda hit: (hit.rank, hit.matched_skill, hit.query_field, hit.matched_field),
             )
             channels[channel] = list(dict.fromkeys(hit.matched_skill for hit in ordered))
+        for matched_skill in channels.get("handoff", ())[:top_k]:
+            selected.add(tuple(sorted((skill_id, matched_skill))))
         for fused in reciprocal_rank_fusion(channels)[:top_k]:
             selected.add(tuple(sorted((skill_id, fused.skill_id))))
     return {key: hits[key] for key in sorted(selected)}

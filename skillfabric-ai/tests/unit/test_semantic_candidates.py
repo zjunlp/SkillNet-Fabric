@@ -12,10 +12,12 @@ from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.semantic.candidates import (
     DEFAULT_CANDIDATE_TOP_K,
     CandidateRetrievalError,
+    _select_candidate_hits,
 )
 from skillfabric.compiled_graph.semantic.candidates import (
     retrieve_candidate_pairs as _retrieve_candidate_pairs,
 )
+from skillfabric.compiled_graph.semantic.models import CandidateHit
 from skillfabric.indexing.bm25 import build_bm25_index
 from tests.unit.relation_helpers import make_skill
 
@@ -661,3 +663,40 @@ def test_fused_candidate_budget_is_bounded_and_deterministic(tmp_path) -> None:
     assert first.pairs == second.pairs
     assert len(first.pairs) <= len(skills) * 2
     assert DEFAULT_CANDIDATE_TOP_K == 8
+
+
+def test_top_handoff_candidate_is_not_displaced_by_cross_channel_agreement() -> None:
+    handoff_pair = ("skill:query", "skill:workflow")
+    consensus_pair = ("skill:alternative", "skill:query")
+    hits = {
+        handoff_pair: [
+            CandidateHit(
+                channel="handoff",
+                query_skill="skill:query",
+                matched_skill="skill:workflow",
+                rank=1,
+            )
+        ],
+        consensus_pair: [
+            CandidateHit(
+                channel="similarity",
+                query_skill="skill:query",
+                matched_skill="skill:alternative",
+                rank=1,
+            ),
+            CandidateHit(
+                channel="lexical",
+                query_skill="skill:query",
+                matched_skill="skill:alternative",
+                rank=1,
+            ),
+        ],
+    }
+
+    selected = _select_candidate_hits(
+        hits,
+        skill_ids=["skill:query", "skill:workflow", "skill:alternative"],
+        top_k=1,
+    )
+
+    assert set(selected) == {handoff_pair, consensus_pair}
