@@ -43,8 +43,8 @@ The compiler performs these stages:
 2. Extract strict, source-grounded skill contracts.
 3. Build BM25 and dense indexes.
 4. Retrieve bounded handoff, similarity, and explicit-reference candidate pairs.
-5. Judge each candidate once as `depend_on`, `compose_with`, `similar_to`, or
-   `none`.
+5. Judge each candidate once, accepting `depend_on`, `compose_with`, or
+   `similar_to`, or rejecting the pair when evidence is insufficient.
 6. Validate evidence, relation direction, uniqueness, and dependency acyclicity.
 7. Write schema-v2 graph and audit artifacts.
 

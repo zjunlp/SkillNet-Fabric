@@ -132,9 +132,8 @@ Optional wiki summaries are controlled independently with `--wiki-summary-mode o
 | `depend_on` | One skill requires another skill's capability, output, or setup | Dependent → prerequisite |
 | `compose_with` | Two skills are useful together in a broader workflow | Symmetric operational evidence |
 | `similar_to` | Two skills address substantially overlapping needs | Symmetric alternative evidence |
-| `none` | Available evidence does not justify a reusable relationship | Not stored as a graph edge |
 
-The graph supplies evidence to routing and planning. It does not force prerequisite closure, automatically enlarge the selected set, or dictate the final execution order.
+Candidate pairs without sufficient evidence are rejected and do not become graph edges. The graph supplies evidence to routing and planning; it does not force prerequisite closure, automatically enlarge the selected set, or dictate the final execution order.
 
 ### 3. Route Through a Query Wiki
 
