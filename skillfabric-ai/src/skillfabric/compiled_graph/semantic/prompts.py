@@ -23,12 +23,16 @@ _OUTPUT_SCHEMA = {
 
 
 def build_relation_judge_messages(
-    pair: CandidatePair,
+    pairs: tuple[CandidatePair, ...],
     skills: dict[str, SkillNode],
     contracts: dict[str, SkillContract],
 ) -> list[dict[str, str]]:
-    """Build a grounded Skill Profile prompt for one unordered candidate pair."""
+    """Build one grounded request for a bounded set of candidate pairs."""
 
+    if not pairs:
+        raise ValueError("relation request must contain at least one candidate pair")
+    skill_ids = sorted({skill_id for pair in pairs for skill_id in pair.key})
+    output_schema = {"decisions": [_OUTPUT_SCHEMA]}
     user = "\n".join(
         [
             "<skill_profiles>",
@@ -37,25 +41,37 @@ def build_relation_judge_messages(
                     skill_id: _skill_profile(
                         skills[skill_id],
                         contracts[skill_id],
-                        pair,
+                        pairs,
                     )
-                    for skill_id in pair.key
+                    for skill_id in skill_ids
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             "</skill_profiles>",
+            "<candidate_pairs>",
+            json.dumps(
+                [
+                    {"skill_a": pair.skill_a, "skill_b": pair.skill_b}
+                    for pair in pairs
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "</candidate_pairs>",
             "<task>",
-            "Assign exactly one final semantic relation to this candidate pair.",
-            "Candidate retrieval only selects the pair; it is never proof of a relation.",
+            "Independently assign exactly one final semantic relation to every listed candidate pair.",
+            "Candidate retrieval only selects pairs for review; it is never proof of a relation.",
+            "Do not compare pairs with one another or infer a relation because another pair is present.",
             "</task>",
             _relation_semantics(),
             _decision_process(),
             _relation_examples(),
             "<output_schema>",
-            json.dumps(_OUTPUT_SCHEMA, ensure_ascii=False, indent=2),
+            json.dumps(output_schema, ensure_ascii=False, indent=2),
             "</output_schema>",
             "Return one JSON object with exactly these keys and no surrounding text.",
+            "Return each listed candidate pair exactly once and return no unlisted pair.",
             "For compose_with, similar_to, or none, use canonical id order.",
             "For a non-none relation, cite exact supporting line numbers from both skills.",
         ]
@@ -163,7 +179,7 @@ def _line_numbered_source(skill: SkillNode) -> list[dict[str, int | str]]:
 def _skill_profile(
     skill: SkillNode,
     contract: SkillContract,
-    pair: CandidatePair,
+    pairs: tuple[CandidatePair, ...],
 ) -> dict[str, object]:
     return {
         "id": skill.id,
@@ -174,7 +190,7 @@ def _skill_profile(
         "requires": _profile_fields(contract.requires),
         "produces": _profile_fields(contract.produces),
         "tools": _profile_fields(contract.tools),
-        "source_evidence": _profile_source_evidence(skill, contract, pair),
+        "source_evidence": _profile_source_evidence(skill, contract, pairs),
     }
 
 
@@ -192,13 +208,15 @@ def _profile_fields(fields) -> list[dict[str, object]]:
 def _profile_source_evidence(
     skill: SkillNode,
     contract: SkillContract,
-    pair: CandidatePair,
+    pairs: tuple[CandidatePair, ...],
 ) -> list[dict[str, int | str]]:
     evidence = list(contract.evidence)
     for fields in (contract.requires, contract.produces, contract.tools):
         evidence.extend(item for field in fields for item in field.evidence)
     evidence.extend(
         item
+        for pair in pairs
+        if skill.id in pair.key
         for hit in pair.hits
         for item in hit.evidence
         if item.skill == skill.id
@@ -218,14 +236,8 @@ def _profile_source_evidence(
 
 RELATION_PROMPT_FINGERPRINT = prompt_fingerprint(
     RELATION_PROMPT_ID,
-    _OUTPUT_SCHEMA,
-    _relation_semantics(),
-    _decision_process(),
-    _relation_examples(),
-)
-CYCLE_PROMPT_FINGERPRINT = prompt_fingerprint(
-    CYCLE_PROMPT_ID,
     {"decisions": [_OUTPUT_SCHEMA]},
     _relation_semantics(),
     _decision_process(),
+    _relation_examples(),
 )

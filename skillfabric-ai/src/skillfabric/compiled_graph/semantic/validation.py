@@ -1,10 +1,11 @@
-"""Strict pair-level semantic validation with validated result caching."""
+"""Strict semantic relation requests with pair-level validated caching."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -30,6 +31,7 @@ _DECISION_KEYS = frozenset(
     {"relation", "source_skill", "target_skill", "confidence", "reason", "evidence"}
 )
 _RELATIONS = frozenset({"depend_on", "compose_with", "similar_to", "none"})
+RELATION_PAIRS_PER_REQUEST = 4
 
 
 class RelationValidationError(RuntimeError):
@@ -37,22 +39,29 @@ class RelationValidationError(RuntimeError):
 
 
 class RelationJudge(Protocol):
-    """Provider protocol for one pair-level semantic judgment."""
+    """Provider protocol for one exact semantic relation request."""
 
     model_id: str
 
     def judge(
         self,
-        pair: CandidatePair,
+        pairs: tuple[CandidatePair, ...],
         skills: dict[str, SkillNode],
         contracts: dict[str, SkillContract],
     ) -> dict[str, Any]:
-        """Return one raw semantic decision."""
+        """Return one raw decision for every requested pair."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingDecision:
+    index: int
+    pair: CandidatePair
+    cache_key: str
 
 
 @dataclass(slots=True)
 class LiteLLMRelationJudge:
-    """Production full-source semantic judge."""
+    """Production Skill Profile semantic judge."""
 
     config: LLMConfig
 
@@ -66,15 +75,15 @@ class LiteLLMRelationJudge:
 
     def judge(
         self,
-        pair: CandidatePair,
+        pairs: tuple[CandidatePair, ...],
         skills: dict[str, SkillNode],
         contracts: dict[str, SkillContract],
     ) -> dict[str, Any]:
         response = litellm_completion(
-            messages=build_relation_judge_messages(pair, skills, contracts),
+            messages=build_relation_judge_messages(pairs, skills, contracts),
             config=self.config,
             usage_operation="graph.semantic_relation",
-            usage_metadata={"skill_a": pair.skill_a, "skill_b": pair.skill_b},
+            usage_metadata={"candidate_pairs": [list(pair.key) for pair in pairs]},
         )
         return parse_json_response(response)
 
@@ -100,12 +109,12 @@ def validate_candidate_pairs(
         raise RelationValidationError("each unordered candidate pair may be judged only once")
     cache = _load_cache(cache_path)
     records: list[RelationDecision | None] = [None] * len(ordered_pairs)
-    pending: list[tuple[int, CandidatePair, str]] = []
+    pending: list[_PendingDecision] = []
     for index, pair in enumerate(ordered_pairs):
         key = _cache_key(pair, skills_by_id, contracts, judge.model_id)
         cached = cache.get(key)
         if cached is None:
-            pending.append((index, pair, key))
+            pending.append(_PendingDecision(index=index, pair=pair, cache_key=key))
             continue
         try:
             records[index] = decision_from_payload(
@@ -117,40 +126,103 @@ def validate_candidate_pairs(
         except (TypeError, ValueError) as exc:
             raise RelationValidationError(f"invalid relation cache for {pair.key}: {exc}") from exc
 
-    def judge_one(item: tuple[int, CandidatePair, str]) -> RelationDecision:
-        _, pair, _ = item
-        raw = judge.judge(pair, skills_by_id, contracts)
+    requests = _pack_requests(pending, limit=RELATION_PAIRS_PER_REQUEST)
+
+    def judge_one(request: tuple[_PendingDecision, ...]) -> list[tuple[_PendingDecision, RelationDecision]]:
+        request_pairs = tuple(item.pair for item in request)
+        raw = judge.judge(request_pairs, skills_by_id, contracts)
         if not isinstance(raw, dict):
             raise ValueError("relation judge output must be an object")
-        return decision_from_payload(
-            pair,
-            raw,
-            skills_by_id,
-        )
+        decisions = _decisions_from_response(request_pairs, raw, skills_by_id)
+        return list(zip(request, decisions, strict=True))
 
-    outcomes = run_llm_jobs(pending, judge_one, options=job_options, label="relation")
+    outcomes = run_llm_jobs(requests, judge_one, options=job_options, label="relation")
     additions: dict[str, dict[str, Any]] = {}
     for outcome in outcomes:
         if not outcome.ok:
             continue
-        index, _pair, key = outcome.item
-        decision = outcome.value
-        if not isinstance(decision, RelationDecision):
+        request_decisions = outcome.value
+        if not isinstance(request_decisions, list):
             raise RelationValidationError("relation validation returned an invalid internal result")
-        records[index] = decision
-        additions[key] = decision.judge_dict()
+        for pending_item, decision in request_decisions:
+            if not isinstance(decision, RelationDecision):
+                raise RelationValidationError(
+                    "relation validation returned an invalid internal result"
+                )
+            records[pending_item.index] = decision
+            additions[pending_item.cache_key] = decision.judge_dict()
     if additions:
         cache.update(additions)
         _write_cache(cache_path, cache)
     failures = [outcome for outcome in outcomes if not outcome.ok]
     if failures:
         first = failures[0]
-        _, pair, _ = first.item
         error = first.error or RuntimeError("unknown relation validation failure")
+        pair_keys = [item.pair.key for item in first.item]
         raise RelationValidationError(
-            f"relation validation failed for {pair.key}: {error}"
+            f"relation validation failed for {pair_keys}: {error}"
         ) from error
     return [record for record in records if record is not None]
+
+
+def _pack_requests(
+    pending: list[_PendingDecision],
+    *,
+    limit: int,
+) -> list[tuple[_PendingDecision, ...]]:
+    if limit <= 0:
+        raise ValueError("relation request limit must be positive")
+    remaining = {item.pair.key: item for item in pending}
+    requests: list[tuple[_PendingDecision, ...]] = []
+    while remaining:
+        endpoint_counts = Counter(
+            skill_id
+            for item in remaining.values()
+            for skill_id in item.pair.key
+        )
+        highest_count = max(endpoint_counts.values())
+        anchor = min(
+            skill_id for skill_id, count in endpoint_counts.items() if count == highest_count
+        )
+        request = tuple(
+            item
+            for item in sorted(remaining.values(), key=lambda row: row.pair.key)
+            if anchor in item.pair.key
+        )[:limit]
+        requests.append(request)
+        for item in request:
+            remaining.pop(item.pair.key)
+    return requests
+
+
+def _decisions_from_response(
+    pairs: tuple[CandidatePair, ...],
+    payload: dict[str, Any],
+    skills: dict[str, SkillNode],
+) -> list[RelationDecision]:
+    if set(payload) != {"decisions"}:
+        raise ValueError("relation judge response must contain exactly decisions")
+    raw_decisions = payload.get("decisions")
+    if not isinstance(raw_decisions, list):
+        raise ValueError("relation judge decisions must be a list")
+    pairs_by_key = {pair.key: pair for pair in pairs}
+    decisions_by_key: dict[tuple[str, str], RelationDecision] = {}
+    for raw in raw_decisions:
+        if not isinstance(raw, dict):
+            raise ValueError("relation judge decisions must be objects")
+        source = _required_string(raw.get("source_skill"), "source_skill")
+        target = _required_string(raw.get("target_skill"), "target_skill")
+        key = tuple(sorted((source, target)))
+        if key in decisions_by_key:
+            raise ValueError(f"relation judge returned duplicate candidate pair: {key}")
+        pair = pairs_by_key.get(key)
+        if pair is None:
+            raise ValueError(f"relation judge returned unexpected candidate pair: {key}")
+        decisions_by_key[key] = decision_from_payload(pair, raw, skills)
+    missing = sorted(set(pairs_by_key) - set(decisions_by_key))
+    if missing:
+        raise ValueError(f"relation judge response is missing candidate pairs: {missing}")
+    return [decisions_by_key[pair.key] for pair in pairs]
 
 
 def decision_from_payload(

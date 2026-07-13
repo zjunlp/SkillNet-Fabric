@@ -21,15 +21,17 @@ class StaticContractExtractor:
 class StaticRelationJudge:
     model_id: str
     responses: dict[tuple[str, str], dict[str, Any]]
+    calls: list[tuple[tuple[str, str], ...]] = field(default_factory=list)
 
     def judge(
         self,
-        pair: CandidatePair,
+        pairs: tuple[CandidatePair, ...],
         skills: dict[str, SkillNode],
         contracts: dict[str, SkillContract],
     ) -> dict[str, Any]:
         del skills, contracts
-        return dict(self.responses[pair.key])
+        self.calls.append(tuple(pair.key for pair in pairs))
+        return {"decisions": [dict(self.responses[pair.key]) for pair in pairs]}
 
 
 @dataclass
@@ -84,36 +86,44 @@ class FixtureRelationJudge:
 
     def judge(
         self,
-        pair: CandidatePair,
+        pairs: tuple[CandidatePair, ...],
         skills: dict[str, SkillNode],
         contracts: dict[str, SkillContract],
     ) -> dict[str, Any]:
         del contracts
-        self.calls.append(pair.key)
-        relation = _KNOWN_RELATIONS.get(pair.key)
-        if relation is None:
-            return {
-                "relation": "none",
-                "source_skill": pair.skill_a,
-                "target_skill": pair.skill_b,
-                "confidence": 0.96,
-                "reason": "The fixture sources do not establish an operational relation.",
-                "evidence": [],
-            }
-        relation_type, source, target, source_needle, target_needle = relation
-        source_line, _ = _find_line(skills[source], source_needle)
-        target_line, _ = _find_line(skills[target], target_needle)
-        return {
-            "relation": relation_type,
-            "source_skill": source,
-            "target_skill": target,
-            "confidence": 0.94,
-            "reason": "The fixture sources explicitly support this operational relation.",
-            "evidence": [
-                {"skill": source, "line": source_line},
-                {"skill": target, "line": target_line},
-            ],
-        }
+        decisions = []
+        for pair in pairs:
+            self.calls.append(pair.key)
+            relation = _KNOWN_RELATIONS.get(pair.key)
+            if relation is None:
+                decisions.append(
+                    {
+                        "relation": "none",
+                        "source_skill": pair.skill_a,
+                        "target_skill": pair.skill_b,
+                        "confidence": 0.96,
+                        "reason": "The fixture sources do not establish an operational relation.",
+                        "evidence": [],
+                    }
+                )
+                continue
+            relation_type, source, target, source_needle, target_needle = relation
+            source_line, _ = _find_line(skills[source], source_needle)
+            target_line, _ = _find_line(skills[target], target_needle)
+            decisions.append(
+                {
+                    "relation": relation_type,
+                    "source_skill": source,
+                    "target_skill": target,
+                    "confidence": 0.94,
+                    "reason": "The fixture sources explicitly support this operational relation.",
+                    "evidence": [
+                        {"skill": source, "line": source_line},
+                        {"skill": target, "line": target_line},
+                    ],
+                }
+            )
+        return {"decisions": decisions}
 
 
 _KNOWN_RELATIONS = {

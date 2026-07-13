@@ -246,7 +246,7 @@ def test_relation_cache_ignores_retrieval_rank_changes_for_the_same_pair(tmp_pat
     assert cached.cache_hit is True
 
 
-def test_successful_decisions_are_cached_when_another_pair_fails(tmp_path) -> None:
+def test_successful_decisions_are_cached_when_another_request_fails(tmp_path, monkeypatch) -> None:
     skills, contracts = semantic_skills_and_contracts()
     other = make_skill("skill:other", "other", "Perform an unrelated operation.")
     contracts[other.id] = SkillContract.from_extraction(
@@ -278,11 +278,13 @@ def test_successful_decisions_are_cached_when_another_pair_fails(tmp_path) -> No
     class PartiallyFailingJudge:
         model_id = "relation-test-model"
 
-        def judge(self, pair, _skills, _contracts):
+        def judge(self, pairs, _skills, _contracts):
+            pair = pairs[0]
             if pair.key == semantic_pair().key:
-                return dependency_payload()
+                return {"decisions": [dependency_payload()]}
             raise RuntimeError("transient provider failure")
 
+    monkeypatch.setattr(validation_module, "RELATION_PAIRS_PER_REQUEST", 1)
     with pytest.raises(RelationValidationError, match="transient provider failure"):
         validate_candidate_pairs(
             [semantic_pair(), failed_pair],
@@ -308,7 +310,7 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     by_id = {skill.id: skill for skill in skills}
 
     messages = build_relation_judge_messages(
-        semantic_pair(),
+        (semantic_pair(),),
         by_id,
         contracts,
     )
@@ -320,7 +322,7 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     assert "<decision_process>" in rendered
     assert "<output_schema>" in rendered
     assert "<candidate_evidence>" not in rendered
-    assert "Candidate retrieval only selects the pair" in rendered
+    assert "Candidate retrieval only selects pairs for review" in rendered
     assert "Retrieval evidence only explains" not in rendered
     assert "<skill_profiles>" in rendered
     assert "<skill_sources>" not in rendered
@@ -341,7 +343,9 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     assert "needs_full_context" not in rendered
     assert "edge_type" not in rendered
     schema_text = rendered.split("<output_schema>", 1)[1].split("</output_schema>", 1)[0]
-    assert set(json.loads(schema_text)) == {
+    schema = json.loads(schema_text)
+    assert set(schema) == {"decisions"}
+    assert set(schema["decisions"][0]) == {
         "relation",
         "source_skill",
         "target_skill",
@@ -377,3 +381,140 @@ def test_relation_cache_identity_includes_prompt_policy(tmp_path, monkeypatch) -
 
     assert first.cache_hit is False
     assert second.cache_hit is False
+
+
+@pytest.mark.parametrize(
+    ("response_kind", "message"),
+    [
+        ("missing", "missing"),
+        ("duplicate", "duplicate"),
+        ("extra", "unexpected"),
+    ],
+)
+def test_relation_request_requires_exact_pair_coverage(
+    response_kind,
+    message,
+) -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    other = make_skill("skill:other", "other", "Perform an unrelated operation.")
+    contracts[other.id] = SkillContract.from_extraction(
+        other,
+        {
+            "capability": "Perform an unrelated operation.",
+            "when_to_use": "Use for an unrelated operation.",
+            "requires": [],
+            "produces": [],
+            "tools": [],
+            "evidence": [{"line": 1}],
+        },
+    )
+    skills.append(other)
+    second_pair = CandidatePair(
+        skill_a="skill:consumer",
+        skill_b=other.id,
+        hits=(
+            CandidateHit(
+                channel="similarity",
+                query_skill="skill:consumer",
+                matched_skill=other.id,
+                rank=1,
+            ),
+        ),
+    )
+    second_decision = {
+        "relation": "none",
+        "source_skill": second_pair.skill_a,
+        "target_skill": second_pair.skill_b,
+        "confidence": 0.99,
+        "reason": "The skills are unrelated.",
+        "evidence": [],
+    }
+    extra_decision = {
+        **second_decision,
+        "source_skill": "skill:other",
+        "target_skill": "skill:producer",
+    }
+    decisions = {
+        "missing": [dependency_payload()],
+        "duplicate": [dependency_payload(), dependency_payload()],
+        "extra": [dependency_payload(), second_decision, extra_decision],
+    }[response_kind]
+
+    class RawJudge:
+        model_id = "relation-test-model"
+
+        def judge(self, _pairs, _skills, _contracts):
+            return {"decisions": decisions}
+
+    with pytest.raises(RelationValidationError, match=message):
+        validate_candidate_pairs(
+            [semantic_pair(), second_pair],
+            skills,
+            contracts,
+            judge=RawJudge(),
+            job_options=LLMJobOptions(concurrency=1, max_retries=0, progress_every=0),
+        )
+
+
+def test_cached_pairs_are_removed_before_request_packing(tmp_path) -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    cache = tmp_path / "relation_decisions.json"
+    first_judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={semantic_pair().key: dependency_payload()},
+    )
+    validate_candidate_pairs(
+        [semantic_pair()],
+        skills,
+        contracts,
+        judge=first_judge,
+        cache_path=cache,
+    )
+    other = make_skill("skill:other", "other", "Perform an unrelated operation.")
+    contracts[other.id] = SkillContract.from_extraction(
+        other,
+        {
+            "capability": "Perform an unrelated operation.",
+            "when_to_use": "Use for an unrelated operation.",
+            "requires": [],
+            "produces": [],
+            "tools": [],
+            "evidence": [{"line": 1}],
+        },
+    )
+    skills.append(other)
+    second_pair = CandidatePair(
+        skill_a="skill:consumer",
+        skill_b=other.id,
+        hits=(
+            CandidateHit(
+                channel="similarity",
+                query_skill="skill:consumer",
+                matched_skill=other.id,
+                rank=1,
+            ),
+        ),
+    )
+    second_payload = {
+        "relation": "none",
+        "source_skill": second_pair.skill_a,
+        "target_skill": second_pair.skill_b,
+        "confidence": 0.99,
+        "reason": "The skills are unrelated.",
+        "evidence": [],
+    }
+    second_judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={second_pair.key: second_payload},
+    )
+
+    decisions = validate_candidate_pairs(
+        [semantic_pair(), second_pair],
+        skills,
+        contracts,
+        judge=second_judge,
+        cache_path=cache,
+    )
+
+    assert [decision.cache_hit for decision in decisions] == [True, False]
+    assert second_judge.calls == [(second_pair.key,)]
