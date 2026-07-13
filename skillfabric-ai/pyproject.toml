@@ -48,9 +48,9 @@ all = [
 skillfabric = "skillfabric.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Icarus-Chen/SkillFabric_public"
-Source = "https://github.com/Icarus-Chen/SkillFabric_public"
-Issues = "https://github.com/Icarus-Chen/SkillFabric_public/issues"
+Homepage = "https://github.com/zjunlp/SkillNet-Fabric"
+Source = "https://github.com/zjunlp/SkillNet-Fabric"
+Issues = "https://github.com/zjunlp/SkillNet-Fabric/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skillfabric"]

@@ -24,7 +24,7 @@ Common local checks:
 ```bash
 source "$HOME/Documents/Develop/Miniforge/etc/profile.d/conda.sh"
 conda activate skillfabric_env
-cd "$HOME/Documents/SkillFabric/skillfabric-public/skillfabric-ai"
+cd "$HOME/Documents/SkillFabric/SkillNet-Fabric/skillfabric-ai"
 
 python -m compileall -q src tests
 python -m pytest tests/unit -q
