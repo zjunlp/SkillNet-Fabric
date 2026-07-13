@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import skillfabric.compiled_graph.semantic.validation as validation_module
 from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.compiled_graph.semantic.prompts import (
@@ -300,8 +301,10 @@ def test_successful_decisions_are_cached_when_another_pair_fails(tmp_path) -> No
     assert len(json.loads(cache.read_text(encoding="utf-8"))) == 1
 
 
-def test_relation_prompt_contains_full_sources_and_one_authoritative_schema() -> None:
+def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema() -> None:
     skills, contracts = semantic_skills_and_contracts()
+    skills[0].raw_text += "\nUnrelated source-only marker."
+    skills[1].raw_text += "\nUnrelated source-only marker."
     by_id = {skill.id: skill for skill in skills}
 
     messages = build_relation_judge_messages(
@@ -312,18 +315,26 @@ def test_relation_prompt_contains_full_sources_and_one_authoritative_schema() ->
     rendered = "\n".join(message["content"] for message in messages)
 
     assert RELATION_PROMPT_ID in messages[0]["content"]
+    assert RELATION_PROMPT_ID == "semantic_relation_judge"
     assert "<relation_semantics>" in rendered
     assert "<decision_process>" in rendered
     assert "<output_schema>" in rendered
     assert "<candidate_evidence>" not in rendered
     assert "Candidate retrieval only selects the pair" in rendered
     assert "Retrieval evidence only explains" not in rendered
-    assert "<skill_sources>" in rendered
+    assert "<skill_profiles>" in rendered
+    assert "<skill_sources>" not in rendered
     user = messages[1]["content"]
-    assert user.index("<skill_sources>") < user.index("<task>")
+    assert user.index("<skill_profiles>") < user.index("<task>")
     assert user.index("<task>") < user.index("<output_schema>")
     assert "Produces a normalized table." in rendered
     assert "Requires the normalized table." in rendered
+    assert "producer description" in rendered
+    assert "consumer description" in rendered
+    assert "Write a report from a normalized table." in rendered
+    assert "stable, reusable workflow progression" in rendered
+    assert "Unrelated source-only marker." not in rendered
+    assert "Prefer none" not in rendered
     assert "model_id" not in rendered
     assert skills[0].content_hash not in rendered
     assert skills[1].content_hash not in rendered
@@ -338,3 +349,31 @@ def test_relation_prompt_contains_full_sources_and_one_authoritative_schema() ->
         "reason",
         "evidence",
     }
+
+
+def test_relation_cache_identity_includes_prompt_policy(tmp_path, monkeypatch) -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    cache = tmp_path / "relation_decisions.json"
+    judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={semantic_pair().key: dependency_payload()},
+    )
+
+    first = validate_candidate_pairs(
+        [semantic_pair()],
+        skills,
+        contracts,
+        judge=judge,
+        cache_path=cache,
+    )[0]
+    monkeypatch.setattr(validation_module, "RELATION_PROMPT_FINGERPRINT", "changed-policy")
+    second = validate_candidate_pairs(
+        [semantic_pair()],
+        skills,
+        contracts,
+        judge=judge,
+        cache_path=cache,
+    )[0]
+
+    assert first.cache_hit is False
+    assert second.cache_hit is False

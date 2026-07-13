@@ -16,6 +16,7 @@ from skillfabric.compiled_graph.semantic.models import (
     RelationDecision,
 )
 from skillfabric.compiled_graph.semantic.prompts import (
+    RELATION_PROMPT_FINGERPRINT,
     RELATION_PROMPT_ID,
     build_relation_judge_messages,
 )
@@ -249,7 +250,8 @@ def _cache_key(
     model_id: str,
 ) -> str:
     payload = {
-        "prompt_id": RELATION_PROMPT_ID,
+        "prompt_name": RELATION_PROMPT_ID,
+        "prompt_fingerprint": RELATION_PROMPT_FINGERPRINT,
         "model_id": model_id,
         "pair": list(pair.key),
         "skills": {skill_id: skills[skill_id].content_hash for skill_id in pair.key},
