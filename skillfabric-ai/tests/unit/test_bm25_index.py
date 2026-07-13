@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.indexing.bm25 import BM25Hit, _fts_query, build_bm25_index, search_bm25
+from skillfabric.indexing.canonical import compact_contract_text
 from tests.unit.relation_helpers import make_skill
 
 
@@ -28,3 +30,29 @@ def test_search_returns_raw_bm25_order_and_explicit_ranks(tmp_path) -> None:
     assert [hit.rank for hit in hits] == list(range(1, len(hits) + 1))
     assert hits[0].skill_id == "skill:pdf"
     assert all(hit.raw_score <= 0 for hit in hits)
+
+
+def test_compact_contract_text_excludes_full_source() -> None:
+    skill = make_skill(
+        "skill:table-parser",
+        "table-parser",
+        "Parse tabular data.\nfull source-only marker",
+    )
+    contract = SkillContract.from_extraction(
+        skill,
+        {
+            "capability": "Parse tabular data.",
+            "when_to_use": "Use for tabular documents.",
+            "requires": [],
+            "produces": [],
+            "tools": [],
+            "evidence": [{"line": 1}],
+        },
+    )
+
+    text = compact_contract_text(skill, contract)
+
+    assert "Capability: Parse tabular data." in text
+    assert "Requires:" in text
+    assert "Produces:" in text
+    assert "full source-only marker" not in text

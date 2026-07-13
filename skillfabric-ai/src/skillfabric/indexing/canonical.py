@@ -30,7 +30,21 @@ def contract_skill_text(
 ) -> str:
     """Build the canonical retrieval document for a validated contract."""
 
-    sections = [
+    sections = _contract_sections(skill, contract)
+    source = _bounded_source(skill.raw_text, source_char_limit)
+    if source:
+        sections.append(f"Source:\n{source}")
+    return "\n".join(sections).strip()
+
+
+def compact_contract_text(skill: SkillNode, contract: SkillContract) -> str:
+    """Build a complete contract document without repeating the full source."""
+
+    return "\n".join(_contract_sections(skill, contract)).strip()
+
+
+def _contract_sections(skill: SkillNode, contract: SkillContract) -> list[str]:
+    return [
         f"Name: {skill.name}",
         f"Description: {skill.description}",
         f"Capability: {contract.capability}",
@@ -39,10 +53,6 @@ def contract_skill_text(
         f"Produces: {_contract_fields_text(contract.produces)}",
         f"Tools: {_contract_fields_text(contract.tools)}",
     ]
-    source = _bounded_source(skill.raw_text, source_char_limit)
-    if source:
-        sections.append(f"Source:\n{source}")
-    return "\n".join(sections).strip()
 
 
 def hash_text(text: str) -> str:

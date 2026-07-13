@@ -6,10 +6,10 @@ import pytest
 
 import skillfabric.router.bundle as bundle_module
 from skillfabric.compiled_graph.models import Edge
+from skillfabric.indexing.ranking import reciprocal_rank_fusion
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.expansion import ExpansionResult, expand_semantic_candidates
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
-from skillfabric.router.retrieval import reciprocal_rank_fusion
 from skillfabric.wiki.loader import WikiSource
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 from tests.unit.relation_helpers import make_skill

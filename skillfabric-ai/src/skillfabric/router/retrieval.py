@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from pathlib import Path
 
 from skillfabric.indexing.bm25 import search_bm25
@@ -14,50 +13,14 @@ from skillfabric.indexing.embeddings import (
     embedding_provider_for_model,
     load_skill_embedding_store,
 )
+from skillfabric.indexing.ranking import reciprocal_rank_fusion
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterSkillCandidate
 from skillfabric.storage import Workspace
 
-RRF_K = 60
-
 
 class RouterRetrievalError(RuntimeError):
     """Raised when a configured retrieval channel cannot run correctly."""
-
-
-@dataclass(frozen=True, slots=True)
-class FusedRank:
-    skill_id: str
-    score: float
-    ranks: dict[str, int]
-
-
-def reciprocal_rank_fusion(
-    channels: dict[str, list[str]],
-    *,
-    k: int = RRF_K,
-) -> list[FusedRank]:
-    """Fuse independent ranked lists without treating raw scores as comparable."""
-
-    if k < 0:
-        raise ValueError("RRF k must be non-negative")
-    scores: dict[str, float] = {}
-    ranks: dict[str, dict[str, int]] = {}
-    for channel, skill_ids in sorted(channels.items()):
-        seen: set[str] = set()
-        for rank, skill_id in enumerate(skill_ids, start=1):
-            if skill_id in seen:
-                continue
-            seen.add(skill_id)
-            scores[skill_id] = scores.get(skill_id, 0.0) + (1.0 / (k + rank))
-            ranks.setdefault(skill_id, {})[channel] = rank
-    return sorted(
-        (
-            FusedRank(skill_id=skill_id, score=score, ranks=ranks[skill_id])
-            for skill_id, score in scores.items()
-        ),
-        key=lambda row: (-row.score, row.skill_id),
-    )
 
 
 def retrieve_seed_candidates(
