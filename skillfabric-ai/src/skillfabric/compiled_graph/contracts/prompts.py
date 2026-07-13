@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 
 from skillfabric.registry.models import SkillNode
-from skillfabric.runtime.prompting import prompt_fingerprint
+from skillfabric.runtime.prompting import (
+    UNTRUSTED_JSON_SERIALIZATION,
+    prompt_fingerprint,
+    render_untrusted_json,
+)
 
 CONTRACT_PROMPT_ID = "skill_contract"
 
@@ -77,6 +81,7 @@ CONTRACT_PROMPT_FINGERPRINT = prompt_fingerprint(
     _CONTRACT_SEMANTICS,
     _DECISION_PROCESS,
     _EXAMPLES,
+    UNTRUSTED_JSON_SERIALIZATION,
 )
 
 
@@ -95,10 +100,10 @@ def build_contract_extraction_messages(skill: SkillNode) -> list[dict[str, str]]
     user = "\n".join(
         [
             "<skill_metadata>",
-            json.dumps(metadata, ensure_ascii=False, indent=2),
+            render_untrusted_json(metadata),
             "</skill_metadata>",
             "<skill_source>",
-            json.dumps(source, ensure_ascii=False, indent=2),
+            render_untrusted_json(source),
             "</skill_source>",
             "<task>",
             "Extract one complete but nonredundant SkillContract for graph construction, routing, "

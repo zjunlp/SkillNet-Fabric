@@ -7,7 +7,11 @@ import json
 from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.semantic.models import CandidatePair, RelationDecision
 from skillfabric.registry.models import SkillNode
-from skillfabric.runtime.prompting import prompt_fingerprint
+from skillfabric.runtime.prompting import (
+    UNTRUSTED_JSON_SERIALIZATION,
+    prompt_fingerprint,
+    render_untrusted_json,
+)
 
 RELATION_PROMPT_ID = "semantic_relation_judge"
 CYCLE_PROMPT_ID = "dependency_cycle_adjudicator"
@@ -36,7 +40,7 @@ def build_relation_judge_messages(
     user = "\n".join(
         [
             "<skill_profiles>",
-            json.dumps(
+            render_untrusted_json(
                 {
                     skill_id: _skill_profile(
                         skills[skill_id],
@@ -45,18 +49,14 @@ def build_relation_judge_messages(
                     )
                     for skill_id in skill_ids
                 },
-                ensure_ascii=False,
-                indent=2,
             ),
             "</skill_profiles>",
             "<candidate_pairs>",
-            json.dumps(
+            render_untrusted_json(
                 [
                     {"skill_a": pair.skill_a, "skill_b": pair.skill_b}
                     for pair in pairs
                 ],
-                ensure_ascii=False,
-                indent=2,
             ),
             "</candidate_pairs>",
             "<task>",
@@ -95,15 +95,11 @@ def build_cycle_adjudication_messages(
     user = "\n".join(
         [
             "<cycle_decisions>",
-            json.dumps(
-                [decision.to_dict() for decision in decisions], ensure_ascii=False, indent=2
-            ),
+            render_untrusted_json([decision.to_dict() for decision in decisions]),
             "</cycle_decisions>",
             "<skill_sources>",
-            json.dumps(
+            render_untrusted_json(
                 {skill_id: _line_numbered_source(skills[skill_id]) for skill_id in skill_ids},
-                ensure_ascii=False,
-                indent=2,
             ),
             "</skill_sources>",
             "<task>",
@@ -240,4 +236,5 @@ RELATION_PROMPT_FINGERPRINT = prompt_fingerprint(
     _relation_semantics(),
     _decision_process(),
     _relation_examples(),
+    UNTRUSTED_JSON_SERIALIZATION,
 )

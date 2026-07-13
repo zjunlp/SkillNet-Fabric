@@ -9,7 +9,11 @@ from typing import Any, Protocol
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.runtime.json_utils import extract_response_text
 from skillfabric.runtime.llm import LLMConfig, litellm_completion
-from skillfabric.runtime.prompting import prompt_fingerprint
+from skillfabric.runtime.prompting import (
+    UNTRUSTED_JSON_SERIALIZATION,
+    prompt_fingerprint,
+    render_untrusted_json,
+)
 from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.models import (
     NO_WORKFLOW_GUIDANCE,
@@ -54,6 +58,7 @@ WIKI_SUMMARY_PROMPT_FINGERPRINT = prompt_fingerprint(
     _FIELD_SEMANTICS,
     _SUMMARY_RULES,
     _OUTPUT_SCHEMA,
+    UNTRUSTED_JSON_SERIALIZATION,
 )
 
 
@@ -298,7 +303,7 @@ def _summary_messages(
     user = "\n".join(
         [
             "<source_data>",
-            json.dumps(source_data, ensure_ascii=False, indent=2),
+            render_untrusted_json(source_data),
             "</source_data>",
             "<task>",
             _SUMMARY_TASK,

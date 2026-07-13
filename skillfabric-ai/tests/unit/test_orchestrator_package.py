@@ -117,6 +117,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "skill:pdf-table-parser" in prompt
     assert "skill:financial-kpi-extractor" in prompt
     assert "&lt;untrusted_skill_source" in prompt
+    assert "&quot;" not in prompt
     assert "relation_evidence" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200

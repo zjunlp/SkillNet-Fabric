@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from html import escape
 from typing import Any
+
+UNTRUSTED_JSON_SERIALIZATION = "indented-json-in-xml-text"
 
 
 def prompt_fingerprint(prompt_name: str, *policy: Any) -> str:
@@ -19,3 +22,10 @@ def prompt_fingerprint(prompt_name: str, *policy: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def render_untrusted_json(payload: Any) -> str:
+    """Serialize untrusted data without allowing it to close an XML text element."""
+
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+    return escape(serialized, quote=False)

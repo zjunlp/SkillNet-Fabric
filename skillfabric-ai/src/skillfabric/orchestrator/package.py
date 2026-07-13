@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,7 @@ from skillfabric.router.models import RouteResult
 from skillfabric.router.traces import _new_trace_id
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
+from skillfabric.runtime.prompting import render_untrusted_json
 from skillfabric.runtime.usage import count_message_tokens
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.contract_pages import render_contract_card, render_untrusted_skill_source
@@ -223,7 +223,7 @@ Return no prose, markdown fences, hidden reasoning, workflow JSON, or task deliv
     }
     user = (
         "<untrusted_planner_input>\n"
-        + escape(json.dumps(data, ensure_ascii=False, indent=2))
+        + render_untrusted_json(data)
         + "\n</untrusted_planner_input>\n\n"
         "Apply the prompt contract and return the JSON object only."
     )
