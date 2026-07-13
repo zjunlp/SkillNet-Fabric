@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from skillfabric.compiled_graph.contracts.models import ContractSchemaError, SkillContract
 from skillfabric.compiled_graph.contracts.prompts import (
+    CONTRACT_PROMPT_FINGERPRINT,
     CONTRACT_PROMPT_ID,
     build_contract_extraction_messages,
 )
@@ -133,7 +134,8 @@ def extract_skill_contracts(
 
 def _cache_key(skill: SkillNode, model_id: str) -> str:
     payload = {
-        "prompt_id": CONTRACT_PROMPT_ID,
+        "prompt_name": CONTRACT_PROMPT_ID,
+        "prompt_fingerprint": CONTRACT_PROMPT_FINGERPRINT,
         "skill_id": skill.id,
         "content_hash": skill.content_hash,
         "model_id": model_id,
