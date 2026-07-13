@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-import skillfabric.indexing.embeddings as embedding_module
 from skillfabric.indexing.embeddings import (
     DEFAULT_EMBEDDING_MODEL_ID,
     ApiEmbeddingProvider,
@@ -327,15 +325,6 @@ def test_router_query_uses_store_model_and_query_embedding(tmp_path) -> None:
     assert query_provider.embed_calls == []
     assert seeds[0].skill_id == "skill:alpha"
     assert seeds[0].retrieval_ranks == {"embedding": 1}
-
-
-def test_legacy_embedding_store_api_is_removed() -> None:
-    assert not hasattr(embedding_module, "build_embedding_store")
-    assert not hasattr(embedding_module, "load_embedding_store")
-    assert not hasattr(embedding_module, "load_embedding_store_payload")
-    assert "DISABLE_DENSE_EMBEDDINGS" not in Path(embedding_module.__file__).read_text(
-        encoding="utf-8"
-    )
 
 
 def _record(key: str, skill_id: str, kind: str, vector: list[float]) -> dict[str, object]:

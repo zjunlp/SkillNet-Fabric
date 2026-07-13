@@ -31,7 +31,7 @@ def _route() -> RouteResult:
     )
 
 
-def test_public_cli_surface_exposes_only_core_commands() -> None:
+def test_public_cli_surface_exposes_core_commands() -> None:
     output = io.StringIO()
 
     with pytest.raises(SystemExit) as raised, contextlib.redirect_stdout(output):
@@ -49,8 +49,6 @@ def test_public_cli_surface_exposes_only_core_commands() -> None:
         "doctor-state",
         "run-state",
     }
-    assert "fallback" not in text.lower()
-    assert "Prepare or finalize" not in text
     assert "Generate one execution prompt" in text
 
 
@@ -245,7 +243,6 @@ def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:
     different = json.loads(different_output.getvalue())
     assert reuse["action"] == "reuse_prompt"
     assert reuse["prompt_path"].endswith("execution_prompt.md")
-    assert "workflow_plan_path" not in reuse
     assert different["action"] == "prepare_required"
 
 

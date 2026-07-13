@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
-from skillfabric.compiled_graph.builder import _BuildDependencies
 from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.parser import parse_skill_file
@@ -76,15 +73,3 @@ def test_graph_document_rejects_obsolete_or_extra_schema_fields() -> None:
         GraphDocument.from_dict({**valid, "schema_version": "1.0"})
     with pytest.raises(ValueError, match="schema-v2"):
         GraphDocument.from_dict({**valid, "communities": []})
-
-
-def test_build_dependencies_expose_only_semantic_compiler_providers() -> None:
-    parameters = set(inspect.signature(_BuildDependencies).parameters)
-
-    assert parameters == {
-        "contract_extractor",
-        "relation_judge",
-        "cycle_adjudicator",
-        "embedding_provider",
-        "build_id",
-    }

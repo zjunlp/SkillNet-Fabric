@@ -10,16 +10,14 @@ from skillfabric.runtime.defaults import default_build_options, default_router_o
 from skillfabric.runtime.progress import ProgressReporter
 
 
-def test_public_defaults_have_no_removed_switches_or_unused_wiki_llm_calls() -> None:
+def test_public_defaults_match_the_documented_workflow() -> None:
     build = default_build_options()
     router = default_router_options()
 
     assert build.wiki_summary_mode == "off"
-    assert not hasattr(build, "embedding_provider")
-    assert not hasattr(build, "llm_concurrency")
-    assert not hasattr(build, "llm_batch_size")
-    assert not hasattr(router, "use_llm_router")
-    assert not hasattr(router, "explorer_backend")
+    assert router.max_selected_skills == 8
+    assert router.seed_limit == 8
+    assert router.expanded_limit == 100
     assert router.max_depth == 2
 
 
@@ -62,36 +60,7 @@ def test_router_defaults_reject_expanded_limit_below_seed_limit(monkeypatch) -> 
         default_router_options()
 
 
-@pytest.mark.parametrize(
-    "command,removed_flag",
-    [
-        ("build", "--embedding-provider"),
-        ("build", "--skip-llm-validation"),
-        ("route", "--skip-llm-router"),
-        ("route", "--explorer-backend"),
-        ("route", "--strict-explorer"),
-        ("route", "--workflow-confidence-threshold"),
-    ],
-)
-def test_removed_cli_flags_are_rejected(command: str, removed_flag: str) -> None:
-    argv = [command]
-    if command == "build":
-        argv.extend(["--skill-root", "skills"])
-    else:
-        argv.append("test query")
-    argv.append(removed_flag)
-    if removed_flag in {
-        "--embedding-provider",
-        "--explorer-backend",
-        "--workflow-confidence-threshold",
-    }:
-        argv.append("removed")
-
-    with pytest.raises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-        cli_main(argv)
-
-
-def test_help_exposes_only_useful_embedding_and_route_controls() -> None:
+def test_help_exposes_embedding_and_route_controls() -> None:
     build_help = io.StringIO()
     with pytest.raises(SystemExit) as build_exit, contextlib.redirect_stdout(build_help):
         cli_main(["build", "--help"])
@@ -102,9 +71,7 @@ def test_help_exposes_only_useful_embedding_and_route_controls() -> None:
     assert build_exit.value.code == 0
     assert route_exit.value.code == 0
     assert "--embedding-model" in build_help.getvalue()
-    assert "--embedding-provider" not in build_help.getvalue()
     assert "--max-depth" in route_help.getvalue()
-    assert "fallback" not in route_help.getvalue().lower()
 
 
 def test_progress_reporter_quiet_suppresses_events() -> None:

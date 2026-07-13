@@ -383,7 +383,6 @@ class WikiSummaryCacheTests(unittest.TestCase):
             self.assertEqual(record.routing_summary, "Use for tabular documents.")
             self.assertEqual(second_records[("skill", "skill:a")].to_dict(), record.to_dict())
             self.assertEqual(second.cache_hits, 1)
-            self.assertFalse(hasattr(second, "fallback_count"))
 
 
 if __name__ == "__main__":

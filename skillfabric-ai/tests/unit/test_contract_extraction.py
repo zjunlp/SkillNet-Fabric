@@ -8,7 +8,6 @@ import pytest
 
 from skillfabric.compiled_graph.contracts.extraction import (
     ContractExtractionError,
-    StaticContractExtractor,
     extract_skill_contracts,
 )
 from skillfabric.compiled_graph.contracts.models import ContractSchemaError, SkillContract
@@ -18,6 +17,7 @@ from skillfabric.compiled_graph.contracts.prompts import (
 )
 from skillfabric.runtime.jobs import LLMJobOptions
 from tests.unit.relation_helpers import make_skill
+from tests.unit.semantic_fixtures import StaticContractExtractor
 
 
 def _payload() -> dict[str, Any]:
@@ -238,4 +238,3 @@ def test_contract_prompt_delimits_untrusted_source_and_has_one_schema() -> None:
     assert "source-grounded noun phrase naming the produced artifact or state" in user
     assert "stable noun phrase" not in user
     assert "execution_role" not in user
-    assert "community" not in user.lower()

@@ -4,8 +4,45 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.semantic.models import CandidatePair
+from skillfabric.compiled_graph.semantic.models import CandidatePair, RelationDecision
 from skillfabric.registry.models import SkillNode
+
+
+@dataclass
+class StaticContractExtractor:
+    model_id: str
+    responses: dict[str, dict[str, Any]]
+
+    def extract(self, skill: SkillNode) -> dict[str, Any]:
+        return dict(self.responses[skill.id])
+
+
+@dataclass
+class StaticRelationJudge:
+    model_id: str
+    responses: dict[tuple[str, str], dict[str, Any]]
+
+    def judge(
+        self,
+        pair: CandidatePair,
+        skills: dict[str, SkillNode],
+        contracts: dict[str, SkillContract],
+    ) -> dict[str, Any]:
+        del skills, contracts
+        return dict(self.responses[pair.key])
+
+
+@dataclass
+class StaticCycleAdjudicator:
+    replacements: dict[tuple[str, str], RelationDecision]
+
+    def adjudicate(
+        self,
+        decisions: tuple[RelationDecision, ...],
+        skills: dict[str, SkillNode],
+    ) -> list[RelationDecision]:
+        del skills
+        return [self.replacements.get(decision.candidate.key, decision) for decision in decisions]
 
 
 @dataclass

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 from skillfabric.compiled_graph.contracts.models import ContractField, SkillContract
 from skillfabric.compiled_graph.models import Edge
 from skillfabric.registry.models import SkillNode
@@ -303,14 +301,6 @@ def _directed_link_label(edge: Edge, current_skill_id: str) -> tuple[str, str]:
         return "compose_with", other
     other = edge.target if edge.source == current_skill_id else edge.source
     return edge.type, other
-
-
-def _content_hash(values: list[str]) -> str:
-    digest = hashlib.sha256()
-    for value in values:
-        digest.update(value.encode("utf-8"))
-        digest.update(b"\0")
-    return digest.hexdigest()
 
 
 def _first_paragraph(text: str) -> str:

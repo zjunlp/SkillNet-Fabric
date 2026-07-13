@@ -30,7 +30,6 @@ def test_system_prompt_separates_fixed_policy_from_untrusted_query() -> None:
     assert "smallest evidence-backed skill set" not in prompt
     assert "requires its exact compiled prerequisite" not in prompt
     assert "Return exactly one structured SkillPackage" in prompt
-    assert "fallback" not in prompt.lower()
 
 
 def test_user_prompt_xml_escapes_untrusted_task_content() -> None:

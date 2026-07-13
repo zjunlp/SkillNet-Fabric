@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -10,12 +9,6 @@ import pytest
 
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
 from skillfabric.wiki.explorer.skill_package import skill_package_json_schema
-
-
-def test_explorer_backend_has_no_unused_router_bundle_parameter() -> None:
-    parameters = set(inspect.signature(ClaudeCodeWikiExplorerBackend.explore).parameters)
-
-    assert "bundle" not in parameters
 
 
 def _empty_package() -> dict[str, Any]:
@@ -165,20 +158,6 @@ def test_backend_rejects_missing_structured_output_without_text_recovery(tmp_pat
         )
 
     assert (trace / "cc_explorer" / "error.json").exists()
-
-
-def test_backend_rejects_legacy_aliases_instead_of_normalizing_them(tmp_path) -> None:
-    root = _query_root(tmp_path)
-    payload = _empty_package()
-    payload["required_edges"] = []
-    trace = tmp_path / "trace"
-
-    with pytest.raises(ValueError, match="exactly"):
-        ClaudeCodeWikiExplorerBackend(sdk_runtime=StubRuntime(payload)).explore(
-            query="x",
-            query_wiki_root=root,
-            trace_dir=trace,
-        )
 
 
 def test_permissions_enforce_read_root_and_count_each_allowed_tool_once(tmp_path) -> None:

@@ -5,7 +5,6 @@ from skillfabric.compiled_graph.contracts.extraction import (
     ContractExtractionRecord,
     ContractExtractor,
     LiteLLMContractExtractor,
-    StaticContractExtractor,
     extract_skill_contracts,
 )
 from skillfabric.compiled_graph.contracts.models import (
@@ -22,6 +21,5 @@ __all__ = [
     "ContractSchemaError",
     "LiteLLMContractExtractor",
     "SkillContract",
-    "StaticContractExtractor",
     "extract_skill_contracts",
 ]

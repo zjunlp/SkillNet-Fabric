@@ -198,15 +198,6 @@ def test_empty_selection_with_coverage_gap_is_a_valid_result(tmp_path) -> None:
     assert result.coverage_gaps
 
 
-def test_router_config_has_no_fallback_or_skip_switches() -> None:
-    config = RouterConfig()
-
-    assert not hasattr(config, "use_llm_router")
-    assert not hasattr(config, "explorer_backend")
-    assert not hasattr(config, "strict_explorer")
-    assert not hasattr(config, "workflow_confidence_threshold")
-
-
 @pytest.mark.parametrize(
     "trace_id",
     [

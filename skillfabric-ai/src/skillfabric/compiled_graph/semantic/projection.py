@@ -35,21 +35,6 @@ class CycleAdjudicator(Protocol):
 
 
 @dataclass(slots=True)
-class StaticCycleAdjudicator:
-    """Explicit deterministic cycle reviewer for tests."""
-
-    replacements: dict[tuple[str, str], RelationDecision]
-
-    def adjudicate(
-        self,
-        decisions: tuple[RelationDecision, ...],
-        skills: dict[str, SkillNode],
-    ) -> list[RelationDecision]:
-        del skills
-        return [self.replacements.get(decision.candidate.key, decision) for decision in decisions]
-
-
-@dataclass(slots=True)
 class LiteLLMCycleAdjudicator:
     """Full-source LLM reviewer for dependency cycles."""
 

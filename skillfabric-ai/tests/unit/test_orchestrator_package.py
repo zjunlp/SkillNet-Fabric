@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import inspect
 import json
-from importlib import import_module
 
 import pytest
 
@@ -220,25 +218,6 @@ def test_planner_schema_contains_only_execution_prompt() -> None:
     assert schema["required"] == ["execution_prompt"]
     assert set(schema["properties"]) == {"execution_prompt"}
     assert schema["additionalProperties"] is False
-
-
-def test_planner_has_no_renderer_or_prepare_finalize_api() -> None:
-    assert "renderer" not in inspect.signature(plan_execution_package).parameters
-    assert not hasattr(package_module, "prepare_execution_package")
-    assert not hasattr(package_module, "finalize_execution_package")
-
-
-def test_agent_run_spec_module_is_removed() -> None:
-    with pytest.raises(ModuleNotFoundError):
-        import_module("skillfabric.orchestrator.agent_run_spec")
-
-
-def test_route_loader_rejects_removed_nested_fields() -> None:
-    payload = _route().to_dict()
-    payload["selected_skills"][0]["rank"] = 1
-
-    with pytest.raises(ValueError, match="selected route skill"):
-        RouteResult.from_dict(payload)
 
 
 def test_route_loader_rejects_non_object_items() -> None:

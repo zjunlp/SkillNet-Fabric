@@ -302,9 +302,3 @@ def _required_string(
     if not value.strip():
         raise ContractSchemaError(f"{label}.{key} must not be empty")
     return value.strip() if strip else value
-
-
-def _nonempty_string(value: str, *, label: str) -> str:
-    if not value:
-        raise ContractSchemaError(f"{label} must not be empty")
-    return value

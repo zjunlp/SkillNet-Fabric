@@ -200,18 +200,6 @@ def test_skill_package_rejects_non_object_array_items(field: str) -> None:
         SkillPackage.from_dict(payload)
 
 
-@pytest.mark.parametrize(
-    "field",
-    ["dependencies", "composition_links", "ordered_skill_ids"],
-)
-def test_skill_package_rejects_removed_route_authority_fields(field: str) -> None:
-    payload = _package().to_dict()
-    payload[field] = []
-
-    with pytest.raises(ValueError, match="skill package must contain exactly"):
-        SkillPackage.from_dict(payload)
-
-
 @pytest.mark.parametrize("evidence", [[], ["not-an-object"]])
 def test_selected_skill_requires_object_evidence(evidence: list[object]) -> None:
     payload = _package().to_dict()

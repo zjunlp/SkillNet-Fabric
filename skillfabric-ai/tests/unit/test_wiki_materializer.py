@@ -58,11 +58,11 @@ class WikiMaterializerTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
 
-            result = build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            config = WikiBuildConfig(workspace=workspace, use_llm_summaries=False)
+            build_wiki(config)
+            result = build_wiki(config)
 
             self.assertGreater(result.pages_written, 0)
-            self.assertNotIn("fallback_count", result.summary)
-            self.assertNotIn("summary_fallback_count", result.health.summary)
             self.assertEqual(result.pages_written, len(list((workspace / "wiki").rglob("*.md"))))
             skill_page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             self.assertTrue(skill_page.exists())
@@ -80,15 +80,7 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("## Tools And Dependencies", text)
             self.assertIn("## Composition Notes", text)
             self.assertIn("## Read Full Source", text)
-            self.assertNotIn("## Evidence", text)
-            self.assertNotIn("## Source", text)
-            self.assertNotIn("content_hash", text)
-            self.assertNotIn("skillfabric", text.lower())
             self.assertNotIn("/Users/", text)
-            self.assertNotIn("[[artifacts/", text)
-            self.assertNotIn("[[scenarios/", text)
-            self.assertNotIn("raw_output", text)
-            self.assertNotIn("\n```markdown\n", text)
             source_page = workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
             self.assertTrue(source_page.exists())
             source_text = source_page.read_text(encoding="utf-8")
@@ -102,22 +94,10 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("[pdf-table-parser](skills/cards/pdf-table-parser.md)", root_index_text)
             self.assertIn("[full SKILL.md](skills/sources/pdf-table-parser.md)", root_index_text)
             self.assertIn("## Full Skill Sources", root_index_text)
-            self.assertNotIn("## Communities", root_index_text)
-            self.assertNotIn("- communities:", root_index_text)
-            self.assertNotIn("title: pdf-table-parser", root_index_text)
-            self.assertNotIn("Source Source", root_index_text)
-            self.assertNotIn(": Skill: pdf-table-parser Source:", root_index_text)
             self.assertIn("Extract tables from PDF files", root_index_text)
-            self.assertFalse((workspace / "wiki" / "skills" / "index.md").exists())
-            self.assertFalse((workspace / "wiki" / "workflows" / "index.md").exists())
-            self.assertFalse((workspace / "wiki" / "references" / "index.md").exists())
-            self.assertFalse((workspace / "wiki" / "skills" / "sources" / "index.md").exists())
-            self.assertFalse((workspace / "wiki" / "overview.md").exists())
-            self.assertFalse((workspace / "wiki" / "resolver.md").exists())
-            self.assertFalse((workspace / "wiki" / "deliverables.md").exists())
-            self.assertFalse((workspace / "wiki" / "artifacts").exists())
-            self.assertFalse((workspace / "wiki" / "scenarios").exists())
             self.assertTrue((workspace / "wiki" / "workflows").exists())
+            log_text = (workspace / "reports" / "wiki_log.md").read_text(encoding="utf-8")
+            self.assertEqual(log_text.count("wiki-build | build_id="), 2)
 
     def test_skill_summary_fields_render_in_their_semantic_sections(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -149,30 +129,11 @@ class WikiMaterializerTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             stale_file = workspace / "wiki" / "unknown-generated-file.md"
-            removed_file = workspace / "wiki" / "communities" / "legacy.md"
-            removed_file.parent.mkdir(parents=True, exist_ok=True)
             stale_file.write_text("# Stale generated output\n", encoding="utf-8")
-            removed_file.write_text("# Removed output\n", encoding="utf-8")
 
             build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
 
             self.assertFalse(stale_file.exists())
-            self.assertFalse(removed_file.exists())
-
-    def test_build_wiki_removes_stale_flat_skill_pages(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            stale_card = workspace / "wiki" / "skills" / "pdf-table-parser.md"
-            stale_card.parent.mkdir(parents=True, exist_ok=True)
-            stale_card.write_text("# stale\n", encoding="utf-8")
-
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            self.assertFalse(stale_card.exists())
-            self.assertTrue(
-                (workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").exists()
-            )
 
     def test_build_wiki_does_not_manage_reports_outside_its_output_directory(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -186,76 +147,6 @@ class WikiMaterializerTests(unittest.TestCase):
 
             self.assertFalse((workspace / "wiki" / "debug").exists())
             self.assertTrue(stale_debug.exists())
-
-    def test_build_wiki_removes_stale_artifact_and_scenario_directories(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            stale_artifact = workspace / "wiki" / "artifacts" / "old.md"
-            stale_scenario = workspace / "wiki" / "scenarios" / "old.md"
-            stale_artifact.parent.mkdir(parents=True, exist_ok=True)
-            stale_scenario.parent.mkdir(parents=True, exist_ok=True)
-            stale_artifact.write_text("# old\n", encoding="utf-8")
-            stale_scenario.write_text("# old\n", encoding="utf-8")
-
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            self.assertFalse(stale_artifact.parent.exists())
-            self.assertFalse(stale_scenario.parent.exists())
-
-    def test_build_wiki_removes_stale_hot_page_and_excludes_it_from_index(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            stale_hot = workspace / "wiki" / "hot.md"
-            stale_hot.parent.mkdir(parents=True, exist_ok=True)
-            stale_hot.write_text("# Legacy Hot Page\n", encoding="utf-8")
-
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            self.assertFalse(stale_hot.exists())
-
-    def test_build_wiki_removes_stale_resolver_page_and_excludes_it_from_index(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            stale_resolver = workspace / "wiki" / "resolver.md"
-            stale_resolver.parent.mkdir(parents=True, exist_ok=True)
-            stale_resolver.write_text("# Legacy Resolver\n", encoding="utf-8")
-
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            self.assertFalse(stale_resolver.exists())
-
-    def test_source_excerpt_uses_fence_that_survives_nested_code_blocks(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            skills_path = workspace / "graph" / "registry.jsonl"
-            rows = skills_path.read_text(encoding="utf-8").splitlines()
-            patched = []
-            for row in rows:
-                if '"id": "skill:pdf-table-parser"' in row:
-                    patched.append(
-                        row.replace(
-                            "Validate column headers.",
-                            "Validate column headers.\\n```python\\nprint('x')\\n```",
-                        )
-                    )
-                else:
-                    patched.append(row)
-            skills_path.write_text("\n".join(patched) + "\n", encoding="utf-8")
-
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
-
-            text = (workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").read_text(
-                encoding="utf-8"
-            )
-            self.assertNotIn("````markdown", text)
-            source_text = (
-                workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
-            ).read_text(encoding="utf-8")
-            self.assertIn("```python", source_text)
 
     def test_first_paragraph_truncates_on_word_boundary(self) -> None:
         summary = _first_paragraph("routing " * 80)

@@ -42,17 +42,6 @@ class ContractExtractionRecord:
 
 
 @dataclass(slots=True)
-class StaticContractExtractor:
-    """Explicit fixture provider for offline tests; never selected by production code."""
-
-    model_id: str
-    responses: dict[str, dict[str, Any]]
-
-    def extract(self, skill: SkillNode) -> dict[str, Any]:
-        return dict(self.responses[skill.id])
-
-
-@dataclass(slots=True)
 class LiteLLMContractExtractor:
     """Production contract extractor backed by the configured LiteLLM endpoint."""
 

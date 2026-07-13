@@ -73,7 +73,7 @@ def _wiki_result(root: Path) -> WikiBuildResult:
     )
 
 
-def test_build_cli_reports_only_schema_v2_artifacts(tmp_path) -> None:
+def test_build_cli_reports_schema_v2_artifacts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     env_file = tmp_path / ".env.test"
     _env_file(env_file)
@@ -107,7 +107,6 @@ def test_build_cli_reports_only_schema_v2_artifacts(tmp_path) -> None:
         "compose_with": 1,
         "similar_to": 0,
     }
-    assert "edge_types" not in payload["graph"]
     assert set(payload["artifacts"]) == {
         "registry",
         "contracts",
@@ -121,8 +120,6 @@ def test_build_cli_reports_only_schema_v2_artifacts(tmp_path) -> None:
         "wiki",
     }
     assert payload["artifacts"]["graph"].endswith("graph/graph.json")
-    assert "compiled.json" not in json.dumps(payload)
-    assert "interface" not in json.dumps(payload).lower()
 
 
 def test_build_cli_skip_wiki_does_not_invoke_wiki_materialization(tmp_path) -> None:

@@ -187,16 +187,6 @@ def llm_usage_context(
         _USAGE_CONTEXT.reset(token)
 
 
-def load_llm_env(*, env_path: str | Path = ".env", override: bool = False) -> dict[str, str]:
-    """Load LLM env file values into the current process environment."""
-
-    values = read_env_file(env_path)
-    for key, value in values.items():
-        if override or key not in os.environ:
-            os.environ[key] = value
-    return values
-
-
 def read_env_file(env_path: str | Path | None = ".env") -> dict[str, str]:
     """Read simple KEY=VALUE env files without mutating the process environment."""
 

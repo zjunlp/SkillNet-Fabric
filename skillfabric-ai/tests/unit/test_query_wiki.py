@@ -31,20 +31,13 @@ def _materialize(tmp_path):
     return bundle, result
 
 
-def test_materializes_schema_v2_query_wiki_without_legacy_surfaces(tmp_path) -> None:
+def test_materializes_schema_v2_query_wiki(tmp_path) -> None:
     bundle, result = _materialize(tmp_path)
     root = result.root
-    assert not hasattr(result, "manifest")
-
     assert (root / "manifest.json").exists()
     assert (root / "index.md").exists()
     assert (root / "EXPLORER.md").exists()
-    assert not (root / "page_index.jsonl").exists()
     assert (root / "edges" / "semantic_edges.jsonl").exists()
-    assert not (root / "communities").exists()
-    assert not (root / "workflows").exists()
-    assert not (root / "edges" / "bridge_edges.jsonl").exists()
-    assert not (root / "edges" / "frontier_edges.jsonl").exists()
 
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "2.0"
@@ -56,8 +49,6 @@ def test_materializes_schema_v2_query_wiki_without_legacy_surfaces(tmp_path) -> 
         "semantic_edges_path",
         "alternatives",
     }
-    assert "community" not in json.dumps(manifest).lower()
-    assert "execution" not in json.dumps(manifest).lower()
 
 
 def test_query_wiki_refuses_to_delete_an_existing_trace_artifact(tmp_path) -> None:

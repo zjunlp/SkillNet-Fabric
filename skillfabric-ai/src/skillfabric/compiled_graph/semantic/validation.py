@@ -50,23 +50,6 @@ class RelationJudge(Protocol):
 
 
 @dataclass(slots=True)
-class StaticRelationJudge:
-    """Explicit fixture judge for deterministic unit and evaluation data."""
-
-    model_id: str
-    responses: dict[tuple[str, str], dict[str, Any]]
-
-    def judge(
-        self,
-        pair: CandidatePair,
-        skills: dict[str, SkillNode],
-        contracts: dict[str, SkillContract],
-    ) -> dict[str, Any]:
-        del skills, contracts
-        return dict(self.responses[pair.key])
-
-
-@dataclass(slots=True)
 class LiteLLMRelationJudge:
     """Production full-source semantic judge."""
 

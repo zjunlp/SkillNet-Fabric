@@ -7,12 +7,7 @@ def make_skill(
     skill_id: str,
     name: str,
     raw_text: str,
-    *,
-    tools: list[str] | None = None,
-    artifacts: list[str] | None = None,
-    actions: list[str] | None = None,
 ) -> SkillNode:
-    del tools, artifacts, actions
     return SkillNode(
         id=skill_id,
         type="skill",

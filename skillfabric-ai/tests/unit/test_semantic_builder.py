@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
 import pytest
 
-import skillfabric.compiled_graph.builder as builder_module
 from skillfabric.compiled_graph.builder import (
     BuildConfig,
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.contracts.extraction import StaticContractExtractor
 from skillfabric.compiled_graph.semantic.candidates import CandidateRetrievalError
-from skillfabric.compiled_graph.semantic.validation import StaticRelationJudge
 from skillfabric.runtime.usage import LLMUsageTracker
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.semantic_fixtures import FixtureContractExtractor, FixtureRelationJudge
+from tests.unit.semantic_fixtures import (
+    FixtureContractExtractor,
+    FixtureRelationJudge,
+    StaticContractExtractor,
+    StaticRelationJudge,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
@@ -35,7 +36,7 @@ def _build(workspace: Path, *, contracts=None, judge=None):
     )
 
 
-def test_builder_writes_only_schema_v2_semantic_artifacts(tmp_path) -> None:
+def test_builder_writes_schema_v2_semantic_artifacts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
 
     result = _build(workspace)
@@ -56,15 +57,6 @@ def test_builder_writes_only_schema_v2_semantic_artifacts(tmp_path) -> None:
     assert {path.name for path in (workspace / "reports").iterdir()} == {
         "build_summary.json",
         "llm_usage.jsonl",
-    }
-    assert not (workspace / "graph" / "compiled.json").exists()
-    assert not (workspace / "graph" / "communities.json").exists()
-    assert not (workspace / "checkpoint.json").exists()
-    assert "skipped_unchanged" not in result.stats
-    assert set(inspect.signature(type(result)).parameters) == {
-        "graph",
-        "workspace",
-        "stats",
     }
 
 
@@ -250,11 +242,6 @@ def test_failed_contract_stage_writes_sanitized_status(tmp_path) -> None:
     assert status["state"] == "failed"
     assert status["failed_stage"] == "contracts"
     assert "sk-sensitive-value" not in json.dumps(status)
-
-
-def test_builder_has_no_unused_graph_query_facade() -> None:
-    assert not hasattr(builder_module, "load_graph")
-    assert not hasattr(builder_module, "get_skill_neighbors")
 
 
 def _fixture_skill_ids() -> list[str]:

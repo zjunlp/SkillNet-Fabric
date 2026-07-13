@@ -12,11 +12,11 @@ from skillfabric.compiled_graph.semantic.prompts import (
 )
 from skillfabric.compiled_graph.semantic.validation import (
     RelationValidationError,
-    StaticRelationJudge,
     validate_candidate_pairs,
 )
 from skillfabric.runtime.jobs import LLMJobOptions
 from tests.unit.relation_helpers import make_skill
+from tests.unit.semantic_fixtures import StaticRelationJudge
 from tests.unit.semantic_helpers import (
     dependency_payload,
     semantic_pair,
@@ -329,7 +329,6 @@ def test_relation_prompt_contains_full_sources_and_one_authoritative_schema() ->
     assert skills[1].content_hash not in rendered
     assert "needs_full_context" not in rendered
     assert "edge_type" not in rendered
-    assert "community" not in rendered.lower()
     schema_text = rendered.split("<output_schema>", 1)[1].split("</output_schema>", 1)[0]
     assert set(json.loads(schema_text)) == {
         "relation",

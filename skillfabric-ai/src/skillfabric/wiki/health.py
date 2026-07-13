@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.loader import load_wiki_source
@@ -118,36 +117,9 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
     return "\n\n".join(sections) + "\n"
 
 
-def read_wiki_health_summary(path: str | Path) -> dict[str, int]:
-    """Read the summary block from a rendered wiki health report."""
-
-    report_path = Path(path)
-    if not report_path.exists():
-        raise FileNotFoundError(f"wiki health report not found: {report_path}")
-    summary: dict[str, int] = {}
-    in_summary = False
-    for line in report_path.read_text(encoding="utf-8").splitlines():
-        if line.strip() == "## Summary":
-            in_summary = True
-            continue
-        if in_summary and line.startswith("## "):
-            break
-        if in_summary and line.startswith("- ") and ":" in line:
-            key, _, value = line[2:].partition(":")
-            summary[key.strip()] = _int_value(value)
-    return summary
-
-
 def write_wiki_health_report(workspace: Workspace, report: WikiHealthReport) -> None:
     """Write wiki health markdown report."""
 
     atomic_write_text(
         workspace.reports_dir / "wiki_health_report.md", render_wiki_health_report(report)
     )
-
-
-def _int_value(value: Any) -> int:
-    try:
-        return int(str(value).strip())
-    except ValueError:
-        return 0

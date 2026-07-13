@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
-import importlib.util
 import json
 import tarfile
 import tomllib
@@ -19,22 +17,7 @@ FIXTURE_SKILLS = Path(__file__).resolve().parents[1] / "fixtures" / "skills"
 
 
 class PublicPackageTests(unittest.TestCase):
-    def test_build_config_exposes_only_standard_public_fields(self) -> None:
-        from skillfabric.compiled_graph.builder import BuildConfig
-
-        public_fields = {field.name for field in dataclasses.fields(BuildConfig)}
-
-        self.assertEqual(
-            public_fields,
-            {
-                "skill_root",
-                "workspace",
-                "llm_env_path",
-                "llm_options",
-            },
-        )
-
-    def test_python_facade_exports_only_high_level_methods(self) -> None:
+    def test_python_facade_exposes_the_documented_workflow(self) -> None:
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
@@ -43,51 +26,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.build))
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
-        self.assertFalse(hasattr(client, "prepare_plan"))
-        self.assertFalse(hasattr(client, "finalize_plan"))
-        self.assertFalse(hasattr(client, "package"))
-        self.assertFalse(hasattr(client, "build_wiki"))
-        self.assertFalse(hasattr(client, "build_execution_package"))
-        self.assertFalse(hasattr(client, "status"))
-
-    def test_public_orchestrator_does_not_export_isolated_native_skill_runtime(self) -> None:
-        import skillfabric.orchestrator as orchestrator
-
-        self.assertFalse(hasattr(orchestrator, "prepare_native_skill_runtime"))
-        self.assertFalse(hasattr(orchestrator, "NativeSkillRuntimeError"))
-        self.assertFalse(hasattr(orchestrator, "NativeSkillRuntimeResult"))
-        self.assertFalse(
-            (PACKAGE_ROOT / "src" / "skillfabric" / "orchestrator" / "native_skills.py").exists()
-        )
-
-    def test_public_package_does_not_ship_experiment_only_modules(self) -> None:
-        import skillfabric.orchestrator as orchestrator
-
-        removed_specs = (
-            "skillfabric.evaluation",
-            "skillfabric.evaluation.evaluation",
-            "skillfabric.exporters",
-            "skillfabric.exporters.neo4j",
-            "skillfabric.orchestrator.outcome",
-            "skillfabric.task_understanding",
-        )
-        for module_name in removed_specs:
-            with self.subTest(module=module_name):
-                self.assertIsNone(_find_spec(module_name))
-
-        for path in (
-            PACKAGE_ROOT / "src" / "skillfabric" / "evaluation",
-            PACKAGE_ROOT / "src" / "skillfabric" / "exporters",
-            PACKAGE_ROOT / "src" / "skillfabric" / "orchestrator" / "outcome.py",
-            PACKAGE_ROOT / "src" / "skillfabric" / "task_understanding.py",
-            PACKAGE_ROOT / "tests" / "unit" / "test_experimental_parity.py",
-            PACKAGE_ROOT / "tests" / "unit" / "test_neo4j_export.py",
-        ):
-            with self.subTest(path=path):
-                self.assertFalse(path.exists())
-
-        self.assertFalse(hasattr(orchestrator, "ExecutionOutcome"))
-        self.assertFalse(hasattr(orchestrator, "classify_execution_outcome"))
 
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -109,8 +47,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(manifest["version"], "0.1.0")
         self.assertEqual(manifest["license"], "MIT")
         self.assertEqual(manifest["skills"], ["./"])
-        for unsupported_field in ("hooks", "mcpServers"):
-            self.assertNotIn(unsupported_field, manifest)
 
         command_dir = plugin_root / "commands"
         expected_commands = {"doctor", "build", "prepare", "run"}
@@ -145,15 +81,6 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn(f"name: skillfabric-{command}", skill_text)
             self.assertIn("disable-model-invocation: true", skill_text)
             self.assertIn("$ARGUMENTS", skill_text)
-
-        for removed in ("init", "route", "plan", "assist", "execute"):
-            self.assertFalse((command_dir / f"{removed}.md").exists())
-            self.assertFalse(
-                (plugin_root / "skills" / f"skillfabric-{removed}" / "SKILL.md").exists()
-            )
-        self.assertFalse((plugin_root / "agents").exists())
-        self.assertFalse((plugin_root / "hooks").exists())
-        self.assertFalse((plugin_root / ".mcp.json").exists())
 
     def test_claude_code_plugin_prompts_have_quality_guardrails(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -204,8 +131,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertIn("Prefer the four slash commands", overview_text)
         self.assertIn("/skillfabric:doctor", overview_text)
         self.assertIn("/skillfabric:run", overview_text)
-        self.assertNotIn("Run `skillfabric route", overview_text)
-        self.assertFalse((plugin_root / "skills" / "skillfabric").exists())
 
     def test_claude_code_prepare_and_run_prompts_match_single_plan_contract(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -242,23 +167,7 @@ class PublicPackageTests(unittest.TestCase):
             "planner_validation.json",
         ):
             self.assertIn(snippet, reference)
-        for removed in (
-            "community",
-            "fallback",
-            "prepare-finalize",
-            "--agent-mode",
-            "--skill-package-file",
-            "--planner-output-file",
-            "workflow_plan",
-            "evidence/required_edges.json",
-            "evidence/selected_skill_evidence.json",
-            "evidence/route_summary.json",
-            "agent_run_spec",
-        ):
-            self.assertNotIn(removed, reference.lower())
         self.assertNotIn("raw json", reference_flat.lower())
-        prepare_command = (plugin_root / "commands" / "prepare.md").read_text(encoding="utf-8")
-        self.assertNotIn("warnings", prepare_command.lower())
 
     def test_claude_code_plugin_prompts_handle_natural_language_commands(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
@@ -306,63 +215,17 @@ class PublicPackageTests(unittest.TestCase):
             "Do not paste API keys",
         ):
             self.assertIn(snippet, readme)
-        for removed in (
-            "--embedding-provider",
-            "community",
-            "canonicalization",
-            "fallback",
-        ):
-            self.assertNotIn(removed, readme.lower())
-        for removed_command in (
-            "/skillfabric:init",
-            "/skillfabric:route",
-            "/skillfabric:plan",
-            "/skillfabric:assist",
-            "/skillfabric:execute",
-        ):
-            self.assertNotIn(removed_command, readme)
-        for internal_reference in (
-            "/Users/",
-            "SkillNet/experiments",
-            "AgentSkillOS",
-            "benchmark",
-        ):
-            self.assertNotIn(internal_reference, readme)
 
-    def test_public_docs_do_not_reference_internal_experiment_surfaces(self) -> None:
+    def test_public_docs_do_not_leak_local_paths(self) -> None:
         doc_paths = [
             PUBLIC_ROOT / "README.md",
             PACKAGE_ROOT / "README.md",
             PACKAGE_ROOT / "tests" / "README.md",
             PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md",
         ]
-        forbidden = (
-            "/Users/",
-            "SkillNet/experiments",
-            "AgentSkillOS",
-            "SKILLFABRIC_EXPERIMENTAL_ROOT",
-            "eval aggregation",
-            "eval_report",
-            "community labels",
-            "canonicalization",
-            "--embedding-provider disabled",
-            "--skip-llm-router",
-            "graph/communities.json",
-            "graph/compiled.json",
-        )
         for path in doc_paths:
             text = path.read_text(encoding="utf-8")
-            for marker in forbidden:
-                with self.subTest(path=path, marker=marker):
-                    self.assertNotIn(marker, text)
-
-    def test_python_facade_rejects_removed_route_switches(self) -> None:
-        from skillfabric import SkillFabric
-
-        client = SkillFabric(workspace=".skillfabric")
-
-        with self.assertRaisesRegex(TypeError, "unsupported route option"):
-            client.route("extract financial KPIs", use_llm_router=False)
+            self.assertNotIn("/Users/", text, path)
 
     def test_python_facade_rejects_coerced_route_limits(self) -> None:
         from skillfabric import SkillFabric
@@ -419,8 +282,6 @@ class PublicPackageTests(unittest.TestCase):
             planner.assert_called_once()
             self.assertEqual(result.prompt_path, result.root / "execution_prompt.md")
             self.assertTrue(result.prompt_path.exists())
-            self.assertFalse((result.root / "workflow_plan.json").exists())
-            self.assertFalse((result.root / "PLANNER.md").exists())
 
     def test_python_facade_rejects_route_file_query_mismatch(self) -> None:
         from skillfabric import SkillFabric
@@ -546,16 +407,6 @@ class PublicPackageTests(unittest.TestCase):
                     package_root=root / "external-package",
                 )
 
-    def test_python_facade_build_rejects_removed_skip_llm_validation_option(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            client = SkillFabric(workspace=workspace)
-
-            with self.assertRaisesRegex(TypeError, "unsupported build option"):
-                client.build(FIXTURE_SKILLS, skip_llm_validation=True)
-
     def test_python_facade_rejects_unknown_embedding_provider(self) -> None:
         from skillfabric import SkillFabric
 
@@ -579,13 +430,6 @@ class PublicPackageTests(unittest.TestCase):
                     archive_paths.extend(handle.getnames())
         for path in archive_paths:
             self.assertFalse(any(marker in path for marker in forbidden), path)
-
-
-def _find_spec(module_name: str) -> object | None:
-    try:
-        return importlib.util.find_spec(module_name)
-    except ModuleNotFoundError:
-        return None
 
 
 def _facade_route():

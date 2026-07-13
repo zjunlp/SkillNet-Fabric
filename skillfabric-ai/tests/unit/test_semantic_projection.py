@@ -8,14 +8,11 @@ from skillfabric.compiled_graph.models import EvidenceRef
 from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.compiled_graph.semantic.projection import (
     DependencyCycleError,
-    StaticCycleAdjudicator,
     project_relation_decisions,
 )
-from skillfabric.compiled_graph.semantic.validation import (
-    StaticRelationJudge,
-    validate_candidate_pairs,
-)
+from skillfabric.compiled_graph.semantic.validation import validate_candidate_pairs
 from tests.unit.relation_helpers import make_skill
+from tests.unit.semantic_fixtures import StaticCycleAdjudicator, StaticRelationJudge
 from tests.unit.semantic_helpers import (
     dependency_payload,
     semantic_pair,
