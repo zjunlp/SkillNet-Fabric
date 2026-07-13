@@ -23,6 +23,7 @@ _USAGE_RECORD_KEYS = frozenset(
         "completion_tokens",
         "total_tokens",
         "cached_prompt_tokens",
+        "cache_write_prompt_tokens",
         "billable_prompt_tokens",
         "cost_usd",
         "estimated",
@@ -43,12 +44,13 @@ class ModelPricing:
     input_per_token: float
     output_per_token: float
     cached_input_per_token: float | None = None
+    cache_write_input_per_token: float | None = None
     source: str = "skillfabric"
 
 
 _TOKENS_PER_MILLION = 1_000_000
 
-# Official OpenAI API pricing snapshot used for SkillFabric's custom model aliases.
+# Standard pricing snapshots used for SkillFabric's custom model aliases.
 # Prices are USD per token. Update this table when upstream provider prices change.
 _SKILLFABRIC_PRICING_OVERRIDES: dict[str, ModelPricing] = {
     "gpt-5.4-mini": ModelPricing(
@@ -56,6 +58,27 @@ _SKILLFABRIC_PRICING_OVERRIDES: dict[str, ModelPricing] = {
         cached_input_per_token=0.075 / _TOKENS_PER_MILLION,
         output_per_token=4.50 / _TOKENS_PER_MILLION,
         source="skillfabric_openai_official",
+    ),
+    "gpt-5.6-sol": ModelPricing(
+        input_per_token=5.0 / _TOKENS_PER_MILLION,
+        cached_input_per_token=0.50 / _TOKENS_PER_MILLION,
+        cache_write_input_per_token=6.25 / _TOKENS_PER_MILLION,
+        output_per_token=30.0 / _TOKENS_PER_MILLION,
+        source="skillfabric_standard_2026_07_13",
+    ),
+    "gpt-5.6-terra": ModelPricing(
+        input_per_token=2.50 / _TOKENS_PER_MILLION,
+        cached_input_per_token=0.25 / _TOKENS_PER_MILLION,
+        cache_write_input_per_token=3.125 / _TOKENS_PER_MILLION,
+        output_per_token=15.0 / _TOKENS_PER_MILLION,
+        source="skillfabric_standard_2026_07_13",
+    ),
+    "gpt-5.6-luna": ModelPricing(
+        input_per_token=1.0 / _TOKENS_PER_MILLION,
+        cached_input_per_token=0.10 / _TOKENS_PER_MILLION,
+        cache_write_input_per_token=1.25 / _TOKENS_PER_MILLION,
+        output_per_token=6.0 / _TOKENS_PER_MILLION,
+        source="skillfabric_standard_2026_07_13",
     ),
 }
 
@@ -77,6 +100,7 @@ class LLMUsageRecord:
     duration_ms: int
     status: str
     cached_prompt_tokens: int = 0
+    cache_write_prompt_tokens: int = 0
     billable_prompt_tokens: int = 0
     pricing_source: str = "unknown"
     error: str | None = None
@@ -92,6 +116,7 @@ class LLMUsageRecord:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "cached_prompt_tokens": self.cached_prompt_tokens,
+            "cache_write_prompt_tokens": self.cache_write_prompt_tokens,
             "billable_prompt_tokens": self.billable_prompt_tokens,
             "cost_usd": self.cost_usd,
             "estimated": self.estimated,
@@ -128,6 +153,10 @@ class LLMUsageRecord:
                 payload["cached_prompt_tokens"],
                 label="cached_prompt_tokens",
             ),
+            cache_write_prompt_tokens=_nonnegative_int(
+                payload["cache_write_prompt_tokens"],
+                label="cache_write_prompt_tokens",
+            ),
             billable_prompt_tokens=_nonnegative_int(
                 payload["billable_prompt_tokens"],
                 label="billable_prompt_tokens",
@@ -154,6 +183,7 @@ class LLMUsageTotals:
     completion_tokens: int = 0
     total_tokens: int = 0
     cached_prompt_tokens: int = 0
+    cache_write_prompt_tokens: int = 0
     billable_prompt_tokens: int = 0
     cost_usd: float | None = None
     estimated_calls: int = 0
@@ -170,6 +200,7 @@ class LLMUsageTotals:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "cached_prompt_tokens": self.cached_prompt_tokens,
+            "cache_write_prompt_tokens": self.cache_write_prompt_tokens,
             "billable_prompt_tokens": self.billable_prompt_tokens,
             "cost_usd": self.cost_usd,
             "estimated_calls": self.estimated_calls,
@@ -210,19 +241,28 @@ class LLMUsageTracker:
             )
             total_tokens = prompt_tokens + completion_tokens
             cached_prompt_tokens = 0
+            cache_write_prompt_tokens = 0
             estimated = True
         else:
             prompt_tokens = usage["prompt_tokens"]
             completion_tokens = 0 if status == "failed" else usage["completion_tokens"]
-            total_tokens = usage.get("total_tokens") or prompt_tokens + completion_tokens
+            total_tokens = prompt_tokens + completion_tokens
             cached_prompt_tokens = min(prompt_tokens, max(0, usage.get("cached_prompt_tokens", 0)))
+            cache_write_prompt_tokens = min(
+                prompt_tokens - cached_prompt_tokens,
+                max(0, usage.get("cache_write_prompt_tokens", 0)),
+            )
             estimated = False
-        billable_prompt_tokens = max(0, prompt_tokens - cached_prompt_tokens)
+        billable_prompt_tokens = max(
+            0,
+            prompt_tokens - cached_prompt_tokens - cache_write_prompt_tokens,
+        )
         estimated_cost_usd, pricing_known, pricing_source = _estimate_cost(
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             cached_prompt_tokens=cached_prompt_tokens,
+            cache_write_prompt_tokens=cache_write_prompt_tokens,
         )
         cost_usd = estimated_cost_usd if status != "failed" else None
         record = LLMUsageRecord(
@@ -234,6 +274,7 @@ class LLMUsageTracker:
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cached_prompt_tokens=cached_prompt_tokens,
+            cache_write_prompt_tokens=cache_write_prompt_tokens,
             billable_prompt_tokens=billable_prompt_tokens,
             cost_usd=cost_usd,
             estimated=estimated,
@@ -308,6 +349,7 @@ def summarize_usage(
         totals.completion_tokens += record.completion_tokens
         totals.total_tokens += record.total_tokens
         totals.cached_prompt_tokens += record.cached_prompt_tokens
+        totals.cache_write_prompt_tokens += record.cache_write_prompt_tokens
         totals.billable_prompt_tokens += record.billable_prompt_tokens
         totals.duration_ms += record.duration_ms
         if record.estimated:
@@ -341,6 +383,7 @@ def _summarize_operation(records: list[LLMUsageRecord]) -> dict[str, Any]:
         "completion_tokens": sum(item.completion_tokens for item in records),
         "total_tokens": sum(item.total_tokens for item in records),
         "cached_prompt_tokens": sum(item.cached_prompt_tokens for item in records),
+        "cache_write_prompt_tokens": sum(item.cache_write_prompt_tokens for item in records),
         "billable_prompt_tokens": sum(item.billable_prompt_tokens for item in records),
         "cost_usd": round(known_cost, 10) if has_known_cost else None,
         "estimated_calls": sum(1 for item in records if item.estimated),
@@ -361,17 +404,28 @@ def _extract_usage(payload: Any) -> dict[str, int] | None:
         raw_usage = raw_usage.dict()
     if not isinstance(raw_usage, dict):
         return None
-    prompt_tokens = _first_int(raw_usage, "prompt_tokens", "input_tokens", "inputTokens")
+    prompt_tokens = _first_int(raw_usage, "prompt_tokens")
+    uncached_input_tokens = _first_int(raw_usage, "input_tokens", "inputTokens")
     completion_tokens = _first_int(raw_usage, "completion_tokens", "output_tokens", "outputTokens")
+    if prompt_tokens is None:
+        prompt_tokens = uncached_input_tokens
     if prompt_tokens is None or completion_tokens is None:
         return None
-    total_tokens = _first_int(raw_usage, "total_tokens", "totalTokens")
     cached_prompt_tokens = _extract_cached_prompt_tokens(raw_usage)
+    cache_write_prompt_tokens = _extract_cache_write_prompt_tokens(raw_usage)
+    if uncached_input_tokens is not None and _uses_component_input_tokens(raw_usage):
+        prompt_tokens = uncached_input_tokens + cached_prompt_tokens + cache_write_prompt_tokens
+    cached_prompt_tokens = min(prompt_tokens, cached_prompt_tokens)
+    cache_write_prompt_tokens = min(
+        prompt_tokens - cached_prompt_tokens,
+        cache_write_prompt_tokens,
+    )
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens or prompt_tokens + completion_tokens,
-        "cached_prompt_tokens": min(prompt_tokens, cached_prompt_tokens),
+        "total_tokens": prompt_tokens + completion_tokens,
+        "cached_prompt_tokens": cached_prompt_tokens,
+        "cache_write_prompt_tokens": cache_write_prompt_tokens,
     }
 
 
@@ -444,15 +498,37 @@ def _count_text(model: str, text: str) -> int:
 
 
 def _extract_cached_prompt_tokens(raw_usage: dict[str, Any]) -> int:
-    for key in (
-        "cached_prompt_tokens",
-        "cached_input_tokens",
-        "cached_tokens",
-        "cache_read_input_tokens",
-    ):
-        value = _first_int(raw_usage, key)
-        if value is not None:
-            return max(0, value)
+    return _extract_usage_token_count(
+        raw_usage,
+        aliases=(
+            "cached_prompt_tokens",
+            "cached_input_tokens",
+            "cached_tokens",
+            "cache_read_input_tokens",
+        ),
+    )
+
+
+def _extract_cache_write_prompt_tokens(raw_usage: dict[str, Any]) -> int:
+    return _extract_usage_token_count(
+        raw_usage,
+        aliases=(
+            "cache_write_prompt_tokens",
+            "cache_write_input_tokens",
+            "cache_creation_input_tokens",
+            "cache_creation_tokens",
+        ),
+    )
+
+
+def _extract_usage_token_count(
+    raw_usage: dict[str, Any],
+    *,
+    aliases: tuple[str, ...],
+) -> int:
+    value = _first_int(raw_usage, *aliases)
+    if value is not None:
+        return max(0, value)
     for detail_key in (
         "prompt_tokens_details",
         "prompt_token_details",
@@ -466,16 +542,21 @@ def _extract_cached_prompt_tokens(raw_usage: dict[str, Any]) -> int:
             details = details.dict()
         if not isinstance(details, dict):
             continue
-        value = _first_int(
-            details,
-            "cached_tokens",
-            "cached_prompt_tokens",
-            "cached_input_tokens",
-            "cache_read_input_tokens",
-        )
+        value = _first_int(details, *aliases)
         if value is not None:
             return max(0, value)
     return 0
+
+
+def _uses_component_input_tokens(raw_usage: dict[str, Any]) -> bool:
+    return _first_int(raw_usage, "prompt_tokens") is None and any(
+        _first_int(raw_usage, key) is not None
+        for key in (
+            "cache_read_input_tokens",
+            "cache_write_input_tokens",
+            "cache_creation_input_tokens",
+        )
+    )
 
 
 def _estimate_cost(
@@ -484,19 +565,30 @@ def _estimate_cost(
     prompt_tokens: int,
     completion_tokens: int,
     cached_prompt_tokens: int = 0,
+    cache_write_prompt_tokens: int = 0,
 ) -> tuple[float | None, bool, str]:
     override = _pricing_override_for_model(model)
     if override is not None:
         cached_tokens = min(prompt_tokens, max(0, cached_prompt_tokens))
-        billable_prompt_tokens = max(0, prompt_tokens - cached_tokens)
+        cache_write_tokens = min(
+            prompt_tokens - cached_tokens,
+            max(0, cache_write_prompt_tokens),
+        )
+        billable_prompt_tokens = max(0, prompt_tokens - cached_tokens - cache_write_tokens)
         cached_input_per_token = (
             override.cached_input_per_token
             if override.cached_input_per_token is not None
             else override.input_per_token
         )
+        cache_write_input_per_token = (
+            override.cache_write_input_per_token
+            if override.cache_write_input_per_token is not None
+            else override.input_per_token
+        )
         cost = (
             billable_prompt_tokens * override.input_per_token
             + cached_tokens * cached_input_per_token
+            + cache_write_tokens * cache_write_input_per_token
             + completion_tokens * override.output_per_token
         )
         return round(cost, 10), True, override.source

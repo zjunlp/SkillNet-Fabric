@@ -97,6 +97,73 @@ class LLMUsageTests(unittest.TestCase):
         self.assertAlmostEqual(record.cost_usd or 0.0, expected_cost, places=10)
         self.assertEqual(record.pricing_source, "skillfabric_openai_official")
 
+    def test_skillfabric_pricing_override_prices_gpt_5_6_tiers(self) -> None:
+        prices = {
+            "gpt-5.6-sol": (5.0, 0.50, 6.25, 30.0),
+            "gpt-5.6-terra": (2.50, 0.25, 3.125, 15.0),
+            "gpt-5.6-luna": (1.0, 0.10, 1.25, 6.0),
+        }
+
+        for model, (input_price, cache_read_price, cache_write_price, output_price) in prices.items():
+            with self.subTest(model=model):
+                record = LLMUsageTracker().record_completion(
+                    model=f"openai/responses/{model}",
+                    messages=[{"role": "user", "content": "Reply with OK only."}],
+                    response={
+                        "choices": [{"message": {"content": "OK"}}],
+                        "usage": {
+                            "input_tokens": 700,
+                            "output_tokens": 50,
+                            "cache_read_input_tokens": 200,
+                            "cache_creation_input_tokens": 100,
+                        },
+                    },
+                    operation="llm_smoke",
+                    duration_ms=10,
+                    status="completed",
+                )
+
+                expected_cost = (
+                    (700 * input_price)
+                    + (200 * cache_read_price)
+                    + (100 * cache_write_price)
+                    + (50 * output_price)
+                ) / 1_000_000
+                self.assertEqual(record.prompt_tokens, 1000)
+                self.assertEqual(record.cached_prompt_tokens, 200)
+                self.assertEqual(record.cache_write_prompt_tokens, 100)
+                self.assertEqual(record.billable_prompt_tokens, 700)
+                self.assertEqual(record.total_tokens, 1050)
+                self.assertAlmostEqual(record.cost_usd or 0.0, expected_cost, places=10)
+                self.assertEqual(record.pricing_source, "skillfabric_standard_2026_07_13")
+
+    def test_openai_style_prompt_tokens_are_not_double_counted_with_cache_details(self) -> None:
+        record = LLMUsageTracker().record_completion(
+            model="gpt-5.6-luna",
+            messages=[{"role": "user", "content": "Reply with OK only."}],
+            response={
+                "choices": [{"message": {"content": "OK"}}],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "total_tokens": 1050,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 200,
+                        "cache_creation_tokens": 100,
+                    },
+                },
+            },
+            operation="llm_smoke",
+            duration_ms=10,
+            status="completed",
+        )
+
+        self.assertEqual(record.prompt_tokens, 1000)
+        self.assertEqual(record.cached_prompt_tokens, 200)
+        self.assertEqual(record.cache_write_prompt_tokens, 100)
+        self.assertEqual(record.billable_prompt_tokens, 700)
+        self.assertEqual(record.total_tokens, 1050)
+
     def test_cached_tokens_are_clamped_to_prompt_tokens(self) -> None:
         record = LLMUsageTracker().record_completion(
             model="gpt-5.4-mini",
@@ -162,6 +229,10 @@ class LLMUsageTests(unittest.TestCase):
             self.assertEqual(len(records), 2)
             self.assertEqual(totals.total_calls, 2)
             self.assertEqual(totals.prompt_tokens, sum(item.prompt_tokens for item in records))
+            self.assertEqual(
+                totals.cache_write_prompt_tokens,
+                sum(item.cache_write_prompt_tokens for item in records),
+            )
             self.assertEqual(totals.by_operation["kg_build"]["total_calls"], 1)
             self.assertEqual(totals.by_operation["route"]["total_calls"], 1)
             self.assertGreater(totals.cost_usd or 0.0, 0.0)
