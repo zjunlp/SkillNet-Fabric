@@ -234,7 +234,7 @@ See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installa
 | `EMBEDDING_MODEL` | Embedding model identifier | `openai/text-embedding-3-small` |
 | `EMBEDDING_DIMENSION` | Embedding vector dimension | `1536` |
 | `SKILLFABRIC_MAX_SELECTED_SKILLS` | Maximum explorer selection size | `8` |
-| `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `8` |
+| `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `24` |
 | `SKILLFABRIC_EXPANDED_LIMIT` | Maximum candidates after graph expansion | `100` |
 | `SKILLFABRIC_MAX_GRAPH_DEPTH` | Operational graph traversal depth | `2` |
 | `SKILLFABRIC_WIKI_SUMMARY_MODE` | Wiki summary mode: `off` or `all` | `off` |

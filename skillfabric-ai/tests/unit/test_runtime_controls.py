@@ -16,7 +16,7 @@ def test_public_defaults_match_the_documented_workflow() -> None:
 
     assert build.wiki_summary_mode == "off"
     assert router.max_selected_skills == 8
-    assert router.seed_limit == 8
+    assert router.seed_limit == 24
     assert router.expanded_limit == 100
     assert router.max_depth == 2
 

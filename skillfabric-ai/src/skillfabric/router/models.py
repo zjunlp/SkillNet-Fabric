@@ -17,7 +17,7 @@ class RouterBundleConfig:
     workspace: str | Path = ".skillfabric"
     query: str = ""
     env_file: str | Path | None = ".env"
-    seed_limit: int = 8
+    seed_limit: int = 24
     expanded_limit: int = 100
     max_depth: int = 2
 

@@ -39,7 +39,7 @@ def _seed(skill_id: str, rank: int = 1) -> RouterSkillCandidate:
 def test_router_bundle_config_has_only_bounded_expansion_controls() -> None:
     config = RouterBundleConfig()
 
-    assert config.seed_limit == 8
+    assert config.seed_limit == 24
     assert config.expanded_limit == 100
     assert config.max_depth == 2
     assert not hasattr(config, "graph_expansion_mode")

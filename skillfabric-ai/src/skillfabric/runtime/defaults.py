@@ -15,7 +15,7 @@ class BuildOptions:
 @dataclass(frozen=True, slots=True)
 class RouterOptions:
     max_selected_skills: int = 8
-    seed_limit: int = 8
+    seed_limit: int = 24
     expanded_limit: int = 100
     max_depth: int = 2
     explorer_max_turns: int = 24
@@ -55,7 +55,7 @@ def default_build_options() -> BuildOptions:
 def default_router_options() -> RouterOptions:
     return RouterOptions(
         max_selected_skills=_nonnegative_int("SKILLFABRIC_MAX_SELECTED_SKILLS", 8),
-        seed_limit=_nonnegative_int("SKILLFABRIC_SEED_LIMIT", 8),
+        seed_limit=_nonnegative_int("SKILLFABRIC_SEED_LIMIT", 24),
         expanded_limit=_nonnegative_int("SKILLFABRIC_EXPANDED_LIMIT", 100),
         max_depth=_nonnegative_int("SKILLFABRIC_MAX_GRAPH_DEPTH", 2),
         explorer_max_turns=_positive_int("SKILLFABRIC_EXPLORER_MAX_TURNS", 24),
