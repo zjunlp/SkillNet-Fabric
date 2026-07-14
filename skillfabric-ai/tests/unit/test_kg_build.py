@@ -43,6 +43,24 @@ def test_parser_rejects_invalid_yaml_instead_of_using_a_partial_parser(tmp_path)
         parse_skill_file(skill_file)
 
 
+def test_parser_normalizes_frontmatter_name_to_kebab_case(tmp_path) -> None:
+    skill_file = tmp_path / "api-integration-specialist" / "SKILL.md"
+    skill_file.parent.mkdir()
+    skill_file.write_text(
+        "---\n"
+        "name: API Integration Specialist\n"
+        "description: Integrate external APIs.\n"
+        "---\n\n"
+        "# API Integration Specialist\n",
+        encoding="utf-8",
+    )
+
+    skill = parse_skill_file(skill_file)
+
+    assert skill.id == "skill:api-integration-specialist"
+    assert skill.name == "api-integration-specialist"
+
+
 def test_skill_node_loader_rejects_unknown_serialized_fields() -> None:
     payload = parse_skill_file(FIXTURE_SKILLS / "pdf-table-parser" / "SKILL.md").to_dict(
         include_raw_text=True

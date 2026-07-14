@@ -12,6 +12,7 @@ import yaml
 from skillfabric.registry.models import SkillNode
 
 _NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_NAME_SEPARATOR_RE = re.compile(r"[^a-z0-9]+")
 _MAX_NAME_LENGTH = 64
 
 
@@ -24,10 +25,10 @@ def parse_skill_file(path: str | Path) -> SkillNode:
     name = frontmatter.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ValueError(f"{skill_path} frontmatter name must be a non-empty string")
-    name = name.strip()
+    name = _normalize_name(name)
     if len(name) > _MAX_NAME_LENGTH or _NAME_RE.fullmatch(name) is None:
         raise ValueError(
-            f"{skill_path} frontmatter name must contain at most {_MAX_NAME_LENGTH} "
+            f"{skill_path} frontmatter name must normalize to at most {_MAX_NAME_LENGTH} "
             "lowercase letters, numbers, and single hyphens"
         )
     description = frontmatter.get("description")
@@ -44,6 +45,10 @@ def parse_skill_file(path: str | Path) -> SkillNode:
         content_hash=content_hash,
         raw_text=raw_text,
     )
+
+
+def _normalize_name(value: str) -> str:
+    return _NAME_SEPARATOR_RE.sub("-", value.strip().lower()).strip("-")
 
 
 def _parse_frontmatter(raw_text: str) -> dict[str, Any]:
