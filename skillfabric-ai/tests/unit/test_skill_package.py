@@ -80,6 +80,19 @@ def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> N
     assert relation.confidence == pytest.approx(0.94)
 
 
+@pytest.mark.parametrize("prefix", ["query_wiki/", "./", "./query_wiki/"])
+def test_skill_package_normalizes_query_wiki_relative_paths(prefix: str) -> None:
+    payload = _package().to_dict()
+    canonical_path = "skills/cards/pdf-table-parser.md"
+    payload["selected_skills"][0]["evidence"] = [{"path": f"{prefix}{canonical_path}"}]
+    payload["wiki_pages_read"][0] = f"{prefix}{canonical_path}"
+
+    package = SkillPackage.from_dict(payload)
+
+    assert package.selected_skills[0].evidence[0].path == canonical_path
+    assert package.wiki_pages_read[0] == canonical_path
+
+
 def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
     _, query_wiki = _query_context(tmp_path)
     package = _package(
