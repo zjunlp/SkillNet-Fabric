@@ -262,7 +262,7 @@ class PublicPackageTests(unittest.TestCase):
 
         build_mock.assert_not_called()
 
-    def test_python_facade_plans_once_and_writes_prompt_only(self) -> None:
+    def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric
 
         with TemporaryDirectory() as tmp:
@@ -272,7 +272,11 @@ class PublicPackageTests(unittest.TestCase):
             with patch(
                 "skillfabric.orchestrator.package.litellm_completion",
                 return_value=json.dumps(
-                    {"execution_prompt": "Parse the PDF, extract KPIs, and verify each value."}
+                    {
+                        "execution_prompt": (
+                            "Parse the PDF, extract the KPIs, and verify each value."
+                        )
+                    }
                 ),
             ) as planner:
                 result = client.plan(
@@ -283,6 +287,9 @@ class PublicPackageTests(unittest.TestCase):
             planner.assert_called_once()
             self.assertEqual(result.prompt_path, result.root / "execution_prompt.md")
             self.assertTrue(result.prompt_path.exists())
+            prompt = result.prompt_path.read_text(encoding="utf-8")
+            self.assertIn("extract financial KPIs from a PDF report", prompt)
+            self.assertIn("Parse the PDF, extract the KPIs", prompt)
 
     def test_python_facade_rejects_route_file_query_mismatch(self) -> None:
         from skillfabric import SkillFabric

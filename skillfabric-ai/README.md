@@ -70,7 +70,7 @@ weights. The explorer must return the exact
 selection-only SkillPackage schema and cite query-wiki paths it read. Graph
 relations remain evidence: they neither force skill selection nor impose final
 execution order. Planning uses one bounded LLM call over the selected contracts
-and full sources, then writes only `execution_prompt.md`.
+and full sources, then places the original task and resulting execution plan in `execution_prompt.md`.
 
 ## Python API
 

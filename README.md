@@ -25,7 +25,7 @@ SkillNet-Fabric turns a local collection of native `SKILL.md` files into a reusa
 - **Semantic skill graph:** distinguish prerequisites, useful compositions, close alternatives, and unrelated pairs.
 - **Bounded retrieval:** combine BM25, dense embeddings, and validated operational edges without placing the full corpus in the route context.
 - **Agentic selection:** let an explorer inspect a task-specific query wiki and choose the skills needed for the current task.
-- **Prompt-only planning:** give the planner the selected contracts and complete skill sources, then produce one validated `execution_prompt.md`.
+- **Constraint-preserving planning:** give the planner the selected contracts and complete skill sources, then combine its complete execution plan with the original task in one validated `execution_prompt.md`.
 - **Explicit failure:** malformed model output, incompatible artifacts, missing credentials, and context overflow stop the workflow instead of silently generating a fallback.
 
 The repository is named **SkillNet-Fabric**. Its installable Python package remains `skillfabric-ai`, and its CLI command remains `skillfabric`.
@@ -153,7 +153,7 @@ The planner receives:
 - each selected `SkillContract`, and
 - the complete source of every selected skill.
 
-It decides the task-specific execution flow and writes one `execution_prompt.md`. SkillNet-Fabric does not create an intermediate workflow DAG or execute the task from the CLI.
+It produces a complete task-specific execution plan. SkillNet-Fabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
 
 ---
 

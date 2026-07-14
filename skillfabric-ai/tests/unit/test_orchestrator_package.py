@@ -74,9 +74,9 @@ def _planner_response() -> str:
     return json.dumps(
         {
             "execution_prompt": (
-                "Parse the PDF tables, extract the requested KPIs, and verify every value "
-                "against the source. Use independent extraction checks in parallel only when "
-                "they do not share mutable state."
+                "First parse the PDF tables, then extract the requested KPIs. Run independent "
+                "checks in parallel when they do not share mutable state, synthesize the results, "
+                "and verify every value against the source."
             )
         }
     )
@@ -101,10 +101,14 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     monkeypatch.setattr(package_module, "count_message_tokens", count_tokens)
     package_root = workspace / "runs" / "planner-test" / "execution_package"
 
+    query = (
+        "Extract financial KPIs from a PDF report. Write result.json with each object using "
+        "the exact keys 'name' and 'value'."
+    )
     result = plan_execution_package(
         workspace,
         _route(),
-        query="extract financial KPIs from a PDF report",
+        query=query,
         env_file=tmp_path / "unused.env",
         package_root=package_root,
         planner_context_max_tokens=10_000,
@@ -121,9 +125,16 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "relation_evidence" in prompt
     assert "source before target" in prompt
     assert "producer-to-consumer handoff" in prompt
+    assert "complete, task-specific execution plan" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
-    assert result.prompt_path.read_text().startswith("Parse the PDF tables")
+    execution_prompt = result.prompt_path.read_text()
+    assert execution_prompt.startswith(f"<original_task>\n{query}\n</original_task>")
+    assert f"<original_task>\n{query}\n</original_task>" in execution_prompt
+    assert "<execution_plan>\nFirst parse the PDF tables" in execution_prompt
+    assert execution_prompt.index("<original_task>") < execution_prompt.index("<execution_plan>")
+    assert "<execution_contract>" not in execution_prompt
+    assert execution_prompt.count(query) == 1
     assert not (package_root / "workflow_plan.json").exists()
     assert not (package_root / "PLANNER.md").exists()
     assert json.loads(result.planner_output_path.read_text()) == json.loads(_planner_response())

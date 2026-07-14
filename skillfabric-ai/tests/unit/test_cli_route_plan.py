@@ -244,7 +244,7 @@ def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:
     root.mkdir(parents=True)
     (root / "execution_prompt.md").write_text("Execute the task.\n", encoding="utf-8")
     (root / "planner_output.json").write_text(
-        json.dumps({"execution_prompt": "Execute the task."}),
+        json.dumps({"execution_prompt": "Use the selected skills, then verify the result."}),
         encoding="utf-8",
     )
     (root / "planner_validation.json").write_text(
