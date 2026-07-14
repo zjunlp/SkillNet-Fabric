@@ -247,6 +247,9 @@ def test_contract_prompt_delimits_untrusted_source_and_has_one_schema() -> None:
 
     assert CONTRACT_PROMPT_ID == "skill_contract"
     assert CONTRACT_PROMPT_ID in system
+    assert "<prompt_contract" in system
+    assert "<role>" in system
+    assert "<trusted_policy>" in system
     assert "<task>" in user
     assert "<contract_semantics>" in user
     assert "<output_schema>" in user

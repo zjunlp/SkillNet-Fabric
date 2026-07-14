@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -221,6 +222,25 @@ def test_build_rejects_an_incompatible_workspace_without_mutating_it(tmp_path) -
         _build(workspace)
 
     assert json.loads(status.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+
+
+def test_build_lock_contention_does_not_overwrite_active_status(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    workspace.mkdir()
+    status = workspace / "status.json"
+    active_status = {
+        "schema_version": "3.0",
+        "state": "building",
+        "stage": "contracts",
+        "build_id": "active-build",
+    }
+    status.write_text(json.dumps(active_status) + "\n", encoding="utf-8")
+    (workspace / "build.lock").write_text(str(os.getpid()), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="build lock already exists"):
+        _build(workspace)
+
+    assert json.loads(status.read_text(encoding="utf-8")) == active_status
 
 
 def test_failed_contract_stage_writes_sanitized_status(tmp_path) -> None:

@@ -120,7 +120,8 @@ def expand_semantic_candidates(
     )
     selected = [*seeds, *expansion_rows[: limit - len(seeds)]]
     selected_ranks = {candidate.skill_id: rank for rank, candidate in enumerate(selected)}
-    alternatives: dict[tuple[str, str], RouterAlternative] = {}
+    alternatives: dict[str, RouterAlternative] = {}
+    alternative_priorities: dict[str, tuple[float, int, str]] = {}
     for edge in similarity_edges:
         source_rank = selected_ranks.get(edge.source)
         target_rank = selected_ranks.get(edge.target)
@@ -130,7 +131,6 @@ def expand_semantic_candidates(
             selected_id, alternative_id = edge.source, edge.target
         else:
             selected_id, alternative_id = edge.target, edge.source
-        key = (alternative_id, selected_id)
         candidate = RouterAlternative(
             skill_id=alternative_id,
             name=skills[alternative_id].name,
@@ -138,9 +138,11 @@ def expand_semantic_candidates(
             confidence=edge.confidence,
             reason=edge.reason,
         )
-        existing = alternatives.get(key)
-        if existing is None or candidate.confidence > existing.confidence:
-            alternatives[key] = candidate
+        priority = (-candidate.confidence, selected_ranks[selected_id], selected_id)
+        existing_priority = alternative_priorities.get(alternative_id)
+        if existing_priority is None or priority < existing_priority:
+            alternatives[alternative_id] = candidate
+            alternative_priorities[alternative_id] = priority
     ordered_alternatives = tuple(
         sorted(
             alternatives.values(),

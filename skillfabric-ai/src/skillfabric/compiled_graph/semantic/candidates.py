@@ -398,8 +398,7 @@ def _add_lexical_hits(
                     query_skill=skill.id,
                     matched_skill=result.skill_id,
                     rank=rank,
-                    evidence=contracts[skill.id].evidence
-                    + contracts[result.skill_id].evidence,
+                    evidence=contracts[skill.id].evidence + contracts[result.skill_id].evidence,
                 ),
             )
             if rank >= top_k:
@@ -468,9 +467,7 @@ def _select_candidate_hits(
         for key, pair_hits in hits.items()
         if any(hit.channel == "explicit_reference" for hit in pair_hits)
     }
-    hits_by_query: dict[str, dict[str, list[CandidateHit]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    hits_by_query: dict[str, dict[str, list[CandidateHit]]] = defaultdict(lambda: defaultdict(list))
     for pair_hits in hits.values():
         for hit in pair_hits:
             if hit.channel != "explicit_reference":

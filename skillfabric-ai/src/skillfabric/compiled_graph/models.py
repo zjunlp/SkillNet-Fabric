@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from skillfabric.registry.models import SkillNode
 
-NodeType = Literal["skill"]
 EdgeType = Literal["similar_to", "compose_with", "depend_on"]
 GRAPH_SCHEMA_VERSION = "3.0"
 _EDGE_TYPES = {"similar_to", "compose_with", "depend_on"}

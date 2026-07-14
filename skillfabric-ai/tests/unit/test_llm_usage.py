@@ -104,7 +104,12 @@ class LLMUsageTests(unittest.TestCase):
             "gpt-5.6-luna": (1.0, 0.10, 1.25, 6.0),
         }
 
-        for model, (input_price, cache_read_price, cache_write_price, output_price) in prices.items():
+        for model, (
+            input_price,
+            cache_read_price,
+            cache_write_price,
+            output_price,
+        ) in prices.items():
             with self.subTest(model=model):
                 record = LLMUsageTracker().record_completion(
                     model=f"openai/responses/{model}",

@@ -59,9 +59,7 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         contracts[contract.skill_id] = contract
     graph_skill_ids = {skill.id for skill in graph.nodes}
     if graph_skill_ids != set(skills) or graph_skill_ids != set(contracts):
-        raise ValueError(
-            "graph, registry, and contract ids differ; rebuild the workspace"
-        )
+        raise ValueError("graph, registry, and contract ids differ; rebuild the workspace")
     for skill_id, contract in contracts.items():
         if contract.content_hash != skills[skill_id].content_hash:
             raise ValueError(f"contract content hash differs for {skill_id}; rebuild the workspace")

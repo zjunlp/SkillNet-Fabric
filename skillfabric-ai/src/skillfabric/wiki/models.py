@@ -56,7 +56,6 @@ class WikiPage:
     path: Path
     page_type: WikiPageType
     entity_id: str
-    title: str
     text: str
 
 

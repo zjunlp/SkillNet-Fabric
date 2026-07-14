@@ -96,7 +96,6 @@ def _directory_pages(
             path=workspace.wiki_dir / "index.md",
             page_type="index",
             entity_id="index",
-            title="SkillFabric Wiki",
             text=render_index(source, page_summaries),
         ),
     ]

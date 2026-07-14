@@ -70,7 +70,6 @@ def _skill_page(
         path=page_path(workspace.wiki_skills_dir, "cards", skill.id),
         page_type="skill",
         entity_id=skill.id,
-        title=skill.name,
         text=text,
     )
 
@@ -118,7 +117,10 @@ def _workflow_page(
         + "\n"
     )
     return WikiPage(
-        page_path(workspace.wiki_dir, "workflows", entity_id), "workflow", entity_id, title, text
+        path=page_path(workspace.wiki_dir, "workflows", entity_id),
+        page_type="workflow",
+        entity_id=entity_id,
+        text=text,
     )
 
 
@@ -149,7 +151,6 @@ def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
         path=workspace.wiki_skill_sources_dir / source_filename,
         page_type="skill",
         entity_id=skill.id,
-        title=f"{skill.name} Source",
         text=text,
     )
 

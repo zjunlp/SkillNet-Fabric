@@ -102,6 +102,7 @@ def build_graph(
     build_id = deps.build_id or str(time.time_ns())
     stage = "initialization"
     timer = _StageTimer()
+    lock_acquired = False
     try:
         with (
             workspace.lock(),
@@ -110,6 +111,7 @@ def build_graph(
                 metadata={"build_id": build_id},
             ),
         ):
+            lock_acquired = True
             contract_extractor = deps.contract_extractor or LiteLLMContractExtractor.from_env(
                 env_path=config.llm_env_path
             )
@@ -243,12 +245,13 @@ def build_graph(
                 stats=stats,
             )
     except Exception as exc:
-        _write_failed_status(
-            workspace,
-            build_id=build_id,
-            stage=stage,
-            error=exc,
-        )
+        if lock_acquired:
+            _write_failed_status(
+                workspace,
+                build_id=build_id,
+                stage=stage,
+                error=exc,
+            )
         raise
 
 

@@ -11,6 +11,7 @@ import pytest
 from skillfabric.cli import PUBLIC_COMMANDS
 from skillfabric.cli import main as cli_main
 from skillfabric.router.models import RouteResult, RouteSelectedSkill
+from tests.unit.wiki_helpers import build_fixture_workspace
 
 
 def _route() -> RouteResult:
@@ -172,18 +173,7 @@ def test_plan_route_file_rejects_non_string_query_artifact(tmp_path) -> None:
 
 def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
-    workspace.mkdir()
-    (workspace / "status.json").write_text(
-        json.dumps(
-            {
-                "schema_version": "3.0",
-                "state": "ready",
-                "build_id": "build-test",
-                "stats": {"skill_count": 8},
-            }
-        ),
-        encoding="utf-8",
-    )
+    build_fixture_workspace(workspace)
     env_file = tmp_path / ".env.test"
     env_file.write_text(
         "API_KEY=private-value\n"
@@ -208,9 +198,44 @@ def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -
     text = output.getvalue()
     payload = json.loads(text)
     assert payload["workspace_ready"] is True
-    assert payload["skill_count"] == 8
+    assert payload["skill_count"] == 7
     assert payload["next_action"] == "ready"
     assert "private-value" not in text
+
+
+def test_doctor_state_rejects_graph_from_a_different_build(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    status_path = workspace / "status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["build_id"] = "newer-build"
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    env_file = tmp_path / ".env.test"
+    env_file.write_text(
+        "API_KEY=test-value\n"
+        "BASE_URL=https://example.test/v1\n"
+        "MODEL=openai/test-model\n"
+        "EMBEDDING_MODEL=openai/test-embedding\n",
+        encoding="utf-8",
+    )
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(
+            [
+                "doctor-state",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert payload["workspace_ready"] is False
+    assert payload["build_id"] == "newer-build"
+    assert payload["skill_count"] == 0
+    assert payload["next_action"] == "build"
 
 
 def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:

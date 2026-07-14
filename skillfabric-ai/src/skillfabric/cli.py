@@ -16,7 +16,7 @@ from skillfabric.compiled_graph.builder import (
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
@@ -413,20 +413,14 @@ def _doctor_state(args: argparse.Namespace) -> None:
     parsed = _parse_control_tokens(args.tokens)
     workspace = Workspace(parsed["workspace"])
     config = _configuration_status(Path(parsed["env_file"]))
-    status = workspace.read_json(workspace.status_path, default={}) or {}
-    ready = bool(
-        isinstance(status, dict)
-        and status.get("state") == "ready"
-        and status.get("schema_version") == GRAPH_SCHEMA_VERSION
-    )
-    stats = status.get("stats", {}) if isinstance(status, dict) else {}
+    ready, build_id, skill_count = _workspace_readiness(workspace)
     payload = {
         "api_configured": config["configured"],
         "missing_configuration": config["missing"],
         "workspace": str(workspace.root),
         "workspace_ready": ready,
-        "build_id": status.get("build_id", "") if isinstance(status, dict) else "",
-        "skill_count": stats.get("skill_count", 0) if isinstance(stats, dict) else 0,
+        "build_id": build_id,
+        "skill_count": skill_count,
         "next_action": "ready"
         if config["configured"] and ready
         else "build"
@@ -434,6 +428,33 @@ def _doctor_state(args: argparse.Namespace) -> None:
         else "init",
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _workspace_readiness(workspace: Workspace) -> tuple[bool, str, int]:
+    try:
+        status = workspace.read_json(workspace.status_path, default={}) or {}
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False, "", 0
+    if not isinstance(status, dict):
+        return False, "", 0
+    raw_build_id = status.get("build_id")
+    build_id = raw_build_id.strip() if isinstance(raw_build_id, str) else ""
+    if (
+        status.get("state") != "ready"
+        or status.get("schema_version") != GRAPH_SCHEMA_VERSION
+        or not build_id
+    ):
+        return False, build_id, 0
+    try:
+        graph_payload = workspace.read_json(workspace.graph_dir / "graph.json")
+        if not isinstance(graph_payload, dict):
+            return False, build_id, 0
+        graph = GraphDocument.from_dict(graph_payload)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        return False, build_id, 0
+    if graph.build_id != build_id:
+        return False, build_id, 0
+    return True, build_id, len(graph.nodes)
 
 
 def _run_state(args: argparse.Namespace) -> None:

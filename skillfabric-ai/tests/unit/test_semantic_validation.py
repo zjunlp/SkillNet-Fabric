@@ -321,15 +321,16 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
 
     assert RELATION_PROMPT_ID in messages[0]["content"]
     assert RELATION_PROMPT_ID == "semantic_relation_judge"
+    assert "<prompt_contract" in messages[0]["content"]
+    assert "<role>" in messages[0]["content"]
+    assert "<trusted_policy>" in messages[0]["content"]
     assert "<relation_semantics>" in rendered
     assert "<decision_process>" in rendered
     assert "<output_schema>" in rendered
     assert "<candidate_pairs>" in rendered
     assert '"query_field": "produces:normalized_table"' in rendered
     assert '"matched_field": "requires:normalized_table"' in rendered
-    candidate_text = rendered.split("<candidate_pairs>", 1)[1].split(
-        "</candidate_pairs>", 1
-    )[0]
+    candidate_text = rendered.split("<candidate_pairs>", 1)[1].split("</candidate_pairs>", 1)[0]
     hint = json.loads(candidate_text)[0]["retrieval_hints"][0]
     assert set(hint) == {
         "channel",
@@ -352,6 +353,11 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     assert "Write a report from a normalized table." in rendered
     assert "adjacent stages in a stable, reusable workflow" in rendered
     assert "source_skill runs before target_skill" in rendered
+    assert "Evaluate substitutability on the shared subproblem" in rendered
+    assert "independently complete the same user request" in rendered
+    assert "provider, tool, runtime, or implementation" in rendered
+    assert "does not require identical implementations" in rendered
+    assert "Partial capability overlap is not enough" in rendered
     assert "symmetric complementary" not in rendered
     assert "Unrelated source-only marker." not in rendered
     assert "Prefer none" not in rendered

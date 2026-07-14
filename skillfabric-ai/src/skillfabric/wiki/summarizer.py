@@ -32,9 +32,7 @@ _OUTPUT_SCHEMA = {
         f"otherwise exactly '{NO_WORKFLOW_GUIDANCE}'"
     ),
 }
-_SUMMARY_TASK = (
-    "Compress one wiki entity into evidence-grounded routing and workflow guidance."
-)
+_SUMMARY_TASK = "Compress one wiki entity into evidence-grounded routing and workflow guidance."
 _FIELD_SEMANTICS = (
     "- summary: state the reusable operational capability.",
     "- routing_summary: state concrete task conditions for selecting this entity.",

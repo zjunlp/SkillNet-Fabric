@@ -131,7 +131,7 @@ Optional wiki summaries are controlled independently with `--wiki-summary-mode o
 | :-- | :-- | :-- |
 | `depend_on` | A concrete artifact, data, or state handoff | Producer → consumer |
 | `compose_with` | Adjacent complementary stages in a reusable workflow | Workflow predecessor → successor |
-| `similar_to` | Strict near alternatives for the same subproblem | Symmetric; canonical id order |
+| `similar_to` | Independent near alternatives for one shared subproblem; implementation may differ | Symmetric; canonical id order |
 
 Candidate pairs without sufficient evidence are rejected and do not become graph edges. The graph supplies evidence to routing and planning; it does not force prerequisite closure, automatically enlarge the selected set, or dictate the final execution order.
 

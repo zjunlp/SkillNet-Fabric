@@ -128,7 +128,9 @@ def validate_candidate_pairs(
 
     requests = _pack_requests(pending, limit=RELATION_PAIRS_PER_REQUEST)
 
-    def judge_one(request: tuple[_PendingDecision, ...]) -> list[tuple[_PendingDecision, RelationDecision]]:
+    def judge_one(
+        request: tuple[_PendingDecision, ...],
+    ) -> list[tuple[_PendingDecision, RelationDecision]]:
         request_pairs = tuple(item.pair for item in request)
         raw = judge.judge(request_pairs, skills_by_id, contracts)
         if not isinstance(raw, dict):
@@ -176,9 +178,7 @@ def _pack_requests(
     requests: list[tuple[_PendingDecision, ...]] = []
     while remaining:
         endpoint_counts = Counter(
-            skill_id
-            for item in remaining.values()
-            for skill_id in item.pair.key
+            skill_id for item in remaining.values() for skill_id in item.pair.key
         )
         highest_count = max(endpoint_counts.values())
         anchor = min(

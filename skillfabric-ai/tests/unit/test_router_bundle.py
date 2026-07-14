@@ -257,6 +257,33 @@ def test_similarity_between_selected_candidates_keeps_alternative_metadata() -> 
     assert result.alternatives[0].alternative_to == "skill:preferred"
 
 
+def test_similarity_keeps_one_strongest_relation_per_alternative() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:first", "first", "First selected skill."),
+            make_skill("skill:second", "second", "Second selected skill."),
+            make_skill("skill:alternative", "alternative", "Shared near substitute."),
+        )
+    }
+
+    result = expand_semantic_candidates(
+        [_seed("skill:first", 1), _seed("skill:second", 2)],
+        [
+            _edge("skill:alternative", "skill:first", "similar_to", confidence=0.95),
+            _edge("skill:alternative", "skill:second", "similar_to", confidence=0.80),
+        ],
+        skills,
+        max_depth=1,
+        limit=2,
+    )
+
+    assert len(result.alternatives) == 1
+    assert result.alternatives[0].skill_id == "skill:alternative"
+    assert result.alternatives[0].alternative_to == "skill:first"
+    assert result.alternatives[0].confidence == pytest.approx(0.95)
+
+
 def test_fixture_bundle_uses_rrf_and_validated_graph_only(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)

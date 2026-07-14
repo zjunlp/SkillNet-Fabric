@@ -50,7 +50,9 @@ The compiler performs these stages:
 
 Directed relations use execution order. `depend_on` is producer to consumer;
 `compose_with` is workflow predecessor to successor. `similar_to` is a symmetric
-near-alternative relation and is stored in canonical id order.
+near-alternative relation for skills that independently solve the same explicit
+subproblem with equivalent task-level results, even when providers, runtimes, or
+toolchains differ. It is stored in canonical id order.
 
 Use `--wiki-summary-mode off` to derive wiki summaries directly from validated
 contracts. This does not skip contract extraction, pair judgment, or embeddings.

@@ -39,7 +39,7 @@ artifact paths.
 ## Workflow
 
 1. Resolve and validate the skill root, workspace, env file, and supported flags.
-   The root must contain at least one `SKILL.md` or `skill.md`.
+   The root must contain at least one `SKILL.md`.
 2. Run `skillfabric init --check --json --env-file $env_file` without printing
    the env file. Stop if configuration is incomplete.
 3. Run `skillfabric build --skill-root $skill_root --workspace $workspace --env-file $env_file`

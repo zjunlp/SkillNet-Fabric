@@ -49,7 +49,6 @@ class ApiEmbeddingProvider:
     timeout: float = 120.0
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE
     max_text_chars: int = DEFAULT_EMBEDDING_TEXT_CHARS
-    provider_name: str = "api"
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not self.model_id.strip():
