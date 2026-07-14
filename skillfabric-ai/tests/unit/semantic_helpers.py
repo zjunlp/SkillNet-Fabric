@@ -66,10 +66,10 @@ def semantic_pair() -> CandidatePair:
 def dependency_payload(*, confidence: float = 0.91) -> dict[str, Any]:
     return {
         "relation": "depend_on",
-        "source_skill": "skill:consumer",
-        "target_skill": "skill:producer",
+        "source_skill": "skill:producer",
+        "target_skill": "skill:consumer",
         "confidence": confidence,
-        "reason": "The consumer requires the normalized table produced by the producer.",
+        "reason": "The producer supplies the normalized table consumed by the consumer.",
         "evidence": [
             {"skill": "skill:consumer", "line": 1},
             {"skill": "skill:producer", "line": 1},

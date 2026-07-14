@@ -41,8 +41,8 @@ def test_projection_writes_one_evidence_grounded_edge_without_weight() -> None:
     assert len(result.edges) == 1
     edge = result.edges[0]
     assert (edge.source, edge.target, edge.type) == (
-        "skill:consumer",
         "skill:producer",
+        "skill:consumer",
         "depend_on",
     )
     assert set(edge.to_dict()) == {
@@ -76,8 +76,6 @@ def test_cycle_adjudicator_can_reclassify_one_edge() -> None:
     replacement = replace(
         first,
         relation="compose_with",
-        source_skill=min(first.candidate.key),
-        target_skill=max(first.candidate.key),
         reason="The capabilities compose but neither is a hard prerequisite.",
     )
     adjudicator = StaticCycleAdjudicator(

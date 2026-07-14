@@ -159,10 +159,10 @@ def _validate_projection_decision(
     if {decision.source_skill, decision.target_skill} != set(decision.candidate.key):
         raise ValueError("relation decision endpoints must match its candidate pair")
     if (
-        decision.relation in {"compose_with", "similar_to", "none"}
+        decision.relation in {"similar_to", "none"}
         and (decision.source_skill, decision.target_skill) != decision.candidate.key
     ):
-        raise ValueError("symmetric and none decisions must use canonical endpoint order")
+        raise ValueError("alternative and none decisions must use canonical endpoint order")
     if decision.relation != "none":
         if not decision.evidence:
             raise ValueError("accepted semantic edges require evidence")

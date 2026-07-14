@@ -151,8 +151,21 @@ def expand_semantic_candidates(
 
 
 def _path_score(seed_score: float, steps: tuple[ExpansionStep, ...]) -> float:
-    weakest_edge = min(step.confidence for step in steps)
+    weakest_edge = min(step.confidence * _step_transition_weight(step) for step in steps)
     return seed_score * weakest_edge / (len(steps) + 1)
+
+
+def _transition_weights(edge_type: str) -> tuple[float, float]:
+    if edge_type == "depend_on":
+        return 1.0, 1.0
+    if edge_type == "compose_with":
+        return 0.7, 0.5
+    raise ValueError(f"unsupported operational edge type: {edge_type}")
+
+
+def _step_transition_weight(step: ExpansionStep) -> float:
+    forward, reverse = _transition_weights(step.edge_type)
+    return forward if step.source == step.semantic_source else reverse
 
 
 def _path_signature(steps: tuple[ExpansionStep, ...]) -> tuple[tuple[str, str, str], ...]:

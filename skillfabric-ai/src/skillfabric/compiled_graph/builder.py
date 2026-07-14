@@ -1,4 +1,4 @@
-"""Schema-v2 semantic graph build orchestration."""
+"""Semantic graph build orchestration."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from skillfabric.compiled_graph.contracts.extraction import (
     extract_skill_contracts,
 )
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import GraphDocument
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, GraphDocument
 from skillfabric.compiled_graph.semantic.candidates import (
     DEFAULT_CANDIDATE_TOP_K,
     retrieve_candidate_pairs,
@@ -40,8 +40,6 @@ from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import llm_usage_context
 from skillfabric.runtime.usage import load_usage_records, summarize_usage
 from skillfabric.storage import Workspace, atomic_write_text
-
-SCHEMA_VERSION = "2.0"
 
 
 @dataclass(slots=True)
@@ -67,7 +65,7 @@ class _BuildDependencies:
 
 @dataclass(slots=True)
 class BuildResult:
-    """Result of a complete schema-v2 graph build."""
+    """Result of a complete graph build."""
 
     graph: GraphDocument
     workspace: Workspace
@@ -228,7 +226,7 @@ def build_graph(
             stats["stage_wall_time_seconds"] = timer.timings
             stats["build_wall_time_seconds"] = timer.total()
             graph = GraphDocument(
-                schema_version=SCHEMA_VERSION,
+                schema_version=GRAPH_SCHEMA_VERSION,
                 build_id=build_id,
                 nodes=skills,
                 edges=list(projection.edges),
@@ -288,7 +286,7 @@ def _write_build_summary(
     workspace.write_json(
         workspace.reports_dir / "build_summary.json",
         {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": GRAPH_SCHEMA_VERSION,
             "build_id": build_id,
             **stats,
             "llm_usage": usage,
@@ -305,7 +303,7 @@ def _write_running_status(
     workspace.write_json(
         workspace.status_path,
         {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": GRAPH_SCHEMA_VERSION,
             "state": "building",
             "stage": stage,
             "build_id": build_id,
@@ -321,7 +319,7 @@ def _write_ready_status(
     workspace.write_json(
         workspace.status_path,
         {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": GRAPH_SCHEMA_VERSION,
             "state": "ready",
             "stage": "complete",
             "build_id": graph.build_id,
@@ -340,7 +338,7 @@ def _write_failed_status(
     workspace.write_json(
         workspace.status_path,
         {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": GRAPH_SCHEMA_VERSION,
             "state": "failed",
             "failed_stage": stage,
             "build_id": build_id,
@@ -375,7 +373,7 @@ def _require_compatible_workspace(workspace: Workspace) -> None:
             status = json.loads(workspace.status_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError("workspace is incompatible; use a new workspace") from exc
-        if not isinstance(status, dict) or status.get("schema_version") != SCHEMA_VERSION:
+        if not isinstance(status, dict) or status.get("schema_version") != GRAPH_SCHEMA_VERSION:
             raise ValueError("workspace is incompatible; use a new workspace")
         return
     for generated_dir in (workspace.graph_dir, workspace.cache_dir, workspace.wiki_dir):

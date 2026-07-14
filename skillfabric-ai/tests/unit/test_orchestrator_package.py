@@ -52,8 +52,8 @@ def _route() -> RouteResult:
         relation_evidence=(
             RouteRelationEvidence(
                 relation_type="depend_on",
-                source_skill="skill:financial-kpi-extractor",
-                target_skill="skill:pdf-table-parser",
+                source_skill="skill:pdf-table-parser",
+                target_skill="skill:financial-kpi-extractor",
                 confidence=0.94,
                 reason="Normalized tables may be useful before KPI extraction.",
                 evidence=("skill:financial-kpi-extractor:12", "skill:pdf-table-parser:9"),
@@ -119,6 +119,8 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "&lt;untrusted_skill_source" in prompt
     assert "&quot;" not in prompt
     assert "relation_evidence" in prompt
+    assert "source before target" in prompt
+    assert "producer-to-consumer handoff" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
     assert result.prompt_path.read_text().startswith("Parse the PDF tables")

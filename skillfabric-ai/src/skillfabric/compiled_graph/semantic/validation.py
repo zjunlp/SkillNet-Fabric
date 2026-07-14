@@ -261,7 +261,7 @@ def decision_from_payload(
     evidence = _validated_evidence(payload.get("evidence"), pair=pair, skills=skills)
     if relation != "none" and {item.skill for item in evidence} != set(pair.key):
         raise ValueError("non-none relations require evidence from both candidate skills")
-    if relation in {"compose_with", "similar_to", "none"}:
+    if relation in {"similar_to", "none"}:
         source, target = pair.key
     return RelationDecision(
         candidate=pair,

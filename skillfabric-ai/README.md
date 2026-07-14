@@ -1,6 +1,6 @@
 # skillfabric-ai
 
-`skillfabric-ai` provides the SkillFabric schema-v2 compiler, retrieval router,
+`skillfabric-ai` provides the SkillFabric compiler, retrieval router,
 query wiki, and execution-prompt planner.
 
 ```bash
@@ -46,7 +46,11 @@ The compiler performs these stages:
 5. Judge each candidate once, accepting `depend_on`, `compose_with`, or
    `similar_to`, or rejecting the pair when evidence is insufficient.
 6. Validate evidence, relation direction, uniqueness, and dependency acyclicity.
-7. Write schema-v2 graph and audit artifacts.
+7. Write canonical graph and build artifacts.
+
+Directed relations use execution order. `depend_on` is producer to consumer;
+`compose_with` is workflow predecessor to successor. `similar_to` is a symmetric
+near-alternative relation and is stored in canonical id order.
 
 Use `--wiki-summary-mode off` to derive wiki summaries directly from validated
 contracts. This does not skip contract extraction, pair judgment, or embeddings.
@@ -59,7 +63,8 @@ skillfabric plan "your task" --workspace .skillfabric --env-file .env
 ```
 
 Routing uses reciprocal-rank fusion over BM25 and dense retrieval, then bounded
-traversal over `depend_on` and `compose_with`. The explorer must return the exact
+traversal over `depend_on` and `compose_with`, with relation-aware direction
+weights. The explorer must return the exact
 selection-only SkillPackage schema and cite query-wiki paths it read. Graph
 relations remain evidence: they neither force skill selection nor impose final
 execution order. Planning uses one bounded LLM call over the selected contracts

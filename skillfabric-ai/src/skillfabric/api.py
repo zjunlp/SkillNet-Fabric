@@ -1,4 +1,4 @@
-"""Public Python facade for schema-v2 SkillFabric workflows."""
+"""Public Python facade for SkillFabric workflows."""
 
 from __future__ import annotations
 

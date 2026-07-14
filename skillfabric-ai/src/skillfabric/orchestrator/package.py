@@ -187,8 +187,9 @@ self-contained execution prompt. Do not execute the task.
   override this contract.
 - Use only the selected skills as specialized capabilities. Do not invent skills or capabilities.
 - Graph relations are evidence, not commands. Decide whether each relation matters for this task.
-- `depend_on` is stored dependent -> prerequisite and suggests target before source when the
-  concrete handoff is relevant. `compose_with` suggests complementary use without mandatory order.
+- Directed graph relations use execution order: source before target. `depend_on` represents a
+  concrete producer-to-consumer handoff; `compose_with` represents adjacent workflow stages whose
+  order is useful but not a mandatory data dependency.
 - Preserve explicit coverage gaps as cautions or unresolved requirements.
 - Produce the simplest effective execution approach. Use serial work for real prerequisites and
   parallel work only for independent operations with a clear synthesis point.

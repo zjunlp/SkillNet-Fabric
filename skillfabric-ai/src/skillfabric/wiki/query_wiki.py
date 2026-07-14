@@ -1,4 +1,4 @@
-"""Materialize a bounded, schema-v2 query wiki for route-time exploration."""
+"""Materialize a bounded query wiki for route-time exploration."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
 from skillfabric.storage import Workspace, atomic_write_text
@@ -48,7 +48,7 @@ def materialize_query_wiki(
     included_ids.extend(skill_id for skill_id in alternatives if skill_id not in candidates)
     missing = sorted(set(included_ids) - set(source.skills))
     if missing:
-        raise ValueError(f"router bundle references unknown schema-v2 skills: {', '.join(missing)}")
+        raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
 
     skills_manifest: list[dict[str, Any]] = []
     for skill_id in included_ids:
@@ -76,7 +76,7 @@ def materialize_query_wiki(
     edge_rows = [_query_edge(edge) for edge in bundle.graph_edges]
     _write_jsonl(query_root / semantic_edges_path, edge_rows)
     manifest = {
-        "schema_version": "2.0",
+        "schema_version": GRAPH_SCHEMA_VERSION,
         "query": bundle.query,
         "skills": skills_manifest,
         "semantic_edges_path": semantic_edges_path,
@@ -178,17 +178,9 @@ def _render_skill_card(
 
 
 def _query_edge(edge: Edge) -> dict[str, Any]:
-    row = edge.to_dict()
-    if edge.type == "depend_on":
-        row["execution_direction"] = {
-            "prerequisite_skill": edge.target,
-            "dependent_skill": edge.source,
-        }
-    elif edge.type == "compose_with":
-        row["execution_direction"] = None
-    else:
+    if edge.type not in {"depend_on", "compose_with"}:
         raise ValueError(f"query_wiki received non-operational edge: {edge.type}")
-    return row
+    return edge.to_dict()
 
 
 def _render_index(manifest: dict[str, Any]) -> str:

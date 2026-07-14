@@ -85,15 +85,11 @@ def _workflow_page(
     source_label = source_skill.name if source_skill else edge.source
     target_label = target_skill.name if target_skill else edge.target
     entity_id = f"{edge.source}__{edge.target}__{edge.type}"
-    title = (
-        f"{target_label} -> {source_label}"
-        if edge.type == "depend_on"
-        else f"{source_label} + {target_label}"
-    )
+    title = f"{source_label} -> {target_label}"
     ordering = (
-        f"{target_label} before {source_label}"
+        f"{source_label} before {target_label} (required handoff)"
         if edge.type == "depend_on"
-        else "No hard execution order."
+        else f"{source_label} before {target_label} (workflow order)"
     )
     text = (
         "\n\n".join(
@@ -294,11 +290,12 @@ def _field_names(fields: tuple[ContractField, ...]) -> list[str]:
 def _directed_link_label(edge: Edge, current_skill_id: str) -> tuple[str, str]:
     if edge.type == "depend_on":
         if edge.source == current_skill_id:
-            return "depends_on", edge.target
-        return "required_by", edge.source
+            return "provides_to", edge.target
+        return "consumes_from", edge.source
     if edge.type == "compose_with":
-        other = edge.target if edge.source == current_skill_id else edge.source
-        return "compose_with", other
+        if edge.source == current_skill_id:
+            return "workflow_next", edge.target
+        return "workflow_previous", edge.source
     other = edge.target if edge.source == current_skill_id else edge.source
     return edge.type, other
 

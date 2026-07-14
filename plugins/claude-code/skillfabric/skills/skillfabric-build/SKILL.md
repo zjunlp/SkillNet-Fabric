@@ -1,6 +1,6 @@
 ---
 name: skillfabric-build
-description: Use when the user asks Claude Code to build or rebuild a SkillFabric schema-v2 workspace from a skill root.
+description: Use when the user asks Claude Code to build or rebuild a SkillFabric workspace from a skill root.
 license: MIT
 disable-model-invocation: true
 ---

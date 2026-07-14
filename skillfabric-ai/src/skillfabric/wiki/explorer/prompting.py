@@ -86,9 +86,9 @@ the task. Do not execute the task or produce an execution plan.
 </trusted_policy>
 
 <semantic_policy>
-- `depend_on` in edges/semantic_edges.jsonl is stored dependent -> prerequisite.
-- `depend_on` is evidence that the target may need to run before the source.
-- `compose_with` is evidence of complementary capabilities without mandatory order.
+- All directed graph relations use execution order: source -> target.
+- `depend_on` is an explicit producer -> consumer handoff. If relevant, source must run before target.
+- `compose_with` is workflow predecessor -> workflow successor evidence without a mandatory handoff.
 - `similar_to` is evidence of near-substitutability, not a reason to select both skills.
 - Graph relations are evidence, not task-time commands. Decide whether each relation matters for
   this task; do not select a skill solely because an edge points to it.

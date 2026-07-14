@@ -1,4 +1,4 @@
-"""Explorer-only routing over bounded schema-v2 query wikis."""
+"""Explorer-only routing over bounded query wikis."""
 
 from __future__ import annotations
 

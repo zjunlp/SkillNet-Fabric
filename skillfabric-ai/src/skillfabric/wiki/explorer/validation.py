@@ -1,4 +1,4 @@
-"""Fail-closed validation of explorer output against a schema-v2 query wiki."""
+"""Fail-closed validation of explorer output against a query wiki."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge
 from skillfabric.router.models import (
     RouteNearMiss,
     RouterBundle,
@@ -164,8 +164,8 @@ def _load_manifest(root: Path) -> dict[str, Any]:
         "alternatives",
     }
     if not isinstance(payload, dict) or set(payload) != expected:
-        raise ValueError("query_wiki manifest must use the schema-v2 fields")
-    if payload["schema_version"] != "2.0":
+        raise ValueError("query_wiki manifest must use the canonical fields")
+    if payload["schema_version"] != GRAPH_SCHEMA_VERSION:
         raise ValueError("query_wiki manifest schema is obsolete; rebuild the route")
     if not isinstance(payload["skills"], list):
         raise ValueError("query_wiki manifest skills must be a list")

@@ -1,4 +1,4 @@
-"""SkillFabric schema-v2 command-line interface."""
+"""SkillFabric command-line interface."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from skillfabric.compiled_graph.builder import (
     _BuildDependencies,
     build_graph,
 )
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
@@ -89,7 +90,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     help_parser.add_argument("topic", nargs="?", default="workflow")
     commands["help"] = help_parser
 
-    build_parser = subcommands.add_parser("build", help="Build schema-v2 graph and wiki artifacts")
+    build_parser = subcommands.add_parser("build", help="Build graph and wiki artifacts")
     build_parser.add_argument("--skill-root", required=True)
     build_parser.add_argument("--workspace", default=".skillfabric")
     build_parser.add_argument("--env-file", default=".env")
@@ -416,7 +417,7 @@ def _doctor_state(args: argparse.Namespace) -> None:
     ready = bool(
         isinstance(status, dict)
         and status.get("state") == "ready"
-        and status.get("schema_version") == "2.0"
+        and status.get("schema_version") == GRAPH_SCHEMA_VERSION
     )
     stats = status.get("stats", {}) if isinstance(status, dict) else {}
     payload = {

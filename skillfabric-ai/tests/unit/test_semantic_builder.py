@@ -36,12 +36,12 @@ def _build(workspace: Path, *, contracts=None, judge=None):
     )
 
 
-def test_builder_writes_schema_v2_semantic_artifacts(tmp_path) -> None:
+def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
 
     result = _build(workspace)
 
-    assert result.graph.schema_version == "2.0"
+    assert result.graph.schema_version == "3.0"
     assert {path.name for path in (workspace / "graph").iterdir()} == {
         "registry.jsonl",
         "contracts.jsonl",
@@ -65,9 +65,9 @@ def test_fixture_build_recovers_operational_chains_without_similarity_noise(tmp_
     edges = {(edge.source, edge.target, edge.type) for edge in result.graph.edges}
 
     assert edges == {
-        ("skill:financial-kpi-extractor", "skill:pdf-table-parser", "depend_on"),
-        ("skill:report-writer", "skill:financial-kpi-extractor", "depend_on"),
-        ("skill:webshop-product-evaluator", "skill:webshop-product-search", "depend_on"),
+        ("skill:pdf-table-parser", "skill:financial-kpi-extractor", "depend_on"),
+        ("skill:financial-kpi-extractor", "skill:report-writer", "depend_on"),
+        ("skill:webshop-product-search", "skill:webshop-product-evaluator", "depend_on"),
         ("skill:analyze-ci", "skill:testing-python", "compose_with"),
     }
     assert result.stats["edge_counts"] == {
@@ -238,7 +238,7 @@ def test_failed_contract_stage_writes_sanitized_status(tmp_path) -> None:
         )
 
     status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
-    assert status["schema_version"] == "2.0"
+    assert status["schema_version"] == "3.0"
     assert status["state"] == "failed"
     assert status["failed_stage"] == "contracts"
     assert "sk-sensitive-value" not in json.dumps(status)

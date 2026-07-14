@@ -1,4 +1,4 @@
-"""Load canonical schema-v2 graph artifacts for wiki generation."""
+"""Load canonical graph artifacts for wiki generation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import Edge, GraphDocument
+from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 
@@ -40,7 +40,7 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
     registry_path = _required_path(workspace.graph_dir / "registry.jsonl")
     contracts_path = _required_path(workspace.graph_dir / "contracts.jsonl")
     status = _read_json_object(status_path)
-    if status.get("schema_version") != "2.0" or status.get("state") != "ready":
+    if status.get("schema_version") != GRAPH_SCHEMA_VERSION or status.get("state") != "ready":
         raise ValueError("SkillFabric workspace is not ready; complete a successful rebuild")
     graph = GraphDocument.from_dict(json.loads(graph_path.read_text(encoding="utf-8")))
     if status.get("build_id") != graph.build_id:
@@ -60,7 +60,7 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
     graph_skill_ids = {skill.id for skill in graph.nodes}
     if graph_skill_ids != set(skills) or graph_skill_ids != set(contracts):
         raise ValueError(
-            "schema-v2 graph, registry, and contract ids differ; rebuild the workspace"
+            "graph, registry, and contract ids differ; rebuild the workspace"
         )
     for skill_id, contract in contracts.items():
         if contract.content_hash != skills[skill_id].content_hash:

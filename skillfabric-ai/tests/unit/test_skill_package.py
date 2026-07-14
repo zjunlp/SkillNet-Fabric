@@ -75,8 +75,8 @@ def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> N
     assert len(route.relation_evidence) == 1
     relation = route.relation_evidence[0]
     assert relation.relation_type == "depend_on"
-    assert relation.source_skill == "skill:financial-kpi-extractor"
-    assert relation.target_skill == "skill:pdf-table-parser"
+    assert relation.source_skill == "skill:pdf-table-parser"
+    assert relation.target_skill == "skill:financial-kpi-extractor"
     assert relation.confidence == pytest.approx(0.94)
 
 

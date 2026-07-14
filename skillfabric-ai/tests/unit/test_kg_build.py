@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from skillfabric.compiled_graph.models import GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root
@@ -80,14 +80,30 @@ def test_scan_returns_all_skill_documents_in_stable_order() -> None:
 
 def test_graph_document_rejects_obsolete_or_extra_schema_fields() -> None:
     valid = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "build_id": "build",
         "nodes": [],
         "edges": [],
     }
 
-    assert GraphDocument.from_dict(valid).schema_version == "2.0"
+    assert GraphDocument.from_dict(valid).schema_version == "3.0"
     with pytest.raises(ValueError, match="obsolete"):
         GraphDocument.from_dict({**valid, "schema_version": "1.0"})
-    with pytest.raises(ValueError, match="schema-v2"):
+    with pytest.raises(ValueError, match="canonical fields"):
         GraphDocument.from_dict({**valid, "communities": []})
+    with pytest.raises(ValueError, match="obsolete"):
+        GraphDocument(schema_version="2.0", build_id="build", nodes=[], edges=[])
+
+
+def test_only_alternative_edges_require_canonical_endpoint_order() -> None:
+    directional = {
+        "source": "skill:z-upstream",
+        "target": "skill:a-downstream",
+        "confidence": 0.9,
+        "evidence": [],
+        "reason": "Validated relation.",
+    }
+
+    assert Edge.from_dict({**directional, "type": "compose_with"}).source == "skill:z-upstream"
+    with pytest.raises(ValueError, match="alternative edge endpoints"):
+        Edge.from_dict({**directional, "type": "similar_to"})

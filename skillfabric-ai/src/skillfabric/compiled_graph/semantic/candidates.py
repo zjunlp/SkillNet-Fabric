@@ -582,7 +582,7 @@ def _load_embedding_cache(
     except (OSError, json.JSONDecodeError) as exc:
         raise CandidateRetrievalError(f"failed to read embedding store: {exc}") from exc
     if not isinstance(payload, dict) or set(payload) != _EMBEDDING_STORE_KEYS:
-        raise CandidateRetrievalError("embedding store must use the exact schema-v2 fields")
+        raise CandidateRetrievalError("embedding store must use the exact canonical fields")
     if payload.get("schema_version") != _EMBEDDING_SCHEMA_VERSION:
         raise CandidateRetrievalError("embedding store schema is obsolete; rebuild the workspace")
     stored_model_id = payload.get("model_id")

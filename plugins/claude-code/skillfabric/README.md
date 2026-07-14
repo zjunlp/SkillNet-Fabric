@@ -1,6 +1,6 @@
 # SkillFabric Claude Code Plugin
 
-The SkillFabric plugin builds a schema-v2 skill graph, selects an
+The SkillFabric plugin builds a semantic skill graph, selects an
 evidence-grounded skill set for a task, generates an execution prompt, and lets
 Claude Code execute only the finalized prompt.
 
@@ -62,7 +62,7 @@ and prepares a new one when the task differs.
 
 ## Commands
 
-- `/skillfabric:doctor` reports CLI, API, and schema-v2 workspace readiness.
+- `/skillfabric:doctor` reports CLI, API, and workspace readiness.
 - `/skillfabric:build` compiles contracts, semantic edges, indexes, wiki pages,
   and build diagnostics.
 - `/skillfabric:prepare` performs validated route and prompt generation, then

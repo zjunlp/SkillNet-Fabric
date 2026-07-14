@@ -118,8 +118,8 @@ def test_route_result_uses_only_canonical_fields(tmp_path) -> None:
         "skill:pdf-table-parser",
         "skill:financial-kpi-extractor",
     ]
-    assert result.relation_evidence[0].source_skill == "skill:financial-kpi-extractor"
-    assert result.relation_evidence[0].target_skill == "skill:pdf-table-parser"
+    assert result.relation_evidence[0].source_skill == "skill:pdf-table-parser"
+    assert result.relation_evidence[0].target_skill == "skill:financial-kpi-extractor"
     trace = workspace / "runs" / "route-success"
     assert json.loads((trace / "route.json").read_text(encoding="utf-8")) == payload
     assert json.loads((trace / "query.json").read_text(encoding="utf-8")) == {

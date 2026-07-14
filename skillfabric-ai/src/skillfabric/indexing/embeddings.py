@@ -1,4 +1,4 @@
-"""Embedding providers and schema-v2 query-vector loading."""
+"""Embedding providers and query-vector loading."""
 
 from __future__ import annotations
 
@@ -196,7 +196,7 @@ def embedding_provider_for_model(
 
 
 def load_skill_embedding_store(path: str | Path) -> LoadedEmbeddingStore:
-    """Load schema-v2 contract-document vectors used by query routing."""
+    """Load contract-document vectors used by query routing."""
 
     target = Path(path)
     if not target.exists():
@@ -211,7 +211,7 @@ def load_skill_embedding_store(path: str | Path) -> LoadedEmbeddingStore:
         "dimension",
         "records",
     }:
-        raise ValueError("embedding store must use the schema-v2 fields")
+        raise ValueError("embedding store must use the canonical fields")
     if payload["schema_version"] != "2.0":
         raise ValueError("embedding store schema is obsolete; rebuild the workspace")
     model_id = payload["model_id"]

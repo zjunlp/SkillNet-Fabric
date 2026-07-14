@@ -129,24 +129,24 @@ class FixtureRelationJudge:
 _KNOWN_RELATIONS = {
     ("skill:financial-kpi-extractor", "skill:pdf-table-parser"): (
         "depend_on",
-        "skill:financial-kpi-extractor",
         "skill:pdf-table-parser",
-        "after `pdf-table-parser`",
+        "skill:financial-kpi-extractor",
         "produces `.csv` files",
+        "after `pdf-table-parser`",
     ),
     ("skill:financial-kpi-extractor", "skill:report-writer"): (
         "depend_on",
-        "skill:report-writer",
         "skill:financial-kpi-extractor",
-        "Use KPI JSON",
+        "skill:report-writer",
         "output `kpi.json`",
+        "Use KPI JSON",
     ),
     ("skill:webshop-product-evaluator", "skill:webshop-product-search"): (
         "depend_on",
-        "skill:webshop-product-evaluator",
         "skill:webshop-product-search",
-        "after `webshop-product-search`",
+        "skill:webshop-product-evaluator",
         "search results feed downstream",
+        "after `webshop-product-search`",
     ),
     ("skill:analyze-ci", "skill:testing-python"): (
         "compose_with",

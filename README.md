@@ -129,15 +129,17 @@ Optional wiki summaries are controlled independently with `--wiki-summary-mode o
 
 | Relation | Meaning | Direction |
 | :-- | :-- | :-- |
-| `depend_on` | One skill requires another skill's capability, output, or setup | Dependent → prerequisite |
-| `compose_with` | Two skills are useful together in a broader workflow | Symmetric operational evidence |
-| `similar_to` | Two skills address substantially overlapping needs | Symmetric alternative evidence |
+| `depend_on` | A concrete artifact, data, or state handoff | Producer → consumer |
+| `compose_with` | Adjacent complementary stages in a reusable workflow | Workflow predecessor → successor |
+| `similar_to` | Strict near alternatives for the same subproblem | Symmetric; canonical id order |
 
 Candidate pairs without sufficient evidence are rejected and do not become graph edges. The graph supplies evidence to routing and planning; it does not force prerequisite closure, automatically enlarge the selected set, or dictate the final execution order.
 
+Workspaces built with the previous relation direction are rejected and must be rebuilt; the runtime does not reinterpret legacy edges.
+
 ### 3. Route Through a Query Wiki
 
-For each task, the router fuses BM25 and dense ranks, expands only bounded `depend_on` and `compose_with` neighborhoods, and writes a task-specific query wiki. The explorer can inspect only this bounded workspace and returns a strict selection-only `SkillPackage` with cited pages.
+For each task, the router fuses BM25 and dense ranks, expands only bounded `depend_on` and `compose_with` neighborhoods, and writes a task-specific query wiki. Dependency propagation is bidirectional; workflow propagation favors predecessor-to-successor traversal. The explorer can inspect only this bounded workspace and returns a strict selection-only `SkillPackage` with cited pages.
 
 `similar_to` relationships expose near alternatives but do not drive operational graph expansion.
 

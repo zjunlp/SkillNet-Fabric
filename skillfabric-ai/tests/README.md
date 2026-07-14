@@ -13,7 +13,7 @@ Unit coverage includes:
 
 - Native skill parsing and strict contract extraction.
 - Contract-aware candidate retrieval and semantic pair validation.
-- Relation projection, dependency cycles, and schema-v2 artifacts.
+- Relation projection, dependency cycles, and canonical artifacts.
 - BM25/dense rank fusion and bounded operational-edge expansion.
 - Query-wiki generation, explorer SkillPackage validation, and route artifacts.
 - Planner schema, dependency preservation, and prompt-package finalization.

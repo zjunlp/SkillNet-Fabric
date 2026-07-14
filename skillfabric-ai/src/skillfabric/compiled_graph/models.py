@@ -10,6 +10,7 @@ from skillfabric.registry.models import SkillNode
 
 NodeType = Literal["skill"]
 EdgeType = Literal["similar_to", "compose_with", "depend_on"]
+GRAPH_SCHEMA_VERSION = "3.0"
 _EDGE_TYPES = {"similar_to", "compose_with", "depend_on"}
 _NODE_TYPES = {"skill"}
 
@@ -68,7 +69,7 @@ class Edge:
             "reason",
         }
         if set(payload) != expected:
-            raise ValueError("edge must use the schema-v2 semantic fields")
+            raise ValueError("edge must use the canonical semantic fields")
         edge_type = payload["type"]
         if edge_type not in _EDGE_TYPES:
             raise ValueError(f"unsupported edge type: {edge_type}")
@@ -76,8 +77,8 @@ class Edge:
         target = _required_string(payload["target"], label="edge target")
         if source == target:
             raise ValueError("edge endpoints must be distinct")
-        if edge_type in {"compose_with", "similar_to"} and source > target:
-            raise ValueError("symmetric edge endpoints must use canonical id order")
+        if edge_type == "similar_to" and source > target:
+            raise ValueError("alternative edge endpoints must use canonical id order")
         return cls(
             source=source,
             target=target,
@@ -100,6 +101,10 @@ class GraphDocument:
     nodes: list[SkillNode]
     edges: list[Edge]
 
+    def __post_init__(self) -> None:
+        if self.schema_version != GRAPH_SCHEMA_VERSION:
+            raise ValueError("workspace graph schema is obsolete; rebuild with SkillFabric")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
@@ -112,8 +117,8 @@ class GraphDocument:
     def from_dict(cls, payload: dict[str, Any]) -> GraphDocument:
         expected = {"schema_version", "build_id", "nodes", "edges"}
         if set(payload) != expected:
-            raise ValueError("graph must use the schema-v2 canonical fields")
-        if payload.get("schema_version") != "2.0":
+            raise ValueError("graph must use the canonical fields")
+        if payload.get("schema_version") != GRAPH_SCHEMA_VERSION:
             raise ValueError("workspace graph schema is obsolete; rebuild with SkillFabric")
         nodes: list[SkillNode] = []
         seen_node_ids: set[str] = set()
@@ -130,7 +135,7 @@ class GraphDocument:
             Edge.from_dict(item) for item in _object_list(payload["edges"], label="graph edges")
         ]
         return cls(
-            schema_version="2.0",
+            schema_version=GRAPH_SCHEMA_VERSION,
             build_id=_required_string(payload["build_id"], label="graph build_id"),
             nodes=nodes,
             edges=edges,

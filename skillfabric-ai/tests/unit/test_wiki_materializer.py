@@ -79,6 +79,7 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("## Outputs", text)
             self.assertIn("## Tools And Dependencies", text)
             self.assertIn("## Composition Notes", text)
+            self.assertIn("provides_to: [[skills/cards/financial-kpi-extractor]]", text)
             self.assertIn("## Read Full Source", text)
             self.assertNotIn("/Users/", text)
             source_page = workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md"
@@ -89,6 +90,10 @@ class WikiMaterializerTests(unittest.TestCase):
             self.assertIn("# Full SKILL.md", source_text)
             self.assertIn("Extract tables", source_text)
             self.assertNotIn("/Users/", source_text)
+            consumer_text = (
+                workspace / "wiki" / "skills" / "cards" / "financial-kpi-extractor.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("consumes_from: [[skills/cards/pdf-table-parser]]", consumer_text)
             root_index_text = (workspace / "wiki" / "index.md").read_text(encoding="utf-8")
             self.assertIn("## Skill Cards", root_index_text)
             self.assertIn("[pdf-table-parser](skills/cards/pdf-table-parser.md)", root_index_text)

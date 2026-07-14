@@ -37,7 +37,7 @@ def _build_result(root: Path) -> BuildResult:
         content_hash="hash-test",
     )
     graph = GraphDocument(
-        schema_version="2.0",
+        schema_version="3.0",
         build_id="test-build",
         nodes=[skill],
         edges=[],
@@ -73,7 +73,7 @@ def _wiki_result(root: Path) -> WikiBuildResult:
     )
 
 
-def test_build_cli_reports_schema_v2_artifacts(tmp_path) -> None:
+def test_build_cli_reports_canonical_artifacts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     env_file = tmp_path / ".env.test"
     _env_file(env_file)
@@ -101,7 +101,7 @@ def test_build_cli_reports_schema_v2_artifacts(tmp_path) -> None:
 
     payload = json.loads(output.getvalue())
     assert build_wiki_mock.call_count == 1
-    assert payload["graph"]["schema_version"] == "2.0"
+    assert payload["graph"]["schema_version"] == "3.0"
     assert payload["graph"]["edge_counts"] == {
         "depend_on": 2,
         "compose_with": 1,

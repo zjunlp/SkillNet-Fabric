@@ -187,6 +187,31 @@ def test_expansion_limit_orders_same_depth_by_path_score() -> None:
     assert [item.skill_id for item in result.candidates[2:]] == ["skill:high-neighbor"]
 
 
+def test_workflow_expansion_prefers_forward_execution_direction() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:seed", "seed", "Workflow seed."),
+            make_skill("skill:a-previous", "a-previous", "Previous stage."),
+            make_skill("skill:z-next", "z-next", "Next stage."),
+        )
+    }
+    edges = [
+        _edge("skill:a-previous", "skill:seed", "compose_with"),
+        _edge("skill:seed", "skill:z-next", "compose_with"),
+    ]
+
+    result = expand_semantic_candidates(
+        [_seed("skill:seed")],
+        edges,
+        skills,
+        max_depth=1,
+        limit=2,
+    )
+
+    assert [item.skill_id for item in result.candidates] == ["skill:seed", "skill:z-next"]
+
+
 def test_similarity_is_exposed_as_alternative_but_not_traversed() -> None:
     skills = {
         skill.id: skill

@@ -176,7 +176,7 @@ def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -
     (workspace / "status.json").write_text(
         json.dumps(
             {
-                "schema_version": "2.0",
+                "schema_version": "3.0",
                 "state": "ready",
                 "build_id": "build-test",
                 "stats": {"skill_count": 8},

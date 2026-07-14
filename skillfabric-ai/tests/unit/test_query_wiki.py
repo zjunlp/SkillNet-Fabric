@@ -31,7 +31,7 @@ def _materialize(tmp_path):
     return bundle, result
 
 
-def test_materializes_schema_v2_query_wiki(tmp_path) -> None:
+def test_materializes_canonical_query_wiki(tmp_path) -> None:
     bundle, result = _materialize(tmp_path)
     root = result.root
     assert (root / "manifest.json").exists()
@@ -40,7 +40,7 @@ def test_materializes_schema_v2_query_wiki(tmp_path) -> None:
     assert (root / "edges" / "semantic_edges.jsonl").exists()
 
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "2.0"
+    assert manifest["schema_version"] == "3.0"
     assert manifest["query"] == bundle.query
     assert set(manifest) == {
         "schema_version",
@@ -102,15 +102,12 @@ def test_semantic_edges_preserve_compiled_dependency_direction(tmp_path) -> None
     edge = next(
         row
         for row in rows
-        if row["source"] == "skill:financial-kpi-extractor"
-        and row["target"] == "skill:pdf-table-parser"
+        if row["source"] == "skill:pdf-table-parser"
+        and row["target"] == "skill:financial-kpi-extractor"
     )
 
     assert edge["type"] == "depend_on"
-    assert edge["execution_direction"] == {
-        "prerequisite_skill": "skill:pdf-table-parser",
-        "dependent_skill": "skill:financial-kpi-extractor",
-    }
+    assert "execution_direction" not in edge
 
 
 def test_index_and_explorer_instructions_are_concise_and_canonical(tmp_path) -> None:

@@ -25,7 +25,7 @@ from tests.unit.semantic_helpers import (
 )
 
 
-def test_dependency_direction_is_dependent_to_prerequisite() -> None:
+def test_dependency_direction_follows_execution_order() -> None:
     skills, contracts = semantic_skills_and_contracts()
     judge = StaticRelationJudge(
         model_id="relation-test-model",
@@ -40,8 +40,8 @@ def test_dependency_direction_is_dependent_to_prerequisite() -> None:
     )[0]
 
     assert decision.relation == "depend_on"
-    assert decision.source_skill == "skill:consumer"
-    assert decision.target_skill == "skill:producer"
+    assert decision.source_skill == "skill:producer"
+    assert decision.target_skill == "skill:consumer"
 
 
 def test_relation_is_not_rejected_by_a_deterministic_confidence_threshold() -> None:
@@ -88,7 +88,7 @@ def test_valid_none_decision_is_audited_without_evidence() -> None:
     assert decision.evidence == ()
 
 
-def test_symmetric_relation_endpoints_are_canonicalized() -> None:
+def test_workflow_relation_preserves_execution_direction() -> None:
     skills, contracts = semantic_skills_and_contracts()
     response = {
         "relation": "compose_with",
@@ -110,7 +110,10 @@ def test_symmetric_relation_endpoints_are_canonicalized() -> None:
         judge=judge,
     )[0]
 
-    assert (decision.source_skill, decision.target_skill) == semantic_pair().key
+    assert (decision.source_skill, decision.target_skill) == (
+        "skill:producer",
+        "skill:consumer",
+    )
 
 
 @pytest.mark.parametrize(
@@ -321,7 +324,20 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     assert "<relation_semantics>" in rendered
     assert "<decision_process>" in rendered
     assert "<output_schema>" in rendered
-    assert "<candidate_evidence>" not in rendered
+    assert "<candidate_pairs>" in rendered
+    assert '"query_field": "produces:normalized_table"' in rendered
+    assert '"matched_field": "requires:normalized_table"' in rendered
+    candidate_text = rendered.split("<candidate_pairs>", 1)[1].split(
+        "</candidate_pairs>", 1
+    )[0]
+    hint = json.loads(candidate_text)[0]["retrieval_hints"][0]
+    assert set(hint) == {
+        "channel",
+        "query_skill",
+        "matched_skill",
+        "query_field",
+        "matched_field",
+    }
     assert "Candidate retrieval only selects pairs for review" in rendered
     assert "Retrieval evidence only explains" not in rendered
     assert "<skill_profiles>" in rendered
@@ -334,7 +350,9 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     assert "producer description" in rendered
     assert "consumer description" in rendered
     assert "Write a report from a normalized table." in rendered
-    assert "stable, reusable workflow progression" in rendered
+    assert "adjacent stages in a stable, reusable workflow" in rendered
+    assert "source_skill runs before target_skill" in rendered
+    assert "symmetric complementary" not in rendered
     assert "Unrelated source-only marker." not in rendered
     assert "Prefer none" not in rendered
     assert "model_id" not in rendered
