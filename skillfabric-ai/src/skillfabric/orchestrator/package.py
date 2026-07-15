@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ PLANNER_PROMPT_ID = "skillfabric_execution_planner"
 DEFAULT_PLANNER_CONTEXT_MAX_TOKENS = 100_000
 DEFAULT_PLANNER_MAX_ATTEMPTS = 2
 DEFAULT_PLANNER_RETRY_DELAY_SECONDS = 1.0
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,7 @@ def plan_execution_package(
     planner_output: dict[str, Any]
     errors: list[str]
     for attempt in range(1, planner_max_attempts + 1):
+        attempt_errors: list[str] = []
         try:
             with llm_usage_transaction() as usage:
                 with llm_usage_context(log_path=workspace.reports_dir / "llm_usage.jsonl"):
@@ -111,16 +114,27 @@ def plan_execution_package(
                         usage_metadata={"selected_skill_count": len(route.selected_skills)},
                     )
                 candidate = parse_json_response(response)
-                errors = validate_planner_output(candidate)
-                if errors:
-                    raise ValueError("invalid planner output: " + "; ".join(errors))
+                attempt_errors = validate_planner_output(candidate)
+                if attempt_errors:
+                    raise ValueError("invalid planner output: " + "; ".join(attempt_errors))
                 planner_output = candidate
+                errors = attempt_errors
                 usage.commit()
             break
         except Exception as exc:
             if attempt == planner_max_attempts:
-                _write_validation(validation_path, [f"{type(exc).__name__}: {exc}"])
+                _write_validation(
+                    validation_path,
+                    attempt_errors or [f"{type(exc).__name__}: {exc}"],
+                )
                 raise
+            LOGGER.warning(
+                "planner_retry attempt=%d/%d delay_seconds=%.3f error_type=%s",
+                attempt,
+                planner_max_attempts,
+                planner_retry_delay_seconds,
+                type(exc).__name__,
+            )
             if planner_retry_delay_seconds:
                 time.sleep(planner_retry_delay_seconds)
     _write_validation(validation_path, errors)

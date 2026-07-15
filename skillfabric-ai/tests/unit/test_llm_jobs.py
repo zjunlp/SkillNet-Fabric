@@ -206,6 +206,53 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertEqual(records[0].prompt_tokens, 20)
         self.assertEqual(records[0].completion_tokens, 3)
 
+    def test_usage_write_failure_does_not_retry_an_accepted_job(self) -> None:
+        fake_litellm = types.SimpleNamespace(
+            completion=lambda **_kwargs: {
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3},
+            },
+            suppress_debug_info=False,
+            request_timeout=None,
+        )
+        config = LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/responses/gpt-5.4-mini",
+        )
+        worker_calls = 0
+
+        def worker(_item: str) -> dict[str, bool]:
+            nonlocal worker_calls
+            worker_calls += 1
+            response = litellm_completion(
+                messages=[{"role": "user", "content": "Return JSON."}],
+                config=config,
+            )
+            return json.loads(response["choices"][0]["message"]["content"])
+
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict(sys.modules, {"litellm": fake_litellm}),
+            patch("skillfabric.runtime.llm.LLMUsageTracker.append", side_effect=OSError("disk")),
+            patch("skillfabric.runtime.llm.LOGGER.warning") as warning,
+            llm_usage_context(log_path=Path(tmp) / "usage.jsonl"),
+        ):
+            outcomes = run_llm_jobs(
+                ["item"],
+                worker,
+                options=LLMJobOptions(
+                    concurrency=1,
+                    max_retries=2,
+                    retry_backoff_seconds=0,
+                    progress_every=0,
+                ),
+            )
+
+        self.assertEqual(worker_calls, 1)
+        self.assertTrue(outcomes[0].ok)
+        warning.assert_called_once_with("usage_write_failed error_type=%s", "OSError")
+
 
 if __name__ == "__main__":
     unittest.main()

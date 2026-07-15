@@ -212,9 +212,14 @@ def test_plan_rejects_invalid_planner_output_without_prompt(tmp_path, monkeypatc
     assert not (package_root / "execution_prompt.md").exists()
     validation = json.loads((package_root / "planner_validation.json").read_text())
     assert validation["valid"] is False
+    assert validation["errors"] == ["planner output must contain exactly execution_prompt"]
 
 
-def test_plan_retries_invalid_output_without_rebuilding_context(tmp_path, monkeypatch) -> None:
+def test_plan_retries_invalid_output_without_rebuilding_context(
+    tmp_path,
+    monkeypatch,
+    caplog,
+) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
     token_counts = 0
@@ -245,6 +250,7 @@ def test_plan_retries_invalid_output_without_rebuilding_context(tmp_path, monkey
     assert not responses
     assert result.prompt_path.is_file()
     assert json.loads(result.planner_validation_path.read_text()) == {"valid": True, "errors": []}
+    assert "planner_retry attempt=1/2" in caplog.text
 
 
 def test_plan_refuses_to_overwrite_an_existing_package(tmp_path, monkeypatch) -> None:

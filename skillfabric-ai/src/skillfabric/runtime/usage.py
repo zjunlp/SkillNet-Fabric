@@ -311,10 +311,13 @@ def load_usage_records(path: str | Path) -> list[LLMUsageRecord]:
     """Load usage records from an append-only JSONL file."""
 
     usage_path = Path(path)
-    if not usage_path.exists():
-        return []
+    lock = _path_lock(usage_path)
+    with lock:
+        if not usage_path.exists():
+            return []
+        lines = usage_path.read_text(encoding="utf-8").splitlines()
     records: list[LLMUsageRecord] = []
-    for line in usage_path.read_text(encoding="utf-8").splitlines():
+    for line in lines:
         if not line.strip():
             continue
         payload = json.loads(line)

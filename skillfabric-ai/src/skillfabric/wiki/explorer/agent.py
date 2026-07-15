@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from skillfabric.wiki.explorer.validation import (
     SkillPackageValidationResult,
     validate_skill_package,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +106,13 @@ def explore_query_wiki(
             error = exc
         if attempt == config.max_attempts:
             raise error
+        LOGGER.warning(
+            "explorer_retry attempt=%d/%d delay_seconds=%.3f error_type=%s",
+            attempt,
+            config.max_attempts,
+            config.retry_delay_seconds,
+            type(error).__name__,
+        )
         if config.retry_delay_seconds:
             time.sleep(config.retry_delay_seconds)
     raise AssertionError("explorer retry loop ended unexpectedly")

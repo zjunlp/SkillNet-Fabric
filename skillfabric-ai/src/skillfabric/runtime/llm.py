@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import multiprocessing as mp
 import os
@@ -28,6 +29,7 @@ DEFAULT_API_BASE = "https://api.openai.com/v1"
 DEFAULT_REASONING_EFFORT = "medium"
 DEFAULT_MAX_TOKENS = 32768
 DEFAULT_TIMEOUT = 120
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +188,11 @@ def llm_usage_transaction() -> Iterator[LLMUsageTransaction]:
         parent.extend(buffer)
         return
     for path, record in buffer:
-        LLMUsageTracker(log_path=path).append(record)
+        try:
+            LLMUsageTracker(log_path=path).append(record)
+        except Exception as exc:  # noqa: BLE001 - usage accounting must not break accepted calls.
+            LOGGER.warning("usage_write_failed error_type=%s", type(exc).__name__)
+            continue
 
 
 def read_env_file(env_path: str | Path | None = ".env") -> dict[str, str]:
@@ -229,6 +235,7 @@ def litellm_completion(
         "timeout": resolved.timeout,
         "request_timeout": resolved.timeout,
         "force_timeout": resolved.timeout,
+        "max_retries": 0,
     }
     if resolved.reasoning_effort:
         call_kwargs["reasoning_effort"] = resolved.reasoning_effort

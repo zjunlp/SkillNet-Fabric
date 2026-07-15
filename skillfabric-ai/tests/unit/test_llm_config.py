@@ -450,6 +450,7 @@ class LLMConfigTests(unittest.TestCase):
                 sys.modules["litellm"] = original
 
         self.assertEqual(response["choices"][0]["message"]["content"], "ok")
+        self.assertEqual(calls[0]["max_retries"], 0)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["operation"], "route")
         self.assertEqual(records[0]["status"], "completed")

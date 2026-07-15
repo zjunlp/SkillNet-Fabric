@@ -261,7 +261,7 @@ def test_explorer_rejects_invalid_retry_limits(overrides) -> None:
         WikiExplorerConfig(**overrides)
 
 
-def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path) -> None:
+def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path, caplog) -> None:
     root = _query_root(tmp_path)
 
     class FlakyRuntime(StubRuntime):
@@ -285,6 +285,7 @@ def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path)
 
     assert package.package.coverage_gaps
     assert runtime.calls == 2
+    assert "explorer_retry attempt=1/2" in caplog.text
 
 
 def test_non_retryable_failure_propagates_and_is_redacted_in_trace(tmp_path) -> None:

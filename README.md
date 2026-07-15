@@ -240,7 +240,6 @@ See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installa
 | `EMBEDDING_MODEL` | Embedding model identifier | `openai/text-embedding-3-small` |
 | `EMBEDDING_DIMENSION` | Embedding vector dimension | `1536` |
 | `EMBEDDING_MAX_RETRIES` | Retries for each embedding batch | `2` |
-| `EMBEDDING_RETRY_BACKOFF_SECONDS` | Linear retry backoff for embedding batches | `1` |
 | `SKILLFABRIC_MAX_SELECTED_SKILLS` | Maximum explorer selection size | `8` |
 | `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `24` |
 | `SKILLFABRIC_EXPANDED_LIMIT` | Maximum candidates after graph expansion | `100` |

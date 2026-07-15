@@ -6,7 +6,9 @@ import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from skillfabric.runtime import usage as usage_module
 from skillfabric.runtime.usage import LLMUsageTracker, load_usage_records, summarize_usage
 
 
@@ -242,6 +244,30 @@ class LLMUsageTests(unittest.TestCase):
             self.assertEqual(totals.by_operation["route"]["total_calls"], 1)
             self.assertGreater(totals.cost_usd or 0.0, 0.0)
             self.assertEqual(totals.pricing_unknown_calls, 1)
+
+    def test_jsonl_reader_uses_the_shared_path_lock(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usage.jsonl"
+            tracker = LLMUsageTracker(log_path=path)
+            tracker.record_completion(
+                model="openai/gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hello"}],
+                response={"choices": [{"message": {"content": "Hi"}}]},
+                operation="planner",
+                duration_ms=1,
+                status="completed",
+            )
+            path_lock = usage_module._path_lock(path)
+            original_read_text = Path.read_text
+
+            def guarded_read_text(target: Path, *args, **kwargs):
+                self.assertTrue(path_lock.locked())
+                return original_read_text(target, *args, **kwargs)
+
+            with patch.object(Path, "read_text", guarded_read_text):
+                records = load_usage_records(path)
+
+        self.assertEqual(len(records), 1)
 
     def test_usage_summary_can_be_scoped_to_one_build(self) -> None:
         tracker = LLMUsageTracker()

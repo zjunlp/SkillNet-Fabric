@@ -24,7 +24,6 @@ EMBEDDING_BASE_URL=<embedding-api-base>
 EMBEDDING_API_KEY=<embedding-api-key>
 EMBEDDING_DIMENSION=<vector-dimension>
 EMBEDDING_MAX_RETRIES=2
-EMBEDDING_RETRY_BACKOFF_SECONDS=1
 ```
 
 Keep credentials in a private shell or untracked env file. CLI diagnostics
