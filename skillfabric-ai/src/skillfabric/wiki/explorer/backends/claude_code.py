@@ -140,7 +140,7 @@ class ClaudeCodeWikiExplorerBackend:
                 {"event": "backend:attempt", "attempt": attempt, "max_attempts": attempts},
             )
             try:
-                payload, sdk_metrics = self._explore_with_sdk(
+                payload, usage = self._explore_with_sdk(
                     system_prompt,
                     user_prompt,
                     query_wiki_root,
@@ -154,15 +154,7 @@ class ClaudeCodeWikiExplorerBackend:
                 )
                 atomic_write_text(
                     cc_dir / "usage.json",
-                    json.dumps(
-                        {
-                            "backend": "claude-code",
-                            "runtime": "claude-agent-sdk",
-                            "sdk_metrics": sdk_metrics,
-                        },
-                        indent=2,
-                    )
-                    + "\n",
+                    json.dumps(usage, indent=2) + "\n",
                 )
                 _write_event(
                     cc_dir,
@@ -218,7 +210,7 @@ class ClaudeCodeWikiExplorerBackend:
             event_dir=cc_dir,
             timeout_seconds=self.execution_timeout_seconds,
         )
-        return _payload_from_result_message(result_message), _sdk_metrics(result_message)
+        return _payload_from_result_message(result_message), _sdk_usage(result_message)
 
 
 def _build_claude_agent_options(
@@ -492,7 +484,7 @@ def _result_message_error_detail(result_message: Any) -> str:
     return "Claude agent query failed"
 
 
-def _sdk_metrics(message: Any) -> dict[str, Any]:
+def _sdk_usage(message: Any) -> dict[str, Any]:
     usage = getattr(message, "usage", None)
     if not isinstance(usage, dict):
         usage = {}

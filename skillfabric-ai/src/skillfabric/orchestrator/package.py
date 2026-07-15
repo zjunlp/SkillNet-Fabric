@@ -259,7 +259,6 @@ def _write_planner_inputs(
         json.dumps(route.to_dict(), ensure_ascii=False, indent=2) + "\n",
     )
     request = {
-        "schema_version": "2.0",
         "prompt_id": PLANNER_PROMPT_ID,
         "task": query,
         "estimated_prompt_tokens": estimated_prompt_tokens,

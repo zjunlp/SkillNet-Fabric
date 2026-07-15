@@ -194,12 +194,11 @@ def test_provider_for_store_model_preserves_dimension() -> None:
     assert provider.dimension == 32
 
 
-def test_schema_v2_loader_returns_only_skill_document_vectors(tmp_path) -> None:
+def test_embedding_store_loader_returns_only_skill_document_vectors(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
     path.write_text(
         json.dumps(
             {
-                "schema_version": "2.0",
                 "model_id": "embedding-test-model",
                 "dimension": 2,
                 "records": [
@@ -218,13 +217,12 @@ def test_schema_v2_loader_returns_only_skill_document_vectors(tmp_path) -> None:
     assert store.vectors == {"skill:alpha": [1.0, 0.0]}
 
 
-def test_schema_v2_loader_rejects_duplicate_skill_records(tmp_path) -> None:
+def test_embedding_store_loader_rejects_duplicate_skill_records(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
     row = _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0])
     path.write_text(
         json.dumps(
             {
-                "schema_version": "2.0",
                 "model_id": "embedding-test-model",
                 "dimension": 2,
                 "records": [row, {**row, "key": "skill:duplicate"}],
@@ -237,12 +235,11 @@ def test_schema_v2_loader_rejects_duplicate_skill_records(tmp_path) -> None:
         load_skill_embedding_store(path)
 
 
-def test_schema_v2_loader_rejects_zero_norm_skill_vectors(tmp_path) -> None:
+def test_embedding_store_loader_rejects_zero_norm_skill_vectors(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
     path.write_text(
         json.dumps(
             {
-                "schema_version": "2.0",
                 "model_id": "embedding-test-model",
                 "dimension": 2,
                 "records": [
@@ -267,10 +264,9 @@ def test_schema_v2_loader_rejects_zero_norm_skill_vectors(tmp_path) -> None:
         lambda payload: payload["records"][0].update({"vector": [True, 0.0]}),
     ],
 )
-def test_schema_v2_loader_rejects_coerced_metadata_and_vectors(tmp_path, mutate) -> None:
+def test_embedding_store_loader_rejects_coerced_metadata_and_vectors(tmp_path, mutate) -> None:
     path = tmp_path / "embeddings.json"
     payload = {
-        "schema_version": "2.0",
         "model_id": "embedding-test-model",
         "dimension": 2,
         "records": [
@@ -290,7 +286,6 @@ def test_router_query_uses_store_model_and_query_embedding(tmp_path) -> None:
     workspace.write_json(
         workspace.graph_dir / "embeddings.json",
         {
-            "schema_version": "2.0",
             "model_id": DEFAULT_EMBEDDING_MODEL_ID,
             "dimension": 2,
             "records": [

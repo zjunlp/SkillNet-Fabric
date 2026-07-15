@@ -40,10 +40,8 @@ def test_materializes_canonical_query_wiki(tmp_path) -> None:
     assert (root / "edges" / "semantic_edges.jsonl").exists()
 
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "3.0"
     assert manifest["query"] == bundle.query
     assert set(manifest) == {
-        "schema_version",
         "query",
         "skills",
         "semantic_edges_path",

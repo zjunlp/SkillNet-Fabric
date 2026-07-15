@@ -11,7 +11,7 @@ from tests.unit.wiki_helpers import build_fixture_workspace
 
 
 class WikiLoaderTests(unittest.TestCase):
-    def test_loads_schema_v2_semantic_views_for_wiki(self) -> None:
+    def test_loads_semantic_views_for_wiki(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
@@ -23,16 +23,16 @@ class WikiLoaderTests(unittest.TestCase):
             self.assertTrue(source.skill_core_links("skill:financial-kpi-extractor"))
             self.assertTrue(source.operational_edges)
 
-    def test_rejects_obsolete_graph_schema(self) -> None:
+    def test_rejects_unknown_graph_fields(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
             graph_path = workspace / "graph" / "graph.json"
             payload = json.loads(graph_path.read_text(encoding="utf-8"))
-            payload["schema_version"] = "1.0"
+            payload["unused"] = True
             graph_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "rebuild"):
+            with self.assertRaisesRegex(ValueError, "canonical fields"):
                 load_wiki_source(Workspace(workspace))
 
     def test_rejects_non_ready_workspace_even_when_graph_artifacts_remain(self) -> None:
@@ -42,6 +42,18 @@ class WikiLoaderTests(unittest.TestCase):
             status_path = workspace / "status.json"
             status = json.loads(status_path.read_text(encoding="utf-8"))
             status.update({"state": "failed", "failed_stage": "contracts"})
+            status_path.write_text(json.dumps(status), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "not ready"):
+                load_wiki_source(Workspace(workspace))
+
+    def test_rejects_noncanonical_ready_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            status_path = workspace / "status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["unused"] = True
             status_path.write_text(json.dumps(status), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "not ready"):

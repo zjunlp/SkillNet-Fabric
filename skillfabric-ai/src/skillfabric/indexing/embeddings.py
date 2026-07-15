@@ -205,14 +205,11 @@ def load_skill_embedding_store(path: str | Path) -> LoadedEmbeddingStore:
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid embedding store JSON: {exc}") from exc
     if not isinstance(payload, dict) or set(payload) != {
-        "schema_version",
         "model_id",
         "dimension",
         "records",
     }:
         raise ValueError("embedding store must use the canonical fields")
-    if payload["schema_version"] != "2.0":
-        raise ValueError("embedding store schema is obsolete; rebuild the workspace")
     model_id = payload["model_id"]
     dimension = payload["dimension"]
     rows = payload["records"]

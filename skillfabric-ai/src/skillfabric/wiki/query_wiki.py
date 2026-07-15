@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge
+from skillfabric.compiled_graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
 from skillfabric.storage import Workspace, atomic_write_text
@@ -76,7 +76,6 @@ def materialize_query_wiki(
     edge_rows = [_query_edge(edge) for edge in bundle.graph_edges]
     _write_jsonl(query_root / semantic_edges_path, edge_rows)
     manifest = {
-        "schema_version": GRAPH_SCHEMA_VERSION,
         "query": bundle.query,
         "skills": skills_manifest,
         "semantic_edges_path": semantic_edges_path,

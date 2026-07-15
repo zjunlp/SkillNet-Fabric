@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge
+from skillfabric.compiled_graph.models import Edge
 from skillfabric.router.models import (
     RouteNearMiss,
     RouterBundle,
@@ -157,7 +157,6 @@ def _load_manifest(root: Path) -> dict[str, Any]:
     path = root / "manifest.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     expected = {
-        "schema_version",
         "query",
         "skills",
         "semantic_edges_path",
@@ -165,8 +164,6 @@ def _load_manifest(root: Path) -> dict[str, Any]:
     }
     if not isinstance(payload, dict) or set(payload) != expected:
         raise ValueError("query_wiki manifest must use the canonical fields")
-    if payload["schema_version"] != GRAPH_SCHEMA_VERSION:
-        raise ValueError("query_wiki manifest schema is obsolete; rebuild the route")
     if not isinstance(payload["skills"], list):
         raise ValueError("query_wiki manifest skills must be a list")
     expected_skill_keys = {

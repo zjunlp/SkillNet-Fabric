@@ -78,21 +78,16 @@ def test_scan_returns_all_skill_documents_in_stable_order() -> None:
     assert paths == sorted(paths)
 
 
-def test_graph_document_rejects_obsolete_or_extra_schema_fields() -> None:
+def test_graph_document_uses_only_current_canonical_fields() -> None:
     valid = {
-        "schema_version": "3.0",
         "build_id": "build",
         "nodes": [],
         "edges": [],
     }
 
-    assert GraphDocument.from_dict(valid).schema_version == "3.0"
-    with pytest.raises(ValueError, match="obsolete"):
-        GraphDocument.from_dict({**valid, "schema_version": "1.0"})
+    assert GraphDocument.from_dict(valid).build_id == "build"
     with pytest.raises(ValueError, match="canonical fields"):
         GraphDocument.from_dict({**valid, "communities": []})
-    with pytest.raises(ValueError, match="obsolete"):
-        GraphDocument(schema_version="2.0", build_id="build", nodes=[], edges=[])
 
 
 def test_only_alternative_edges_require_canonical_endpoint_order() -> None:

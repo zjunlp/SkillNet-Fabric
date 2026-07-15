@@ -238,6 +238,38 @@ def test_doctor_state_rejects_graph_from_a_different_build(tmp_path) -> None:
     assert payload["next_action"] == "build"
 
 
+def test_doctor_state_rejects_noncanonical_ready_status(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    status_path = workspace / "status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["unused"] = True
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    env_file = tmp_path / ".env.test"
+    env_file.write_text(
+        "API_KEY=test-value\n"
+        "BASE_URL=https://example.test/v1\n"
+        "MODEL=openai/test-model\n"
+        "EMBEDDING_MODEL=openai/test-embedding\n",
+        encoding="utf-8",
+    )
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(
+            [
+                "doctor-state",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert payload["workspace_ready"] is False
+
+
 def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     root = workspace / "runs" / "run-test" / "execution_package"

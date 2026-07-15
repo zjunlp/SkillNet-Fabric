@@ -16,7 +16,7 @@ from skillfabric.compiled_graph.builder import (
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, GraphDocument
+from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
@@ -347,7 +347,6 @@ def _build_summary(result: BuildResult, wiki: WikiBuildResult | None) -> dict[st
         "build_id": result.graph.build_id,
         "skill_count": len(result.graph.nodes),
         "graph": {
-            "schema_version": result.graph.schema_version,
             "node_count": len(result.graph.nodes),
             "edge_count": len(result.graph.edges),
             "edge_counts": result.stats.get("edge_counts", {}),
@@ -440,8 +439,9 @@ def _workspace_readiness(workspace: Workspace) -> tuple[bool, str, int]:
     raw_build_id = status.get("build_id")
     build_id = raw_build_id.strip() if isinstance(raw_build_id, str) else ""
     if (
-        status.get("state") != "ready"
-        or status.get("schema_version") != GRAPH_SCHEMA_VERSION
+        set(status) != {"state", "stage", "build_id"}
+        or status.get("state") != "ready"
+        or status.get("stage") != "complete"
         or not build_id
     ):
         return False, build_id, 0

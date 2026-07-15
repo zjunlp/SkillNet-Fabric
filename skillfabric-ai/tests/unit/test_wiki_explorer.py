@@ -71,7 +71,7 @@ def _query_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_backend_uses_the_canonical_schema_and_writes_audit_artifacts(tmp_path) -> None:
+def test_backend_uses_the_canonical_schema_and_writes_route_artifacts(tmp_path) -> None:
     root = _query_root(tmp_path)
     runtime = StubRuntime(
         _empty_package(),
@@ -96,10 +96,10 @@ def test_backend_uses_the_canonical_schema_and_writes_audit_artifacts(tmp_path) 
     assert runtime.options.output_format["schema"] == skill_package_json_schema()
     assert json.loads((trace / "cc_explorer" / "skill_package.json").read_text())["coverage_gaps"]
     usage = json.loads((trace / "cc_explorer" / "usage.json").read_text())
-    assert usage["sdk_metrics"]["input_tokens"] == 123
-    assert usage["sdk_metrics"]["output_tokens"] == 17
-    assert usage["sdk_metrics"]["cache_creation_input_tokens"] == 19
-    assert usage["sdk_metrics"]["cache_read_input_tokens"] == 23
+    assert usage["input_tokens"] == 123
+    assert usage["output_tokens"] == 17
+    assert usage["cache_creation_input_tokens"] == 19
+    assert usage["cache_read_input_tokens"] == 23
 
 
 def test_backend_default_tool_budget_scales_with_the_selection_limit(tmp_path) -> None:

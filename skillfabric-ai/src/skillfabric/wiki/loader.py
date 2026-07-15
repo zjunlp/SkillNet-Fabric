@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import GRAPH_SCHEMA_VERSION, Edge, GraphDocument
+from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 
@@ -40,7 +40,11 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
     registry_path = _required_path(workspace.graph_dir / "registry.jsonl")
     contracts_path = _required_path(workspace.graph_dir / "contracts.jsonl")
     status = _read_json_object(status_path)
-    if status.get("schema_version") != GRAPH_SCHEMA_VERSION or status.get("state") != "ready":
+    if (
+        set(status) != {"state", "stage", "build_id"}
+        or status.get("state") != "ready"
+        or status.get("stage") != "complete"
+    ):
         raise ValueError("SkillFabric workspace is not ready; complete a successful rebuild")
     graph = GraphDocument.from_dict(json.loads(graph_path.read_text(encoding="utf-8")))
     if status.get("build_id") != graph.build_id:

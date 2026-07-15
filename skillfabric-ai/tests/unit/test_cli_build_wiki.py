@@ -37,7 +37,6 @@ def _build_result(root: Path) -> BuildResult:
         content_hash="hash-test",
     )
     graph = GraphDocument(
-        schema_version="3.0",
         build_id="test-build",
         nodes=[skill],
         edges=[],
@@ -101,7 +100,7 @@ def test_build_cli_reports_canonical_artifacts(tmp_path) -> None:
 
     payload = json.loads(output.getvalue())
     assert build_wiki_mock.call_count == 1
-    assert payload["graph"]["schema_version"] == "3.0"
+    assert set(payload["graph"]) == {"node_count", "edge_count", "edge_counts"}
     assert payload["graph"]["edge_counts"] == {
         "depend_on": 2,
         "compose_with": 1,

@@ -442,7 +442,7 @@ def test_embedding_store_is_reused_by_text_hash(tmp_path) -> None:
     assert second.metrics["cache_hit_count"] == 1
     assert not hasattr(second, "embeddings")
     payload = json.loads(store.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "2.0"
+    assert set(payload) == {"model_id", "dimension", "records"}
     assert payload["records"][0]["kind"] == "skill"
     assert "content_hash" not in payload["records"][0]
 

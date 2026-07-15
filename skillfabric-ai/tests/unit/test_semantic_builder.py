@@ -42,7 +42,7 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
 
     result = _build(workspace)
 
-    assert result.graph.schema_version == "3.0"
+    assert set(result.graph.to_dict()) == {"build_id", "nodes", "edges"}
     assert {path.name for path in (workspace / "graph").iterdir()} == {
         "registry.jsonl",
         "contracts.jsonl",
@@ -212,16 +212,20 @@ def test_build_summary_excludes_usage_from_previous_builds(tmp_path) -> None:
     assert summary["llm_usage"]["total_tokens"] == 0
 
 
-def test_build_rejects_an_incompatible_workspace_without_mutating_it(tmp_path) -> None:
+def test_rebuild_replaces_existing_status_without_a_version_gate(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     workspace.mkdir()
     status = workspace / "status.json"
-    status.write_text('{"schema_version":"1.0","state":"ready"}\n', encoding="utf-8")
+    status.write_text('{"state":"ready","build_id":"previous"}\n', encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"incompatible.*new workspace"):
-        _build(workspace)
+    result = _build(workspace)
 
-    assert json.loads(status.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    assert result.graph.build_id == "semantic-builder-test"
+    assert json.loads(status.read_text(encoding="utf-8")) == {
+        "state": "ready",
+        "stage": "complete",
+        "build_id": "semantic-builder-test",
+    }
 
 
 def test_build_lock_contention_does_not_overwrite_active_status(tmp_path) -> None:
@@ -229,7 +233,6 @@ def test_build_lock_contention_does_not_overwrite_active_status(tmp_path) -> Non
     workspace.mkdir()
     status = workspace / "status.json"
     active_status = {
-        "schema_version": "3.0",
         "state": "building",
         "stage": "contracts",
         "build_id": "active-build",
@@ -258,7 +261,6 @@ def test_failed_contract_stage_writes_sanitized_status(tmp_path) -> None:
         )
 
     status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
-    assert status["schema_version"] == "3.0"
     assert status["state"] == "failed"
     assert status["failed_stage"] == "contracts"
     assert "sk-sensitive-value" not in json.dumps(status)

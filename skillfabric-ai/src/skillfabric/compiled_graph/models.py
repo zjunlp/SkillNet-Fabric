@@ -9,7 +9,6 @@ from typing import Any, Literal
 from skillfabric.registry.models import SkillNode
 
 EdgeType = Literal["similar_to", "compose_with", "depend_on"]
-GRAPH_SCHEMA_VERSION = "3.0"
 _EDGE_TYPES = {"similar_to", "compose_with", "depend_on"}
 _NODE_TYPES = {"skill"}
 
@@ -95,18 +94,12 @@ class Edge:
 class GraphDocument:
     """Root object serialized to graph.json."""
 
-    schema_version: str
     build_id: str
     nodes: list[SkillNode]
     edges: list[Edge]
 
-    def __post_init__(self) -> None:
-        if self.schema_version != GRAPH_SCHEMA_VERSION:
-            raise ValueError("workspace graph schema is obsolete; rebuild with SkillFabric")
-
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": self.schema_version,
             "build_id": self.build_id,
             "nodes": [node.to_dict(include_raw_text=False) for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
@@ -114,11 +107,9 @@ class GraphDocument:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> GraphDocument:
-        expected = {"schema_version", "build_id", "nodes", "edges"}
+        expected = {"build_id", "nodes", "edges"}
         if set(payload) != expected:
             raise ValueError("graph must use the canonical fields")
-        if payload.get("schema_version") != GRAPH_SCHEMA_VERSION:
-            raise ValueError("workspace graph schema is obsolete; rebuild with SkillFabric")
         nodes: list[SkillNode] = []
         seen_node_ids: set[str] = set()
         for item in _object_list(payload["nodes"], label="graph nodes"):
@@ -134,7 +125,6 @@ class GraphDocument:
             Edge.from_dict(item) for item in _object_list(payload["edges"], label="graph edges")
         ]
         return cls(
-            schema_version=GRAPH_SCHEMA_VERSION,
             build_id=_required_string(payload["build_id"], label="graph build_id"),
             nodes=nodes,
             edges=edges,

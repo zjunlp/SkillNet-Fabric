@@ -28,8 +28,7 @@ from skillfabric.registry.models import SkillNode
 from skillfabric.storage import atomic_write_text
 
 DEFAULT_CANDIDATE_TOP_K = 8
-_EMBEDDING_SCHEMA_VERSION = "2.0"
-_EMBEDDING_STORE_KEYS = {"schema_version", "model_id", "dimension", "records"}
+_EMBEDDING_STORE_KEYS = {"model_id", "dimension", "records"}
 _EMBEDDING_RECORD_KEYS = {
     "key",
     "skill_id",
@@ -580,8 +579,6 @@ def _load_embedding_cache(
         raise CandidateRetrievalError(f"failed to read embedding store: {exc}") from exc
     if not isinstance(payload, dict) or set(payload) != _EMBEDDING_STORE_KEYS:
         raise CandidateRetrievalError("embedding store must use the exact canonical fields")
-    if payload.get("schema_version") != _EMBEDDING_SCHEMA_VERSION:
-        raise CandidateRetrievalError("embedding store schema is obsolete; rebuild the workspace")
     stored_model_id = payload.get("model_id")
     if not isinstance(stored_model_id, str) or not stored_model_id.strip():
         raise CandidateRetrievalError("embedding store model_id must be a non-empty string")
@@ -641,7 +638,6 @@ def _write_embedding_cache(
         return
     dimension = len(records[0].vector) if records else 0
     payload = {
-        "schema_version": _EMBEDDING_SCHEMA_VERSION,
         "model_id": model_id,
         "dimension": dimension,
         "records": [record.to_dict() for record in records],
