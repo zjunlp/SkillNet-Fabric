@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
+import sys
 import threading
 import time
+import types
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
+from skillfabric.runtime.usage import load_usage_records
 
 
 class LLMJobRunnerTests(unittest.TestCase):
@@ -147,27 +155,56 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertEqual([outcome.value for outcome in outcomes], [0, 1, 2, 3])
         self.assertEqual(slow_observed_later_start, [True])
 
-    def test_retries_error_payloads_when_requested(self) -> None:
-        attempts = 0
-
-        def worker(item: str) -> dict[str, str]:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                return {"error_type": "api_error", "reason": "timeout"}
-            return {"ok": item}
-
-        outcomes = run_llm_jobs(
-            ["alpha"],
-            worker,
-            options=LLMJobOptions(concurrency=1, max_retries=1, progress_every=0),
-            label="test",
-            retry_on_result=lambda payload: bool(payload.get("error_type")),
+    def test_usage_contains_only_the_accepted_attempt(self) -> None:
+        responses = [
+            {
+                "choices": [{"message": {"content": "not json"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+            },
+            {
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3},
+            },
+        ]
+        fake_litellm = types.SimpleNamespace(
+            completion=lambda **_kwargs: responses.pop(0),
+            suppress_debug_info=False,
+            request_timeout=None,
+        )
+        config = LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/responses/gpt-5.4-mini",
         )
 
+        with TemporaryDirectory() as tmp, patch.dict(sys.modules, {"litellm": fake_litellm}):
+            usage_path = Path(tmp) / "usage.jsonl"
+
+            def worker(_item: str) -> dict[str, bool]:
+                response = litellm_completion(
+                    messages=[{"role": "user", "content": "Return JSON."}],
+                    config=config,
+                )
+                return json.loads(response["choices"][0]["message"]["content"])
+
+            with llm_usage_context(log_path=usage_path):
+                outcomes = run_llm_jobs(
+                    ["item"],
+                    worker,
+                    options=LLMJobOptions(
+                        concurrency=1,
+                        max_retries=1,
+                        retry_backoff_seconds=0,
+                        progress_every=0,
+                    ),
+                )
+
+            records = load_usage_records(usage_path)
+
         self.assertTrue(outcomes[0].ok)
-        self.assertEqual(outcomes[0].value, {"ok": "alpha"})
-        self.assertEqual(attempts, 2)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].prompt_tokens, 20)
+        self.assertEqual(records[0].completion_tokens, 3)
 
 
 if __name__ == "__main__":

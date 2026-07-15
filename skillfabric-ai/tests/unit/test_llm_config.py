@@ -11,7 +11,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
+from skillfabric.runtime.llm import (
+    LLMConfig,
+    litellm_completion,
+    llm_usage_context,
+    llm_usage_transaction,
+)
 
 LLM_ENV_KEYS = (
     "API_KEY",
@@ -32,14 +37,6 @@ LLM_ENV_KEYS = (
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_MODEL",
-    "USAGE_ENABLED",
-    "USAGE_LOG_PATH",
-    "USAGE_OPERATION",
-    "USAGE_METADATA",
-    "SKILLFABRIC_USAGE_ENABLED",
-    "SKILLFABRIC_USAGE_LOG_PATH",
-    "SKILLFABRIC_USAGE_OPERATION",
-    "SKILLFABRIC_USAGE_METADATA",
 )
 
 
@@ -59,9 +56,6 @@ class LLMConfigTests(unittest.TestCase):
             {"max_tokens": True},
             {"timeout": 0},
             {"timeout": float("nan")},
-            {"usage_enabled": "yes"},
-            {"usage_operation": ""},
-            {"usage_metadata": []},
         ]
 
         for overrides in invalid_overrides:
@@ -73,29 +67,6 @@ class LLMConfigTests(unittest.TestCase):
             }
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 LLMConfig(**values)
-
-    def test_llm_config_rejects_invalid_usage_env_values(self) -> None:
-        invalid_lines = [
-            "USAGE_ENABLED=perhaps",
-            "USAGE_METADATA=not-json",
-            "USAGE_METADATA=[]",
-        ]
-
-        for invalid_line in invalid_lines:
-            with self.subTest(invalid_line=invalid_line), TemporaryDirectory() as tmp:
-                env_path = Path(tmp) / ".env"
-                env_path.write_text(
-                    "API_KEY=sk-test\n"
-                    "BASE_URL=https://example.test/v1\n"
-                    "MODEL=openai/test-model\n"
-                    f"{invalid_line}\n",
-                    encoding="utf-8",
-                )
-                with (
-                    patch.dict(os.environ, _cleared_llm_env(), clear=False),
-                    self.assertRaises(ValueError),
-                ):
-                    LLMConfig.from_env(env_path=env_path)
 
     def test_completion_rejects_invalid_explicit_overrides_before_calling_provider(self) -> None:
         calls: list[dict[str, object]] = []
@@ -127,7 +98,6 @@ class LLMConfigTests(unittest.TestCase):
     def test_loads_litellm_settings_from_env_file(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
-            usage_path = Path(tmp) / "usage.jsonl"
             env_path.write_text(
                 "\n".join(
                     [
@@ -136,10 +106,6 @@ class LLMConfigTests(unittest.TestCase):
                         "MODEL=openai/test-model",
                         "MAX_TOKENS=123",
                         "SKILLFABRIC_LLM_REASONING_EFFORT=medium",
-                        "USAGE_ENABLED=1",
-                        f"USAGE_LOG_PATH={usage_path}",
-                        "USAGE_OPERATION=wiki_build",
-                        'USAGE_METADATA={"task_id":"task_a","trace_id":"trace_a"}',
                     ]
                 )
                 + "\n",
@@ -154,10 +120,6 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.model, "openai/test-model")
             self.assertEqual(config.max_tokens, 123)
             self.assertEqual(config.reasoning_effort, "medium")
-            self.assertTrue(config.usage_enabled)
-            self.assertEqual(config.usage_log_path, usage_path)
-            self.assertEqual(config.usage_operation, "wiki_build")
-            self.assertEqual(config.usage_metadata, {"task_id": "task_a", "trace_id": "trace_a"})
 
     def test_loads_primary_api_settings_from_skillnet_style_env_names(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -466,18 +428,18 @@ class LLMConfigTests(unittest.TestCase):
         try:
             with TemporaryDirectory() as tmp:
                 usage_path = Path(tmp) / "usage.jsonl"
-                response = litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    config=LLMConfig(
-                        api_base="https://example.test/api",
-                        api_key="sk-test",
-                        model="openai/test-model",
-                        max_tokens=321,
-                        timeout=15.0,
-                        usage_log_path=usage_path,
+                with llm_usage_context(log_path=usage_path):
+                    response = litellm_completion(
+                        messages=[{"role": "user", "content": "Hello"}],
+                        config=LLMConfig(
+                            api_base="https://example.test/api",
+                            api_key="sk-test",
+                            model="openai/test-model",
+                            max_tokens=321,
+                            timeout=15.0,
+                        ),
                         usage_operation="route",
-                    ),
-                )
+                    )
                 records = [
                     json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
                 ]
@@ -494,7 +456,7 @@ class LLMConfigTests(unittest.TestCase):
         self.assertGreater(records[0]["prompt_tokens"], 0)
         self.assertGreater(records[0]["completion_tokens"], 0)
 
-    def test_litellm_completion_merges_env_and_call_usage_metadata(self) -> None:
+    def test_litellm_completion_merges_context_and_call_usage_metadata(self) -> None:
         fake_litellm = types.SimpleNamespace()
 
         def fake_completion(**_kwargs):
@@ -508,18 +470,20 @@ class LLMConfigTests(unittest.TestCase):
         try:
             with TemporaryDirectory() as tmp:
                 usage_path = Path(tmp) / "usage.jsonl"
-                litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    config=LLMConfig(
-                        api_base="https://example.test/api",
-                        api_key="sk-test",
-                        model="openai/test-model",
-                        usage_log_path=usage_path,
+                with llm_usage_context(
+                    log_path=usage_path,
+                    metadata={"task_id": "task_a", "trace_id": "trace_a"},
+                ):
+                    litellm_completion(
+                        messages=[{"role": "user", "content": "Hello"}],
+                        config=LLMConfig(
+                            api_base="https://example.test/api",
+                            api_key="sk-test",
+                            model="openai/test-model",
+                        ),
                         usage_operation="route",
-                        usage_metadata={"task_id": "task_a", "trace_id": "trace_a"},
-                    ),
-                    usage_metadata={"skill_id": "skill:docx"},
-                )
+                        usage_metadata={"skill_id": "skill:docx"},
+                    )
                 records = [
                     json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
                 ]
@@ -534,7 +498,7 @@ class LLMConfigTests(unittest.TestCase):
             {"task_id": "task_a", "trace_id": "trace_a", "skill_id": "skill:docx"},
         )
 
-    def test_litellm_usage_context_overrides_config_usage_target(self) -> None:
+    def test_nested_usage_transactions_require_an_outer_commit(self) -> None:
         fake_litellm = types.SimpleNamespace()
 
         def fake_completion(**_kwargs):
@@ -547,23 +511,29 @@ class LLMConfigTests(unittest.TestCase):
         sys.modules["litellm"] = fake_litellm
         try:
             with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "context_usage.jsonl"
-                with llm_usage_context(
-                    log_path=usage_path,
-                    operation="route",
-                    metadata={"task_id": "task_a"},
-                ):
-                    litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        config=LLMConfig(
-                            api_base="https://example.test/api",
-                            api_key="sk-test",
-                            model="openai/test-model",
-                            usage_log_path=None,
-                            usage_operation="config_operation",
-                            usage_metadata={"experiment_run_id": "run_1"},
-                        ),
-                    )
+                usage_path = Path(tmp) / "usage.jsonl"
+                config = LLMConfig(
+                    api_base="https://example.test/api",
+                    api_key="sk-test",
+                    model="openai/test-model",
+                )
+                with llm_usage_context(log_path=usage_path):
+                    with llm_usage_transaction(), llm_usage_transaction() as inner:
+                        litellm_completion(
+                            messages=[{"role": "user", "content": "discarded"}],
+                            config=config,
+                        )
+                        inner.commit()
+                    with (
+                        llm_usage_transaction() as outer,
+                        llm_usage_transaction() as inner,
+                    ):
+                        litellm_completion(
+                            messages=[{"role": "user", "content": "accepted"}],
+                            config=config,
+                        )
+                        inner.commit()
+                        outer.commit()
                 records = [
                     json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
                 ]
@@ -574,10 +544,7 @@ class LLMConfigTests(unittest.TestCase):
                 sys.modules["litellm"] = original
 
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["operation"], "route")
-        self.assertEqual(
-            records[0]["metadata"], {"experiment_run_id": "run_1", "task_id": "task_a"}
-        )
+        self.assertEqual(records[0]["status"], "completed")
 
     def test_litellm_usage_context_propagates_through_llm_job_threads(self) -> None:
         fake_litellm = types.SimpleNamespace()
@@ -597,19 +564,18 @@ class LLMConfigTests(unittest.TestCase):
                     api_base="https://example.test/api",
                     api_key="sk-test",
                     model="openai/test-model",
-                    usage_log_path=None,
                 )
 
                 def worker(item: str) -> str:
                     litellm_completion(
                         messages=[{"role": "user", "content": item}],
                         config=config,
+                        usage_operation="kg_build.interface_extraction",
                     )
                     return item
 
                 with llm_usage_context(
                     log_path=usage_path,
-                    operation="kg_build.interface_extraction",
                     metadata={"experiment_run_id": "run_1"},
                 ):
                     outcomes = run_llm_jobs(
@@ -670,18 +636,18 @@ class LLMConfigTests(unittest.TestCase):
 
             def call_in_thread() -> None:
                 try:
-                    litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        config=LLMConfig(
-                            api_base="https://example.test/api",
-                            api_key="sk-test",
-                            model="openai/test-model",
-                            timeout=0.05,
-                            usage_log_path=usage_path,
+                    with llm_usage_context(log_path=usage_path):
+                        litellm_completion(
+                            messages=[{"role": "user", "content": "Hello"}],
+                            config=LLMConfig(
+                                api_base="https://example.test/api",
+                                api_key="sk-test",
+                                model="openai/test-model",
+                                timeout=0.05,
+                            ),
                             usage_operation="validation",
-                        ),
-                        _skillfabric_test_sleep_seconds=5.0,
-                    )
+                            _skillfabric_test_sleep_seconds=5.0,
+                        )
                 except BaseException as exc:  # noqa: BLE001 - test captures timeout type.
                     errors.append(exc)
 
@@ -740,7 +706,7 @@ class LLMConfigTests(unittest.TestCase):
 
         self.assertEqual(calls[0]["max_tokens"], 32768)
 
-    def test_litellm_completion_records_usage_when_log_path_is_configured(self) -> None:
+    def test_litellm_completion_records_usage_with_explicit_context(self) -> None:
         calls: list[dict[str, object]] = []
         fake_litellm = types.SimpleNamespace()
 
@@ -763,17 +729,17 @@ class LLMConfigTests(unittest.TestCase):
                             "BASE_URL=https://example.test/api",
                             "API_KEY=sk-test",
                             "MODEL=openai/test-model",
-                            f"USAGE_LOG_PATH={usage_path}",
-                            "USAGE_OPERATION=custom_smoke",
                         ]
                     )
                     + "\n",
                     encoding="utf-8",
                 )
-                response = litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    env_path=env_path,
-                )
+                with llm_usage_context(log_path=usage_path):
+                    response = litellm_completion(
+                        messages=[{"role": "user", "content": "Hello"}],
+                        env_path=env_path,
+                        usage_operation="custom_smoke",
+                    )
                 records = [
                     json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
                 ]
@@ -818,17 +784,17 @@ class LLMConfigTests(unittest.TestCase):
                             "BASE_URL=https://example.test/api",
                             "API_KEY=sk-test",
                             "MODEL=openai/responses/gpt-5.4-mini",
-                            f"USAGE_LOG_PATH={usage_path}",
                         ]
                     )
                     + "\n",
                     encoding="utf-8",
                 )
-                litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    env_path=env_path,
-                    usage_operation="llm_smoke",
-                )
+                with llm_usage_context(log_path=usage_path):
+                    litellm_completion(
+                        messages=[{"role": "user", "content": "Hello"}],
+                        env_path=env_path,
+                        usage_operation="llm_smoke",
+                    )
                 records = [
                     json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
                 ]

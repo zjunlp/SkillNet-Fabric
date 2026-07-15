@@ -8,7 +8,6 @@ import pytest
 from skillfabric.indexing.embeddings import (
     DEFAULT_EMBEDDING_MODEL_ID,
     ApiEmbeddingProvider,
-    default_embedding_provider,
     embedding_provider_for_model,
     load_skill_embedding_store,
 )
@@ -55,6 +54,29 @@ def test_api_provider_uses_litellm_embedding() -> None:
     assert calls[0]["input"] == ["find pdf table parser"]
     assert calls[0]["api_key"] == "test-key"
     assert calls[0]["api_base"] == "https://example.test/v1"
+
+
+def test_api_provider_retries_a_failed_batch() -> None:
+    provider = ApiEmbeddingProvider(
+        dimension=2,
+        max_retries=1,
+        retry_backoff_seconds=0,
+    )
+    attempts = 0
+
+    def flaky_embedding(**_kwargs: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary embedding failure")
+        return {"data": [{"embedding": [0.25, 0.75]}]}
+
+    fake_litellm = type("FakeLiteLLM", (), {"embedding": staticmethod(flaky_embedding)})
+    with patch.dict("sys.modules", {"litellm": fake_litellm}):
+        vector = provider.embed("find pdf table parser")
+
+    assert vector == [0.25, 0.75]
+    assert attempts == 2
 
 
 def test_api_provider_rejects_a_response_with_the_wrong_dimension() -> None:
@@ -142,7 +164,11 @@ def test_embedding_specific_env_overrides_shared_api_env(tmp_path) -> None:
 def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path) -> None:
     env_path = tmp_path / ".env.test"
     env_path.write_text(
-        "EMBEDDING_BATCH_SIZE=7\nEMBEDDING_TEXT_CHARS=2500\nEMBEDDING_TIMEOUT=45\n",
+        "EMBEDDING_BATCH_SIZE=7\n"
+        "EMBEDDING_TEXT_CHARS=2500\n"
+        "EMBEDDING_TIMEOUT=45\n"
+        "EMBEDDING_MAX_RETRIES=4\n"
+        "EMBEDDING_RETRY_BACKOFF_SECONDS=2.5\n",
         encoding="utf-8",
     )
 
@@ -151,6 +177,8 @@ def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path
     assert provider.batch_size == 7
     assert provider.max_text_chars == 2500
     assert provider.timeout == 45
+    assert provider.max_retries == 4
+    assert provider.retry_backoff_seconds == 2.5
 
 
 @pytest.mark.parametrize(
@@ -163,6 +191,9 @@ def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path
         {"timeout": float("nan")},
         {"batch_size": 0},
         {"max_text_chars": -1},
+        {"max_retries": -1},
+        {"retry_backoff_seconds": -1},
+        {"retry_backoff_seconds": float("nan")},
     ],
 )
 def test_api_provider_rejects_invalid_runtime_configuration(overrides) -> None:
@@ -176,14 +207,6 @@ def test_api_provider_rejects_invalid_numeric_env_instead_of_using_defaults(tmp_
 
     with pytest.raises(ValueError, match="EMBEDDING_BATCH_SIZE"):
         ApiEmbeddingProvider.from_env(env_path=env_path)
-
-
-def test_default_provider_rejects_unknown_provider(tmp_path) -> None:
-    env_path = tmp_path / ".env.test"
-    env_path.write_text("EMBEDDING_PROVIDER=custom-provider\n", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="unsupported embedding provider"):
-        default_embedding_provider(env_path=env_path)
 
 
 def test_provider_for_store_model_preserves_dimension() -> None:

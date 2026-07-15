@@ -26,6 +26,8 @@ class RouterConfig:
     explorer_max_turns: int = 24
     explorer_load_timeout_ms: int = 30_000
     explorer_timeout_seconds: float = 300.0
+    explorer_max_attempts: int = 2
+    explorer_retry_delay_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if self.trace_id is not None:
@@ -48,6 +50,7 @@ class RouterConfig:
             name="explorer_load_timeout_ms",
             minimum=1_000,
         )
+        _require_int_at_least(self.explorer_max_attempts, name="explorer_max_attempts", minimum=1)
         timeout = self.explorer_timeout_seconds
         if (
             isinstance(timeout, bool)
@@ -56,6 +59,14 @@ class RouterConfig:
             or timeout < 1.0
         ):
             raise ValueError("explorer_timeout_seconds must be finite and at least 1")
+        delay = self.explorer_retry_delay_seconds
+        if (
+            isinstance(delay, bool)
+            or not isinstance(delay, (int, float))
+            or not math.isfinite(delay)
+            or delay < 0
+        ):
+            raise ValueError("explorer_retry_delay_seconds must be finite and non-negative")
 
 
 def _require_int_at_least(value: Any, *, name: str, minimum: int) -> None:

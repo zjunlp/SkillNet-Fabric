@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from skillfabric.runtime.llm import read_env_file
+from skillfabric.runtime.llm import llm_usage_transaction, read_env_file
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -139,7 +139,6 @@ def run_llm_jobs(
     *,
     options: LLMJobOptions | None = None,
     label: str = "llm",
-    retry_on_result: Callable[[R], bool] | None = None,
     on_success: Callable[[LLMJobOutcome[R]], None] | None = None,
 ) -> list[LLMJobOutcome[R]]:
     """Run LLM jobs with concurrency, rate limiting, retries, and progress logging."""
@@ -159,22 +158,12 @@ def run_llm_jobs(
             attempts += 1
             try:
                 limiter.wait()
-                value = worker(item)
-                if retry_on_result is not None and retry_on_result(value):
-                    raise _RetryableResult(value)
+                with llm_usage_transaction() as usage:
+                    value = worker(item)
+                    usage.commit()
                 return LLMJobOutcome(
                     index=index, item=item, ok=True, value=value, attempts=attempts
                 )
-            except _RetryableResult as exc:
-                if attempts > job_options.max_retries:
-                    return LLMJobOutcome(
-                        index=index,
-                        item=item,
-                        ok=True,
-                        value=exc.value,
-                        attempts=attempts,
-                    )
-                _sleep_before_retry(job_options.retry_backoff_seconds, attempts)
             except Exception as exc:  # noqa: BLE001 - caller normalizes final failures.
                 if attempts > job_options.max_retries:
                     return LLMJobOutcome(
@@ -212,12 +201,6 @@ def run_llm_jobs(
                 submit_next()
 
     return [outcome for outcome in outcomes if outcome is not None]
-
-
-class _RetryableResult(Exception):
-    def __init__(self, value: Any) -> None:
-        super().__init__("retryable LLM result")
-        self.value = value
 
 
 def _sleep_before_retry(base_delay: float, attempts: int) -> None:

@@ -144,6 +144,45 @@ def test_invalid_explorer_skill_fails_without_ranked_fallback(tmp_path) -> None:
     assert not (workspace / "runs" / "invalid-skill" / "route.json").exists()
 
 
+def test_route_retries_invalid_skill_package_on_the_same_query_wiki(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    invalid = _package()
+    invalid["selected_skills"][0]["skill_id"] = "skill:not-real"
+
+    class RetryingRuntime(StubSdkRuntime):
+        def __init__(self) -> None:
+            super().__init__(_package())
+            self.outputs = [invalid, _package()]
+            self.calls = 0
+
+        async def query(self, *, prompt: Any, options: Any):
+            del options
+            self.calls += 1
+            async for event in prompt:
+                self.prompts.append(str(event["message"]["content"]))
+            yield self.ResultMessage(self.outputs.pop(0))
+
+    runtime = RetryingRuntime()
+    result = route_task(
+        RouterConfig(
+            workspace=workspace,
+            query="extract KPIs",
+            trace_id="retry-invalid-package",
+            explorer_max_attempts=2,
+            explorer_retry_delay_seconds=0,
+        ),
+        sdk_runtime=runtime,
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+
+    assert runtime.calls == 2
+    assert result.selected_skill_ids == [
+        "skill:pdf-table-parser",
+        "skill:financial-kpi-extractor",
+    ]
+
+
 def test_graph_dependency_does_not_expand_explorer_selection(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
@@ -231,6 +270,9 @@ def test_router_config_rejects_unsafe_trace_ids(trace_id) -> None:
         ({"explorer_timeout_seconds": 0.5}, "explorer_timeout_seconds"),
         ({"explorer_timeout_seconds": float("nan")}, "explorer_timeout_seconds"),
         ({"explorer_timeout_seconds": float("inf")}, "explorer_timeout_seconds"),
+        ({"explorer_max_attempts": 0}, "explorer_max_attempts"),
+        ({"explorer_retry_delay_seconds": -1}, "explorer_retry_delay_seconds"),
+        ({"explorer_retry_delay_seconds": float("nan")}, "explorer_retry_delay_seconds"),
     ],
 )
 def test_router_config_rejects_invalid_numeric_limits(overrides, match) -> None:

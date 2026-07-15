@@ -21,6 +21,8 @@ from skillfabric.indexing.embeddings import (
 )
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
+    DEFAULT_PLANNER_MAX_ATTEMPTS,
+    DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
     ExecutionPackageResult,
     plan_execution_package,
 )
@@ -129,6 +131,14 @@ class SkillFabric:
                 "explorer_timeout_seconds",
                 defaults.explorer_timeout_seconds,
             ),
+            explorer_max_attempts=overrides.pop(
+                "explorer_max_attempts",
+                defaults.explorer_max_attempts,
+            ),
+            explorer_retry_delay_seconds=overrides.pop(
+                "explorer_retry_delay_seconds",
+                defaults.explorer_retry_delay_seconds,
+            ),
         )
         if overrides:
             raise TypeError(f"unsupported route option(s): {', '.join(sorted(overrides))}")
@@ -147,6 +157,8 @@ class SkillFabric:
         package_root: str | Path | None = None,
         env_file: str | Path | None = None,
         planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
+        planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
+        planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
         **route_overrides: Any,
     ) -> ExecutionPackageResult:
         if route is not None and route_file is not None:
@@ -181,6 +193,8 @@ class SkillFabric:
             env_file=env_file or self.env_file,
             package_root=resolved_root,
             planner_context_max_tokens=planner_context_max_tokens,
+            planner_max_attempts=planner_max_attempts,
+            planner_retry_delay_seconds=planner_retry_delay_seconds,
         )
 
     def _route_context(

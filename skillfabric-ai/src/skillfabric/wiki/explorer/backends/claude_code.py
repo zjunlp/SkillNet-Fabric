@@ -58,7 +58,6 @@ class ClaudeCodeWikiExplorerBackend:
     max_turns: int = 24
     load_timeout_ms: int = 30_000
     execution_timeout_seconds: float = 300.0
-    max_attempts: int = 2
     tool_budget: dict[str, int] | None = None
 
     def __post_init__(self) -> None:
@@ -73,7 +72,6 @@ class ClaudeCodeWikiExplorerBackend:
             name="load_timeout_ms",
             minimum=1_000,
         )
-        _require_int_at_least(self.max_attempts, name="max_attempts", minimum=1)
         timeout = self.execution_timeout_seconds
         if (
             isinstance(timeout, bool)
@@ -133,54 +131,39 @@ class ClaudeCodeWikiExplorerBackend:
                 "tool_budget": tool_budget,
             },
         )
-        attempts = self.max_attempts
-        for attempt in range(1, attempts + 1):
+        try:
+            payload, usage = self._explore_with_sdk(
+                system_prompt,
+                user_prompt,
+                query_wiki_root,
+                cc_dir,
+                tool_budget,
+            )
+            package = SkillPackage.from_dict(payload)
+            atomic_write_text(
+                cc_dir / "skill_package.json",
+                json.dumps(package.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            )
+            atomic_write_text(
+                cc_dir / "usage.json",
+                json.dumps(usage, indent=2) + "\n",
+            )
             _write_event(
                 cc_dir,
-                {"event": "backend:attempt", "attempt": attempt, "max_attempts": attempts},
+                {"event": "backend:finish", "selected_count": len(package.selected_skills)},
             )
-            try:
-                payload, usage = self._explore_with_sdk(
-                    system_prompt,
-                    user_prompt,
-                    query_wiki_root,
-                    cc_dir,
-                    tool_budget,
-                )
-                package = SkillPackage.from_dict(payload)
-                atomic_write_text(
-                    cc_dir / "skill_package.json",
-                    json.dumps(package.to_dict(), ensure_ascii=False, indent=2) + "\n",
-                )
-                atomic_write_text(
-                    cc_dir / "usage.json",
-                    json.dumps(usage, indent=2) + "\n",
-                )
-                _write_event(
-                    cc_dir,
-                    {
-                        "event": "backend:finish",
-                        "attempt": attempt,
-                        "selected_count": len(package.selected_skills),
-                    },
-                )
-                return package
-            except Exception as exc:
-                error = {
-                    "error_type": type(exc).__name__,
-                    "error": _safe_error_text(str(exc)),
-                    "attempt": attempt,
-                }
-                if attempt < attempts and _is_retryable_explorer_error(exc):
-                    _write_event(cc_dir, {"event": "backend:retry", **error})
-                    continue
-                atomic_write_text(
-                    cc_dir / "error.json",
-                    json.dumps(error, ensure_ascii=False, indent=2) + "\n",
-                )
-                _write_event(cc_dir, {"event": "backend:error", **error})
-                raise
-        raise RuntimeError("Claude explorer stopped without a result or error")
+            return package
+        except Exception as exc:
+            error = {
+                "error_type": type(exc).__name__,
+                "error": _safe_error_text(str(exc)),
+            }
+            atomic_write_text(
+                cc_dir / "error.json",
+                json.dumps(error, ensure_ascii=False, indent=2) + "\n",
+            )
+            _write_event(cc_dir, {"event": "backend:error", **error})
+            raise
 
     def _explore_with_sdk(
         self,
@@ -537,26 +520,6 @@ def _load_sdk_runtime() -> Any:
     Runtime.ResultMessage = ResultMessage
     Runtime.query = staticmethod(query)
     return Runtime
-
-
-def _is_retryable_explorer_error(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return any(
-        marker in text
-        for marker in (
-            "socket connection was closed",
-            "service temporarily unavailable",
-            "bad gateway",
-            "gateway timeout",
-            "connection reset",
-            "connection aborted",
-            "econnreset",
-            "etimedout",
-            " 502",
-            " 503",
-            " 504",
-        )
-    )
 
 
 def _safe_error_text(value: str) -> str:

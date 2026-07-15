@@ -23,6 +23,8 @@ EMBEDDING_MODEL=<embedding-model>
 EMBEDDING_BASE_URL=<embedding-api-base>
 EMBEDDING_API_KEY=<embedding-api-key>
 EMBEDDING_DIMENSION=<vector-dimension>
+EMBEDDING_MAX_RETRIES=2
+EMBEDDING_RETRY_BACKOFF_SECONDS=1
 ```
 
 Keep credentials in a private shell or untracked env file. CLI diagnostics
@@ -69,8 +71,10 @@ traversal over `depend_on` and `compose_with`, with relation-aware direction
 weights. The explorer must return the exact
 selection-only SkillPackage schema and cite query-wiki paths it read. Graph
 relations remain evidence: they neither force skill selection nor impose final
-execution order. Planning uses one bounded LLM call over the selected contracts
-and full sources, then places the original task and resulting execution plan in `execution_prompt.md`.
+execution order. Retrieval and query-wiki materialization run once; the explorer
+retries only SDK, response, or package-validation failures. Planning constructs
+its context once and retries only the LLM response when necessary, then places
+the original task and resulting execution plan in `execution_prompt.md`.
 
 ## Python API
 
@@ -87,6 +91,8 @@ result = sf.plan(task, route=route, planner_context_max_tokens=100_000)
 print(result.prompt_path)
 ```
 
-The context limit is checked before the Planner call. Overflow, malformed model
-output, missing credentials, and provider failures stop explicitly; SkillFabric
-does not truncate context or generate a fallback prompt.
+The context limit is checked before the Planner call. Each route and planner has
+at most two attempts by default, and token/cost summaries include only accepted
+attempts. Overflow, missing credentials, and exhausted provider or validation
+failures stop explicitly; SkillFabric does not truncate context or generate a
+fallback prompt.

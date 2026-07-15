@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,12 @@ from typing import Any
 from skillfabric.router.models import RouteResult
 from skillfabric.router.traces import _new_trace_id
 from skillfabric.runtime.json_utils import parse_json_response
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
+from skillfabric.runtime.llm import (
+    LLMConfig,
+    litellm_completion,
+    llm_usage_context,
+    llm_usage_transaction,
+)
 from skillfabric.runtime.prompting import render_untrusted_json
 from skillfabric.runtime.usage import count_message_tokens
 from skillfabric.storage import Workspace, atomic_write_text
@@ -20,6 +27,8 @@ from skillfabric.wiki.pages import slug
 
 PLANNER_PROMPT_ID = "skillfabric_execution_planner"
 DEFAULT_PLANNER_CONTEXT_MAX_TOKENS = 100_000
+DEFAULT_PLANNER_MAX_ATTEMPTS = 2
+DEFAULT_PLANNER_RETRY_DELAY_SECONDS = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +57,10 @@ def plan_execution_package(
     env_file: str | Path = ".env",
     package_root: str | Path | None = None,
     planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
+    planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
+    planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
 ) -> ExecutionPackageResult:
-    """Call the planner once and write an authoritative execution prompt."""
+    """Retry planner calls without rebuilding the route or planner context."""
 
     task = _required_string(query, label="planner query")
     if (
@@ -58,6 +69,11 @@ def plan_execution_package(
         or planner_context_max_tokens < 1
     ):
         raise ValueError("planner_context_max_tokens must be a positive integer")
+    _require_positive_int(planner_max_attempts, name="planner_max_attempts")
+    _require_nonnegative_float(
+        planner_retry_delay_seconds,
+        name="planner_retry_delay_seconds",
+    )
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
     root = _package_root(workspace, query=task, package_root=package_root)
     if root.exists():
@@ -82,23 +98,32 @@ def plan_execution_package(
         context_max_tokens=planner_context_max_tokens,
     )
     validation_path = root / "planner_validation.json"
-    try:
-        with llm_usage_context(log_path=workspace.reports_dir / "llm_usage.jsonl"):
-            response = litellm_completion(
-                messages=messages,
-                config=llm_config,
-                usage_operation="planner.execution_prompt",
-                usage_metadata={"selected_skill_count": len(route.selected_skills)},
-            )
-        planner_output = parse_json_response(response)
-    except Exception as exc:
-        _write_validation(validation_path, [f"{type(exc).__name__}: {exc}"])
-        raise
-
-    errors = validate_planner_output(planner_output)
+    planner_output: dict[str, Any]
+    errors: list[str]
+    for attempt in range(1, planner_max_attempts + 1):
+        try:
+            with llm_usage_transaction() as usage:
+                with llm_usage_context(log_path=workspace.reports_dir / "llm_usage.jsonl"):
+                    response = litellm_completion(
+                        messages=messages,
+                        config=llm_config,
+                        usage_operation="planner.execution_prompt",
+                        usage_metadata={"selected_skill_count": len(route.selected_skills)},
+                    )
+                candidate = parse_json_response(response)
+                errors = validate_planner_output(candidate)
+                if errors:
+                    raise ValueError("invalid planner output: " + "; ".join(errors))
+                planner_output = candidate
+                usage.commit()
+            break
+        except Exception as exc:
+            if attempt == planner_max_attempts:
+                _write_validation(validation_path, [f"{type(exc).__name__}: {exc}"])
+                raise
+            if planner_retry_delay_seconds:
+                time.sleep(planner_retry_delay_seconds)
     _write_validation(validation_path, errors)
-    if errors:
-        raise ValueError(f"invalid planner output: {'; '.join(errors)}")
 
     planner_output_path = root / "planner_output.json"
     prompt_path = root / "execution_prompt.md"
@@ -317,8 +342,25 @@ def _required_string(value: Any, *, label: str) -> str:
     return value
 
 
+def _require_positive_int(value: Any, *, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _require_nonnegative_float(value: Any, *, name: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{name} must be a finite non-negative number")
+
+
 __all__ = [
     "DEFAULT_PLANNER_CONTEXT_MAX_TOKENS",
+    "DEFAULT_PLANNER_MAX_ATTEMPTS",
+    "DEFAULT_PLANNER_RETRY_DELAY_SECONDS",
     "PLANNER_PROMPT_ID",
     "ExecutionPackageResult",
     "plan_execution_package",

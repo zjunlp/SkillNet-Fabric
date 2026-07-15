@@ -301,6 +301,11 @@ class LLMUsageTracker:
                     json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True) + "\n"
                 )
 
+    def append(self, record: LLMUsageRecord) -> None:
+        """Append an already constructed usage record."""
+
+        self._append(record)
+
 
 def load_usage_records(path: str | Path) -> list[LLMUsageRecord]:
     """Load usage records from an append-only JSONL file."""

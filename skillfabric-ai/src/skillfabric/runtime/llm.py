@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from skillfabric.runtime.usage import LLMUsageTracker
+from skillfabric.runtime.usage import LLMUsageRecord, LLMUsageTracker
 
 # Keep default offline test/build paths from making LiteLLM fetch pricing metadata.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
@@ -34,9 +34,7 @@ DEFAULT_TIMEOUT = 120
 class LLMUsageContext:
     """Thread-local usage overrides for nested SkillFabric runs."""
 
-    enabled: bool | None = None
     log_path: Path | None = None
-    operation: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -44,6 +42,20 @@ _USAGE_CONTEXT: ContextVar[LLMUsageContext | None] = ContextVar(
     "skillfabric_llm_usage_context",
     default=None,
 )
+_USAGE_BUFFER: ContextVar[list[tuple[Path, LLMUsageRecord]] | None] = ContextVar(
+    "skillfabric_llm_usage_buffer",
+    default=None,
+)
+
+
+@dataclass(slots=True)
+class LLMUsageTransaction:
+    """Commit usage only after an LLM-backed operation is accepted."""
+
+    committed: bool = False
+
+    def commit(self) -> None:
+        self.committed = True
 
 
 def _current_usage_context() -> LLMUsageContext:
@@ -61,10 +73,6 @@ class LLMConfig:
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
     max_tokens: int = DEFAULT_MAX_TOKENS
     timeout: float = DEFAULT_TIMEOUT
-    usage_enabled: bool = True
-    usage_log_path: Path | None = None
-    usage_operation: str = "llm"
-    usage_metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _require_string(self.api_base, name="api_base")
@@ -80,11 +88,6 @@ class LLMConfig:
             raise ValueError("reasoning_effort must be a string")
         _require_positive_int(self.max_tokens, name="max_tokens")
         _require_positive_float(self.timeout, name="timeout")
-        if not isinstance(self.usage_enabled, bool):
-            raise ValueError("usage_enabled must be a boolean")
-        _require_string(self.usage_operation, name="usage_operation")
-        if not isinstance(self.usage_metadata, dict):
-            raise ValueError("usage_metadata must be an object")
 
     @classmethod
     def from_env(cls, *, env_path: str | Path | None = None) -> LLMConfig:
@@ -126,23 +129,6 @@ class LLMConfig:
         timeout = float(
             _first_value(values, "SKILLFABRIC_LLM_TIMEOUT", "TIMEOUT", default=str(DEFAULT_TIMEOUT))
         )
-        usage_enabled = _parse_bool(
-            _first_value(values, "SKILLFABRIC_USAGE_ENABLED", "USAGE_ENABLED", default="1"),
-            default=True,
-        )
-        usage_log_value = _first_value(values, "SKILLFABRIC_USAGE_LOG_PATH", "USAGE_LOG_PATH")
-        usage_log_path = _resolve_optional_path(usage_log_value, env_path=env_path)
-        usage_operation = _first_value(
-            values, "SKILLFABRIC_USAGE_OPERATION", "USAGE_OPERATION", default="llm"
-        )
-        usage_metadata = _parse_json_object(
-            _first_value(values, "SKILLFABRIC_USAGE_METADATA", "USAGE_METADATA", default="")
-        )
-        usage_context = _current_usage_context()
-        usage_enabled = usage_enabled if usage_context.enabled is None else usage_context.enabled
-        usage_log_path = usage_context.log_path or usage_log_path
-        usage_operation = usage_context.operation or usage_operation
-        usage_metadata = {**usage_metadata, **usage_context.metadata}
         if not api_key:
             raise ValueError(
                 "missing API key. Set API_KEY, OPENAI_API_KEY, or ANTHROPIC_AUTH_TOKEN. "
@@ -156,28 +142,20 @@ class LLMConfig:
             reasoning_effort=reasoning_effort,
             max_tokens=max_tokens,
             timeout=timeout,
-            usage_enabled=usage_enabled,
-            usage_log_path=usage_log_path,
-            usage_operation=usage_operation,
-            usage_metadata=usage_metadata,
         )
 
 
 @contextmanager
 def llm_usage_context(
     *,
-    enabled: bool | None = None,
     log_path: str | Path | None = None,
-    operation: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Iterator[None]:
     """Temporarily override usage tracking for the current thread/context."""
 
     parent = _current_usage_context()
     child = LLMUsageContext(
-        enabled=parent.enabled if enabled is None else enabled,
         log_path=parent.log_path if log_path is None else Path(log_path).expanduser().resolve(),
-        operation=parent.operation if operation is None else operation,
         metadata={**parent.metadata, **(metadata or {})},
     )
     token = _USAGE_CONTEXT.set(child)
@@ -185,6 +163,30 @@ def llm_usage_context(
         yield
     finally:
         _USAGE_CONTEXT.reset(token)
+
+
+@contextmanager
+def llm_usage_transaction() -> Iterator[LLMUsageTransaction]:
+    """Buffer usage records and persist them only when the caller commits."""
+
+    parent = _USAGE_BUFFER.get()
+    buffer: list[tuple[Path, LLMUsageRecord]] = []
+    token = _USAGE_BUFFER.set(buffer)
+    transaction = LLMUsageTransaction()
+    try:
+        yield transaction
+    except BaseException:
+        _USAGE_BUFFER.reset(token)
+        raise
+    else:
+        _USAGE_BUFFER.reset(token)
+    if not transaction.committed:
+        return
+    if parent is not None:
+        parent.extend(buffer)
+        return
+    for path, record in buffer:
+        LLMUsageTracker(log_path=path).append(record)
 
 
 def read_env_file(env_path: str | Path | None = ".env") -> dict[str, str]:
@@ -231,12 +233,9 @@ def litellm_completion(
     if resolved.reasoning_effort:
         call_kwargs["reasoning_effort"] = resolved.reasoning_effort
     usage_context = _current_usage_context()
-    operation = usage_operation or usage_context.operation or resolved.usage_operation
-    metadata = {**resolved.usage_metadata, **usage_context.metadata, **(usage_metadata or {})}
-    usage_enabled = (
-        resolved.usage_enabled if usage_context.enabled is None else usage_context.enabled
-    )
-    usage_log_path = usage_context.log_path or resolved.usage_log_path
+    operation = usage_operation or "llm"
+    metadata = {**usage_context.metadata, **(usage_metadata or {})}
+    usage_log_path = usage_context.log_path
     started = time.monotonic()
     try:
         if _should_use_process_timeout(resolved.timeout):
@@ -245,7 +244,6 @@ def litellm_completion(
             response = _direct_litellm_completion(call_kwargs, resolved.timeout)
     except BaseException as exc:
         _record_usage(
-            resolved,
             model=resolved_model,
             messages=provider_messages,
             response=None,
@@ -254,12 +252,10 @@ def litellm_completion(
             status="failed",
             error=f"{type(exc).__name__}: {exc}",
             metadata=metadata,
-            usage_enabled=usage_enabled,
             usage_log_path=usage_log_path,
         )
         raise
     _record_usage(
-        resolved,
         model=resolved_model,
         messages=provider_messages,
         response=response,
@@ -268,7 +264,6 @@ def litellm_completion(
         status="completed",
         error=None,
         metadata=metadata,
-        usage_enabled=usage_enabled,
         usage_log_path=usage_log_path,
     )
     return response
@@ -355,7 +350,6 @@ def response_to_jsonable(response: Any) -> Any:
 
 
 def _record_usage(
-    config: LLMConfig,
     *,
     model: str,
     messages: list[dict[str, Any]],
@@ -365,16 +359,14 @@ def _record_usage(
     status: str,
     error: str | None,
     metadata: dict[str, Any] | None,
-    usage_enabled: bool | None = None,
     usage_log_path: Path | None = None,
 ) -> None:
-    enabled = config.usage_enabled if usage_enabled is None else usage_enabled
-    log_path = usage_log_path or config.usage_log_path
-    if not enabled or log_path is None:
+    if usage_log_path is None:
         return
     try:
-        tracker = LLMUsageTracker(log_path=log_path)
-        tracker.record_completion(
+        buffer = _USAGE_BUFFER.get()
+        tracker = LLMUsageTracker(log_path=None if buffer is not None else usage_log_path)
+        record = tracker.record_completion(
             model=model,
             messages=messages,
             response=response,
@@ -384,6 +376,8 @@ def _record_usage(
             error=error,
             metadata=metadata,
         )
+        if buffer is not None:
+            buffer.append((usage_log_path, record))
     except Exception:  # noqa: BLE001 - usage accounting must not break LLM calls.
         return
 
@@ -579,29 +573,6 @@ def _provider_messages(model: str, messages: list[dict[str, Any]]) -> list[dict[
     return [{"role": "user", "content": system_text}, *non_system_messages]
 
 
-def _parse_bool(value: str, *, default: bool) -> bool:
-    if not value:
-        return default
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError("boolean configuration must be one of: 1, true, yes, on, 0, false, no, off")
-
-
-def _parse_json_object(value: str) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError("usage metadata must be a valid JSON object") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("usage metadata must be a JSON object")
-    return dict(payload)
-
-
 def _require_string(value: object, *, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
@@ -621,16 +592,3 @@ def _require_positive_float(value: object, *, name: str) -> float:
     if not math.isfinite(resolved) or resolved <= 0:
         raise ValueError(f"{name} must be a finite positive number")
     return resolved
-
-
-def _resolve_optional_path(value: str, *, env_path: str | Path | None) -> Path | None:
-    if not value:
-        return None
-    path = Path(value)
-    if path.is_absolute():
-        return path
-    if env_path is not None:
-        env_file = Path(env_path)
-        base = env_file.parent if env_file.name else env_file
-        return (base / path).resolve()
-    return path.resolve()

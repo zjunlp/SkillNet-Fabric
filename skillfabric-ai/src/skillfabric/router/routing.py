@@ -53,6 +53,8 @@ def route_task(
             max_turns=config.explorer_max_turns,
             load_timeout_ms=config.explorer_load_timeout_ms,
             execution_timeout_seconds=config.explorer_timeout_seconds,
+            max_attempts=config.explorer_max_attempts,
+            retry_delay_seconds=config.explorer_retry_delay_seconds,
         ),
         query=config.query,
         query_wiki_root=query_wiki.root,

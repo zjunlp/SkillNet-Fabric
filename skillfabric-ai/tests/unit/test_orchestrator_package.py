@@ -166,6 +166,24 @@ def test_plan_rejects_context_overflow_before_creating_package(tmp_path, monkeyp
     assert not package_root.exists()
 
 
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"planner_max_attempts": 0}, "planner_max_attempts"),
+        ({"planner_retry_delay_seconds": -1}, "planner_retry_delay_seconds"),
+        ({"planner_retry_delay_seconds": float("nan")}, "planner_retry_delay_seconds"),
+    ],
+)
+def test_plan_rejects_invalid_retry_limits(tmp_path, options, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        plan_execution_package(
+            tmp_path / ".skillfabric",
+            _route(),
+            query="extract financial KPIs",
+            **options,
+        )
+
+
 def test_plan_rejects_invalid_planner_output_without_prompt(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
@@ -188,11 +206,45 @@ def test_plan_rejects_invalid_planner_output_without_prompt(tmp_path, monkeypatc
             _route(),
             query="extract financial KPIs",
             package_root=package_root,
+            planner_max_attempts=1,
         )
 
     assert not (package_root / "execution_prompt.md").exists()
     validation = json.loads((package_root / "planner_validation.json").read_text())
     assert validation["valid"] is False
+
+
+def test_plan_retries_invalid_output_without_rebuilding_context(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    token_counts = 0
+    responses = [json.dumps({"execution_prompt": ""}), _planner_response()]
+
+    def count_tokens(*_args, **_kwargs):
+        nonlocal token_counts
+        token_counts += 1
+        return 100
+
+    monkeypatch.setattr(package_module, "count_message_tokens", count_tokens)
+    monkeypatch.setattr(
+        package_module,
+        "litellm_completion",
+        lambda **_kwargs: responses.pop(0),
+    )
+
+    result = plan_execution_package(
+        workspace,
+        _route(),
+        query="extract financial KPIs",
+        package_root=workspace / "runs" / "retry" / "execution_package",
+        planner_max_attempts=2,
+        planner_retry_delay_seconds=0,
+    )
+
+    assert token_counts == 1
+    assert not responses
+    assert result.prompt_path.is_file()
+    assert json.loads(result.planner_validation_path.read_text()) == {"valid": True, "errors": []}
 
 
 def test_plan_refuses_to_overwrite_an_existing_package(tmp_path, monkeypatch) -> None:

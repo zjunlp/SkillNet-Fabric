@@ -107,7 +107,7 @@ flowchart LR
     F --> G
     G --> H["Bounded query wiki"]
     H --> I["Explorer selects skills"]
-    I --> J["Single-call planner"]
+    I --> J["Validated planner"]
     J --> K["execution_prompt.md"]
 ```
 
@@ -125,6 +125,8 @@ The build pipeline:
 
 Optional wiki summaries are controlled independently with `--wiki-summary-mode off|all`. Disabling them does not skip contract extraction, semantic relation judgment, or embeddings.
 
+LLM-backed build jobs retry within the compiler. Usage artifacts commit only the accepted attempt for each contract, relation batch, cycle review, or wiki summary, so transient service failures do not inflate method-level token and cost totals.
+
 ### 2. Model Skill Relationships
 
 | Relation | Meaning | Direction |
@@ -141,6 +143,8 @@ Workspaces built with the previous relation direction are rejected and must be r
 
 For each task, the router fuses BM25 and dense ranks, expands only bounded `depend_on` and `compose_with` neighborhoods, and writes a task-specific query wiki. Dependency propagation is bidirectional; workflow propagation favors predecessor-to-successor traversal. The explorer can inspect only this bounded workspace and returns a strict selection-only `SkillPackage` with cited pages.
 
+The query wiki is materialized once. The explorer then receives at most two attempts by default; SDK failures, malformed responses, and packages that fail exact validation are retried without repeating retrieval or graph expansion.
+
 `similar_to` relationships expose near alternatives but do not drive operational graph expansion.
 
 ### 4. Generate the Execution Prompt
@@ -154,6 +158,8 @@ The planner receives:
 - the complete source of every selected skill.
 
 It produces a complete task-specific execution plan. SkillNet-Fabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
+
+Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default, and only the accepted response is committed to `llm_usage.jsonl`.
 
 ---
 
@@ -233,10 +239,14 @@ See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installa
 | `EMBEDDING_BASE_URL` | OpenAI-compatible embedding endpoint; falls back to `BASE_URL` | provider default |
 | `EMBEDDING_MODEL` | Embedding model identifier | `openai/text-embedding-3-small` |
 | `EMBEDDING_DIMENSION` | Embedding vector dimension | `1536` |
+| `EMBEDDING_MAX_RETRIES` | Retries for each embedding batch | `2` |
+| `EMBEDDING_RETRY_BACKOFF_SECONDS` | Linear retry backoff for embedding batches | `1` |
 | `SKILLFABRIC_MAX_SELECTED_SKILLS` | Maximum explorer selection size | `8` |
 | `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `24` |
 | `SKILLFABRIC_EXPANDED_LIMIT` | Maximum candidates after graph expansion | `100` |
 | `SKILLFABRIC_MAX_GRAPH_DEPTH` | Operational graph traversal depth | `2` |
+| `SKILLFABRIC_EXPLORER_MAX_ATTEMPTS` | Maximum explorer calls for one materialized query wiki | `2` |
+| `SKILLFABRIC_EXPLORER_RETRY_DELAY_SECONDS` | Delay between explorer attempts | `1` |
 | `SKILLFABRIC_WIKI_SUMMARY_MODE` | Wiki summary mode: `off` or `all` | `off` |
 
 Project-specific LLM aliases such as `SKILLFABRIC_LLM_API_KEY`, `SKILLFABRIC_LLM_API_BASE`, and `SKILLFABRIC_LLM_MODEL` are also supported. CLI flags override routing defaults where an equivalent option exists.
@@ -273,7 +283,7 @@ SkillNet-Fabric writes generated state under the configured workspace:
 └── status.json
 ```
 
-Artifacts are versioned and validated. Use a new workspace when the CLI reports an incompatible schema instead of mutating generated files by hand.
+Artifacts use exact validated fields. Rebuild a workspace when canonical artifact validation fails instead of mutating generated files by hand.
 
 ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,6 +16,8 @@ DEFAULT_EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSION = 1536
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
 DEFAULT_EMBEDDING_TEXT_CHARS = 4_000
+DEFAULT_EMBEDDING_MAX_RETRIES = 2
+DEFAULT_EMBEDDING_RETRY_BACKOFF_SECONDS = 1.0
 _RECORD_KEYS = {
     "key",
     "skill_id",
@@ -49,6 +52,8 @@ class ApiEmbeddingProvider:
     timeout: float = 120.0
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE
     max_text_chars: int = DEFAULT_EMBEDDING_TEXT_CHARS
+    max_retries: int = DEFAULT_EMBEDDING_MAX_RETRIES
+    retry_backoff_seconds: float = DEFAULT_EMBEDDING_RETRY_BACKOFF_SECONDS
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not self.model_id.strip():
@@ -57,6 +62,11 @@ class ApiEmbeddingProvider:
         _require_float(self.timeout, name="timeout", minimum_exclusive=0.0)
         _require_int(self.batch_size, name="batch_size", minimum=1)
         _require_int(self.max_text_chars, name="max_text_chars", minimum=0)
+        _require_int(self.max_retries, name="max_retries", minimum=0)
+        _require_nonnegative_float(
+            self.retry_backoff_seconds,
+            name="retry_backoff_seconds",
+        )
         for name, value in (("api_key", self.api_key), ("api_base", self.api_base)):
             if not isinstance(value, str):
                 raise ValueError(f"{name} must be a string")
@@ -123,6 +133,22 @@ class ApiEmbeddingProvider:
                 ),
                 name="EMBEDDING_TEXT_CHARS",
             ),
+            max_retries=_parse_int(
+                _first_value(
+                    values,
+                    "EMBEDDING_MAX_RETRIES",
+                    default=str(DEFAULT_EMBEDDING_MAX_RETRIES),
+                ),
+                name="EMBEDDING_MAX_RETRIES",
+            ),
+            retry_backoff_seconds=_parse_float(
+                _first_value(
+                    values,
+                    "EMBEDDING_RETRY_BACKOFF_SECONDS",
+                    default=str(DEFAULT_EMBEDDING_RETRY_BACKOFF_SECONDS),
+                ),
+                name="EMBEDDING_RETRY_BACKOFF_SECONDS",
+            ),
         )
 
     def embed(self, text: str) -> list[float]:
@@ -149,7 +175,7 @@ class ApiEmbeddingProvider:
                 kwargs["api_key"] = self.api_key
             if self.api_base:
                 kwargs["api_base"] = self.api_base
-            vectors.extend(_vectors_from_embedding_response(litellm.embedding(**kwargs)))
+            vectors.extend(self._embed_batch(litellm, kwargs))
         if len(vectors) != len(texts):
             raise RuntimeError(
                 f"embedding API returned {len(vectors)} vectors for {len(texts)} texts"
@@ -167,16 +193,23 @@ class ApiEmbeddingProvider:
         self.dimension = actual_dimension
         return vectors
 
+    def _embed_batch(self, litellm: Any, kwargs: dict[str, Any]) -> list[list[float]]:
+        for attempt in range(self.max_retries + 1):
+            try:
+                return _vectors_from_embedding_response(litellm.embedding(**kwargs))
+            except Exception:
+                if attempt == self.max_retries:
+                    raise
+                if self.retry_backoff_seconds:
+                    time.sleep(self.retry_backoff_seconds * (attempt + 1))
+        raise AssertionError("embedding retry loop ended unexpectedly")
+
 
 def default_embedding_provider(
     *,
     env_path: str | Path | None = ".env",
 ) -> EmbeddingProvider:
-    values = read_env_file(env_path)
-    provider = _first_value(values, "EMBEDDING_PROVIDER", default="api").strip().lower()
-    if provider in {"", "api"}:
-        return ApiEmbeddingProvider.from_env(env_path=env_path)
-    raise ValueError(f"unsupported embedding provider: {provider}. Use 'api'.")
+    return ApiEmbeddingProvider.from_env(env_path=env_path)
 
 
 def embedding_provider_for_model(
@@ -354,6 +387,15 @@ def _require_float(value: object, *, name: str, minimum_exclusive: float) -> flo
     resolved = float(value)
     if not math.isfinite(resolved) or resolved <= minimum_exclusive:
         raise ValueError(f"{name} must be a finite number greater than {minimum_exclusive}")
+    return resolved
+
+
+def _require_nonnegative_float(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    resolved = float(value)
+    if not math.isfinite(resolved) or resolved < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
     return resolved
 
 

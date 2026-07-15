@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
 from skillfabric.wiki.explorer.skill_package import skill_package_json_schema
 
@@ -68,6 +69,17 @@ def _query_root(tmp_path: Path) -> Path:
     root = tmp_path / "query_wiki"
     root.mkdir()
     (root / "index.md").write_text("# Query Wiki\n", encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "query": "x",
+                "skills": [],
+                "semantic_edges_path": "edges/semantic_edges.jsonl",
+                "alternatives": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -229,12 +241,24 @@ def test_backend_rejects_invalid_tool_budgets(tmp_path, tool_budget) -> None:
         {"max_turns": 0},
         {"load_timeout_ms": 999},
         {"execution_timeout_seconds": float("inf")},
-        {"max_attempts": 0},
     ],
 )
 def test_backend_rejects_invalid_runtime_limits(overrides) -> None:
     with pytest.raises(ValueError):
         ClaudeCodeWikiExplorerBackend(**overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"max_attempts": 0},
+        {"retry_delay_seconds": -1},
+        {"retry_delay_seconds": float("nan")},
+    ],
+)
+def test_explorer_rejects_invalid_retry_limits(overrides) -> None:
+    with pytest.raises(ValueError):
+        WikiExplorerConfig(**overrides)
 
 
 def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path) -> None:
@@ -251,13 +275,15 @@ def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path)
             yield self.ResultMessage(self.output)
 
     runtime = FlakyRuntime(_empty_package())
-    package = ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
+    package = explore_query_wiki(
+        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
         query="x",
         query_wiki_root=root,
         trace_dir=tmp_path / "trace",
+        sdk_runtime=runtime,
     )
 
-    assert package.coverage_gaps
+    assert package.package.coverage_gaps
     assert runtime.calls == 2
 
 

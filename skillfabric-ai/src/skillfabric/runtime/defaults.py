@@ -21,6 +21,8 @@ class RouterOptions:
     explorer_max_turns: int = 24
     explorer_load_timeout_ms: int = 30_000
     explorer_timeout_seconds: float = 300.0
+    explorer_max_attempts: int = 2
+    explorer_retry_delay_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         for name in ("max_selected_skills", "seed_limit", "max_depth"):
@@ -36,6 +38,7 @@ class RouterOptions:
             self.explorer_load_timeout_ms,
             name="explorer_load_timeout_ms",
         )
+        _require_positive_int(self.explorer_max_attempts, name="explorer_max_attempts")
         if (
             isinstance(self.explorer_timeout_seconds, bool)
             or not isinstance(self.explorer_timeout_seconds, (int, float))
@@ -43,6 +46,13 @@ class RouterOptions:
             or self.explorer_timeout_seconds <= 0
         ):
             raise ValueError("explorer_timeout_seconds must be finite and positive")
+        if (
+            isinstance(self.explorer_retry_delay_seconds, bool)
+            or not isinstance(self.explorer_retry_delay_seconds, (int, float))
+            or not math.isfinite(self.explorer_retry_delay_seconds)
+            or self.explorer_retry_delay_seconds < 0
+        ):
+            raise ValueError("explorer_retry_delay_seconds must be finite and non-negative")
 
 
 def default_build_options() -> BuildOptions:
@@ -66,6 +76,11 @@ def default_router_options() -> RouterOptions:
         explorer_timeout_seconds=_positive_float(
             "SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS",
             300.0,
+        ),
+        explorer_max_attempts=_positive_int("SKILLFABRIC_EXPLORER_MAX_ATTEMPTS", 2),
+        explorer_retry_delay_seconds=_nonnegative_float(
+            "SKILLFABRIC_EXPLORER_RETRY_DELAY_SECONDS",
+            1.0,
         ),
     )
 
@@ -97,6 +112,16 @@ def _positive_float(name: str, default: float) -> float:
     value = float(raw)
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _nonnegative_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    value = float(raw)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and non-negative")
     return value
 
 

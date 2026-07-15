@@ -20,6 +20,8 @@ from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
+    DEFAULT_PLANNER_MAX_ATTEMPTS,
+    DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
     plan_execution_package,
 )
 from skillfabric.router.config import RouterConfig
@@ -119,6 +121,16 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
         type=int,
         default=DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     )
+    plan_parser.add_argument(
+        "--planner-max-attempts",
+        type=int,
+        default=DEFAULT_PLANNER_MAX_ATTEMPTS,
+    )
+    plan_parser.add_argument(
+        "--planner-retry-delay-seconds",
+        type=float,
+        default=DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
+    )
     _add_route_tuning(plan_parser)
     plan_parser.set_defaults(handler=_plan)
     commands["plan"] = plan_parser
@@ -183,6 +195,8 @@ def _add_route_tuning(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--explorer-max-turns", type=int)
     parser.add_argument("--explorer-load-timeout-ms", type=int)
     parser.add_argument("--explorer-timeout-seconds", type=float)
+    parser.add_argument("--explorer-max-attempts", type=int)
+    parser.add_argument("--explorer-retry-delay-seconds", type=float)
 
 
 def _help(
@@ -373,6 +387,8 @@ def _plan(args: argparse.Namespace) -> None:
         env_file=args.env_file,
         package_root=package_root,
         planner_context_max_tokens=args.planner_context_max_tokens,
+        planner_max_attempts=args.planner_max_attempts,
+        planner_retry_delay_seconds=args.planner_retry_delay_seconds,
     )
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
 
@@ -593,6 +609,16 @@ def _router_config(
             defaults.explorer_timeout_seconds
             if args.explorer_timeout_seconds is None
             else args.explorer_timeout_seconds
+        ),
+        explorer_max_attempts=(
+            defaults.explorer_max_attempts
+            if args.explorer_max_attempts is None
+            else args.explorer_max_attempts
+        ),
+        explorer_retry_delay_seconds=(
+            defaults.explorer_retry_delay_seconds
+            if args.explorer_retry_delay_seconds is None
+            else args.explorer_retry_delay_seconds
         ),
     )
 
