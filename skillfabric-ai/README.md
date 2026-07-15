@@ -72,8 +72,13 @@ selection-only SkillPackage schema and cite query-wiki paths it read. Graph
 relations remain evidence: they neither force skill selection nor impose final
 execution order. Retrieval and query-wiki materialization run once; the explorer
 retries only SDK, response, or package-validation failures. Planning constructs
-its context once and retries only the LLM response when necessary, then places
-the original task and resulting execution plan in `execution_prompt.md`.
+its context once and retries only invalid returned content, then places the
+original task and resulting execution plan in `execution_prompt.md`.
+
+Each LiteLLM completion has one initial request and at most two retries for the
+provider's retryable transport, timeout, rate-limit, and server failures. An
+exhausted request is not submitted again by Build or Planner validation loops,
+so network and response-validation retries cannot multiply each other.
 
 ## Python API
 

@@ -11,7 +11,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
-from skillfabric.runtime.llm import LLMConfig, litellm_completion, llm_usage_context
+from skillfabric.runtime.llm import (
+    LLMConfig,
+    LLMRequestError,
+    litellm_completion,
+    llm_usage_context,
+)
 from skillfabric.runtime.usage import load_usage_records
 
 
@@ -106,6 +111,49 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertEqual(attempts, 3)
         self.assertFalse(outcomes[0].ok)
         self.assertIsInstance(outcomes[0].error, TimeoutError)
+
+    def test_provider_request_failure_is_not_retried_by_job_runner(self) -> None:
+        provider_calls = 0
+
+        def completion(**kwargs):
+            nonlocal provider_calls
+            provider_calls += 1
+            self.assertEqual(kwargs["max_retries"], 2)
+            raise TimeoutError("provider retries exhausted")
+
+        fake_litellm = types.SimpleNamespace(
+            completion=completion,
+            suppress_debug_info=False,
+            request_timeout=None,
+        )
+        config = LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/responses/gpt-5.4-mini",
+        )
+
+        def worker(_item: str) -> str:
+            litellm_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                config=config,
+            )
+            return "unreachable"
+
+        with patch.dict(sys.modules, {"litellm": fake_litellm}):
+            outcomes = run_llm_jobs(
+                ["item"],
+                worker,
+                options=LLMJobOptions(
+                    concurrency=1,
+                    max_retries=2,
+                    retry_backoff_seconds=0,
+                    progress_every=0,
+                ),
+            )
+
+        self.assertEqual(provider_calls, 1)
+        self.assertFalse(outcomes[0].ok)
+        self.assertIsInstance(outcomes[0].error, LLMRequestError)
 
     def test_uses_concurrent_workers(self) -> None:
         active = 0

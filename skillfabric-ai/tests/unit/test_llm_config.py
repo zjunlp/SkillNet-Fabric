@@ -13,6 +13,7 @@ from unittest.mock import patch
 from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
 from skillfabric.runtime.llm import (
     LLMConfig,
+    LLMRequestError,
     litellm_completion,
     llm_usage_context,
     llm_usage_transaction,
@@ -450,7 +451,7 @@ class LLMConfigTests(unittest.TestCase):
                 sys.modules["litellm"] = original
 
         self.assertEqual(response["choices"][0]["message"]["content"], "ok")
-        self.assertEqual(calls[0]["max_retries"], 0)
+        self.assertEqual(calls[0]["max_retries"], 2)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["operation"], "route")
         self.assertEqual(records[0]["status"], "completed")
@@ -628,7 +629,8 @@ class LLMConfigTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], TimeoutError)
+        self.assertIsInstance(errors[0], LLMRequestError)
+        self.assertIsInstance(errors[0].__cause__, TimeoutError)
 
     def test_litellm_completion_records_failure_usage_for_timeout(self) -> None:
         errors: list[BaseException] = []

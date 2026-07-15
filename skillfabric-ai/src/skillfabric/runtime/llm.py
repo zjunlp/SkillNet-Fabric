@@ -29,6 +29,7 @@ DEFAULT_API_BASE = "https://api.openai.com/v1"
 DEFAULT_REASONING_EFFORT = "medium"
 DEFAULT_MAX_TOKENS = 32768
 DEFAULT_TIMEOUT = 120
+DEFAULT_NETWORK_RETRIES = 2
 LOGGER = logging.getLogger(__name__)
 
 
@@ -58,6 +59,10 @@ class LLMUsageTransaction:
 
     def commit(self) -> None:
         self.committed = True
+
+
+class LLMRequestError(RuntimeError):
+    """Raised after LiteLLM exhausts its request-level retry policy."""
 
 
 def _current_usage_context() -> LLMUsageContext:
@@ -214,7 +219,7 @@ def litellm_completion(
     usage_metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> Any:
-    """Call litellm.completion with project env configuration."""
+    """Call LiteLLM with project configuration and bounded network retries."""
 
     resolved = config or LLMConfig.from_env(env_path=env_path)
     resolved_model = resolved.model if model is None else _require_string(model, name="model")
@@ -235,7 +240,7 @@ def litellm_completion(
         "timeout": resolved.timeout,
         "request_timeout": resolved.timeout,
         "force_timeout": resolved.timeout,
-        "max_retries": 0,
+        "max_retries": DEFAULT_NETWORK_RETRIES,
     }
     if resolved.reasoning_effort:
         call_kwargs["reasoning_effort"] = resolved.reasoning_effort
@@ -249,7 +254,7 @@ def litellm_completion(
             response = _completion_with_process_timeout(call_kwargs, resolved.timeout)
         else:
             response = _direct_litellm_completion(call_kwargs, resolved.timeout)
-    except BaseException as exc:
+    except Exception as exc:
         _record_usage(
             model=resolved_model,
             messages=provider_messages,
@@ -261,7 +266,7 @@ def litellm_completion(
             metadata=metadata,
             usage_log_path=usage_log_path,
         )
-        raise
+        raise LLMRequestError(f"{type(exc).__name__}: {exc}") from exc
     _record_usage(
         model=resolved_model,
         messages=provider_messages,
@@ -304,16 +309,20 @@ def _completion_with_process_timeout(call_kwargs: dict[str, Any], timeout: float
     output: mp.Queue[dict[str, Any]] = ctx.Queue(maxsize=1)
     process = ctx.Process(target=_completion_process_worker, args=(call_kwargs, timeout, output))
     process.start()
+    attempts = int(call_kwargs.get("max_retries", 0)) + 1
     grace_seconds = min(5.0, max(0.5, timeout * 0.1))
+    timeout_budget = (timeout + grace_seconds) * attempts
     try:
-        result = output.get(timeout=timeout + grace_seconds)
+        result = output.get(timeout=timeout_budget)
     except queue.Empty as exc:
         process.terminate()
         process.join(timeout=5.0)
         if process.is_alive():
             process.kill()
             process.join(timeout=5.0)
-        raise TimeoutError(f"LLM call exceeded process timeout of {timeout} seconds") from exc
+        raise TimeoutError(
+            f"LLM call exceeded process timeout budget of {timeout_budget:g} seconds"
+        ) from exc
     finally:
         if process.is_alive():
             process.join(timeout=1.0)

@@ -16,6 +16,7 @@ from skillfabric.router.models import (
     RouteResult,
     RouteSelectedSkill,
 )
+from skillfabric.runtime.llm import LLMRequestError
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
@@ -251,6 +252,35 @@ def test_plan_retries_invalid_output_without_rebuilding_context(
     assert result.prompt_path.is_file()
     assert json.loads(result.planner_validation_path.read_text()) == {"valid": True, "errors": []}
     assert "planner_retry attempt=1/2" in caplog.text
+
+
+def test_plan_does_not_repeat_a_provider_request_failure(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    calls = 0
+
+    def failed_completion(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise LLMRequestError("provider retries exhausted")
+
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 100)
+    monkeypatch.setattr(package_module, "litellm_completion", failed_completion)
+    package_root = workspace / "runs" / "provider-failure" / "execution_package"
+
+    with pytest.raises(LLMRequestError, match="provider retries exhausted"):
+        plan_execution_package(
+            workspace,
+            _route(),
+            query="extract financial KPIs",
+            package_root=package_root,
+            planner_max_attempts=2,
+            planner_retry_delay_seconds=0,
+        )
+
+    assert calls == 1
+    validation = json.loads((package_root / "planner_validation.json").read_text())
+    assert validation["valid"] is False
 
 
 def test_plan_refuses_to_overwrite_an_existing_package(tmp_path, monkeypatch) -> None:

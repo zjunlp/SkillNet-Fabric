@@ -15,6 +15,7 @@ from skillfabric.router.traces import _new_trace_id
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import (
     LLMConfig,
+    LLMRequestError,
     litellm_completion,
     llm_usage_context,
     llm_usage_transaction,
@@ -62,7 +63,7 @@ def plan_execution_package(
     planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
     planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
 ) -> ExecutionPackageResult:
-    """Retry planner calls without rebuilding the route or planner context."""
+    """Retry invalid planner responses without rebuilding route or context."""
 
     task = _required_string(query, label="planner query")
     if (
@@ -122,7 +123,7 @@ def plan_execution_package(
                 usage.commit()
             break
         except Exception as exc:
-            if attempt == planner_max_attempts:
+            if isinstance(exc, LLMRequestError) or attempt == planner_max_attempts:
                 _write_validation(
                     validation_path,
                     attempt_errors or [f"{type(exc).__name__}: {exc}"],

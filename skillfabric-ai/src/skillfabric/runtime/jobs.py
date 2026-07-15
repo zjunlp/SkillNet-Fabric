@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from skillfabric.runtime.llm import llm_usage_transaction, read_env_file
+from skillfabric.runtime.llm import LLMRequestError, llm_usage_transaction, read_env_file
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -165,7 +165,7 @@ def run_llm_jobs(
                     index=index, item=item, ok=True, value=value, attempts=attempts
                 )
             except Exception as exc:  # noqa: BLE001 - caller normalizes final failures.
-                if attempts > job_options.max_retries:
+                if isinstance(exc, LLMRequestError) or attempts > job_options.max_retries:
                     return LLMJobOutcome(
                         index=index, item=item, ok=False, error=exc, attempts=attempts
                     )
