@@ -205,6 +205,60 @@ def test_validated_decision_cache_avoids_duplicate_calls(tmp_path) -> None:
     assert "candidate_channels" not in second[0].to_dict()
 
 
+def test_relation_judges_each_uncached_pair_in_its_own_request() -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    other = make_skill("skill:other", "other", "Perform an unrelated operation.")
+    contracts[other.id] = SkillContract.from_extraction(
+        other,
+        {
+            "capability": "Perform an unrelated operation.",
+            "when_to_use": "Use for an unrelated operation.",
+            "requires": [],
+            "produces": [],
+            "tools": [],
+            "evidence": [{"line": 1}],
+        },
+    )
+    skills.append(other)
+    second_pair = CandidatePair(
+        skill_a="skill:consumer",
+        skill_b=other.id,
+        hits=(
+            CandidateHit(
+                channel="similarity",
+                query_skill="skill:consumer",
+                matched_skill=other.id,
+                rank=1,
+            ),
+        ),
+    )
+    judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={
+            semantic_pair().key: dependency_payload(),
+            second_pair.key: {
+                "relation": "none",
+                "source_skill": second_pair.skill_a,
+                "target_skill": second_pair.skill_b,
+                "confidence": 0.99,
+                "reason": "The skills are unrelated.",
+                "evidence": [],
+            },
+        },
+    )
+
+    validate_candidate_pairs(
+        [semantic_pair(), second_pair],
+        skills,
+        contracts,
+        judge=judge,
+        job_options=LLMJobOptions(concurrency=1, max_retries=0, progress_every=0),
+    )
+
+    assert all(len(call) == 1 for call in judge.calls)
+    assert {call[0] for call in judge.calls} == {semantic_pair().key, second_pair.key}
+
+
 def test_relation_cache_ignores_retrieval_rank_changes_for_the_same_pair(tmp_path) -> None:
     skills, contracts = semantic_skills_and_contracts()
     cache = tmp_path / "relation_decisions.json"
@@ -249,7 +303,7 @@ def test_relation_cache_ignores_retrieval_rank_changes_for_the_same_pair(tmp_pat
     assert cached.cache_hit is True
 
 
-def test_successful_decisions_are_cached_when_another_request_fails(tmp_path, monkeypatch) -> None:
+def test_successful_decisions_are_cached_when_another_request_fails(tmp_path) -> None:
     skills, contracts = semantic_skills_and_contracts()
     other = make_skill("skill:other", "other", "Perform an unrelated operation.")
     contracts[other.id] = SkillContract.from_extraction(
@@ -287,7 +341,6 @@ def test_successful_decisions_are_cached_when_another_request_fails(tmp_path, mo
                 return {"decisions": [dependency_payload()]}
             raise RuntimeError("transient provider failure")
 
-    monkeypatch.setattr(validation_module, "RELATION_PAIRS_PER_REQUEST", 1)
     with pytest.raises(RelationValidationError, match="transient provider failure"):
         validate_candidate_pairs(
             [semantic_pair(), failed_pair],
@@ -470,15 +523,10 @@ def test_relation_request_requires_exact_pair_coverage(
         "reason": "The skills are unrelated.",
         "evidence": [],
     }
-    extra_decision = {
-        **second_decision,
-        "source_skill": "skill:other",
-        "target_skill": "skill:producer",
-    }
     decisions = {
-        "missing": [dependency_payload()],
+        "missing": [],
         "duplicate": [dependency_payload(), dependency_payload()],
-        "extra": [dependency_payload(), second_decision, extra_decision],
+        "extra": [dependency_payload(), second_decision],
     }[response_kind]
 
     class RawJudge:
@@ -489,7 +537,7 @@ def test_relation_request_requires_exact_pair_coverage(
 
     with pytest.raises(RelationValidationError, match=message):
         validate_candidate_pairs(
-            [semantic_pair(), second_pair],
+            [semantic_pair()],
             skills,
             contracts,
             judge=RawJudge(),

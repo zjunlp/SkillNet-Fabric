@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -14,6 +15,7 @@ from skillfabric.runtime.llm import DEFAULT_API_BASE, read_env_file
 DEFAULT_EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSION = 1536
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
+DEFAULT_EMBEDDING_CONCURRENCY = 1
 DEFAULT_EMBEDDING_TEXT_CHARS = 4_000
 DEFAULT_EMBEDDING_MAX_RETRIES = 2
 _RECORD_KEYS = {
@@ -49,6 +51,7 @@ class ApiEmbeddingProvider:
     api_base: str = ""
     timeout: float = 120.0
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE
+    concurrency: int = DEFAULT_EMBEDDING_CONCURRENCY
     max_text_chars: int = DEFAULT_EMBEDDING_TEXT_CHARS
     max_retries: int = DEFAULT_EMBEDDING_MAX_RETRIES
 
@@ -58,6 +61,7 @@ class ApiEmbeddingProvider:
         _require_int(self.dimension, name="dimension", minimum=1)
         _require_float(self.timeout, name="timeout", minimum_exclusive=0.0)
         _require_int(self.batch_size, name="batch_size", minimum=1)
+        _require_int(self.concurrency, name="concurrency", minimum=1)
         _require_int(self.max_text_chars, name="max_text_chars", minimum=0)
         _require_int(self.max_retries, name="max_retries", minimum=1)
         for name, value in (("api_key", self.api_key), ("api_base", self.api_base)):
@@ -118,6 +122,14 @@ class ApiEmbeddingProvider:
                 ),
                 name="EMBEDDING_BATCH_SIZE",
             ),
+            concurrency=_parse_int(
+                _first_value(
+                    values,
+                    "EMBEDDING_CONCURRENCY",
+                    default=str(DEFAULT_EMBEDDING_CONCURRENCY),
+                ),
+                name="EMBEDDING_CONCURRENCY",
+            ),
             max_text_chars=_parse_int(
                 _first_value(
                     values,
@@ -148,8 +160,12 @@ class ApiEmbeddingProvider:
             raise RuntimeError("litellm is required for API embeddings") from exc
         vectors: list[list[float]] = []
         prepared = [_truncate_embedding_text(text, self.max_text_chars) for text in texts]
-        for start in range(0, len(prepared), self.batch_size):
-            batch = prepared[start : start + self.batch_size]
+        batches = [
+            prepared[start : start + self.batch_size]
+            for start in range(0, len(prepared), self.batch_size)
+        ]
+
+        def embed_batch(batch: list[str]) -> list[list[float]]:
             kwargs: dict[str, Any] = {
                 "model": self.model_id,
                 "input": batch,
@@ -161,7 +177,15 @@ class ApiEmbeddingProvider:
                 kwargs["api_key"] = self.api_key
             if self.api_base:
                 kwargs["api_base"] = self.api_base
-            vectors.extend(_vectors_from_embedding_response(litellm.embedding(**kwargs)))
+            return _vectors_from_embedding_response(litellm.embedding(**kwargs))
+
+        if self.concurrency == 1 or len(batches) == 1:
+            embedded_batches = [embed_batch(batch) for batch in batches]
+        else:
+            with ThreadPoolExecutor(max_workers=min(self.concurrency, len(batches))) as executor:
+                embedded_batches = list(executor.map(embed_batch, batches))
+        for batch_vectors in embedded_batches:
+            vectors.extend(batch_vectors)
         if len(vectors) != len(texts):
             raise RuntimeError(
                 f"embedding API returned {len(vectors)} vectors for {len(texts)} texts"
@@ -178,6 +202,7 @@ class ApiEmbeddingProvider:
             raise RuntimeError("embedding API vectors must be finite and non-zero")
         self.dimension = actual_dimension
         return vectors
+
 
 def default_embedding_provider(
     *,

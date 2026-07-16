@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -74,6 +75,27 @@ def test_api_provider_delegates_the_retry_limit_to_litellm() -> None:
 
     assert vector == [0.25, 0.75]
     assert calls[0]["max_retries"] == 4
+
+
+def test_api_provider_runs_batches_concurrently_and_preserves_input_order() -> None:
+    provider = ApiEmbeddingProvider(
+        dimension=2,
+        batch_size=1,
+        concurrency=2,
+    )
+    barrier = threading.Barrier(2)
+
+    def fake_embedding(**kwargs: object) -> dict[str, object]:
+        barrier.wait(timeout=1)
+        text = kwargs["input"][0]
+        vector = [1.0, 0.0] if text == "first" else [0.0, 1.0]
+        return {"data": [{"index": 0, "embedding": vector}]}
+
+    fake_litellm = type("FakeLiteLLM", (), {"embedding": staticmethod(fake_embedding)})
+    with patch.dict("sys.modules", {"litellm": fake_litellm}):
+        vectors = provider.embed_many(["first", "second"])
+
+    assert vectors == [[1.0, 0.0], [0.0, 1.0]]
 
 
 def test_api_provider_rejects_a_response_with_the_wrong_dimension() -> None:
@@ -162,6 +184,7 @@ def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path
     env_path = tmp_path / ".env.test"
     env_path.write_text(
         "EMBEDDING_BATCH_SIZE=7\n"
+        "EMBEDDING_CONCURRENCY=3\n"
         "EMBEDDING_TEXT_CHARS=2500\n"
         "EMBEDDING_TIMEOUT=45\n"
         "EMBEDDING_MAX_RETRIES=4\n",
@@ -171,6 +194,7 @@ def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path
     provider = ApiEmbeddingProvider.from_env(env_path=env_path)
 
     assert provider.batch_size == 7
+    assert provider.concurrency == 3
     assert provider.max_text_chars == 2500
     assert provider.timeout == 45
     assert provider.max_retries == 4
@@ -185,6 +209,7 @@ def test_embedding_runtime_limits_are_loaded_from_the_selected_env_file(tmp_path
         {"timeout": 0},
         {"timeout": float("nan")},
         {"batch_size": 0},
+        {"concurrency": 0},
         {"max_text_chars": -1},
         {"max_retries": 0},
     ],

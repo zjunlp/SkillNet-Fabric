@@ -239,6 +239,10 @@ See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installa
 | `EMBEDDING_BASE_URL` | OpenAI-compatible embedding endpoint; falls back to `BASE_URL` | provider default |
 | `EMBEDDING_MODEL` | Embedding model identifier | `openai/text-embedding-3-small` |
 | `EMBEDDING_DIMENSION` | Embedding vector dimension | `1536` |
+| `EMBEDDING_BATCH_SIZE` | Maximum texts sent in each embedding request | `64` |
+| `EMBEDDING_CONCURRENCY` | Concurrent embedding batch requests | `1` |
+| `EMBEDDING_TIMEOUT` | Per-request embedding timeout in seconds | `120` |
+| `EMBEDDING_TEXT_CHARS` | Maximum characters retained per embedding input; `0` disables truncation | `4000` |
 | `EMBEDDING_MAX_RETRIES` | Retries for each embedding batch | `2` |
 | `SKILLFABRIC_MAX_SELECTED_SKILLS` | Maximum explorer selection size | `8` |
 | `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `24` |

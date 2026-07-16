@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,7 +30,6 @@ _DECISION_KEYS = frozenset(
     {"relation", "source_skill", "target_skill", "confidence", "reason", "evidence"}
 )
 _RELATIONS = frozenset({"depend_on", "compose_with", "similar_to", "none"})
-RELATION_PAIRS_PER_REQUEST = 4
 
 
 class RelationValidationError(RuntimeError):
@@ -126,7 +124,7 @@ def validate_candidate_pairs(
         except (TypeError, ValueError) as exc:
             raise RelationValidationError(f"invalid relation cache for {pair.key}: {exc}") from exc
 
-    requests = _pack_requests(pending, limit=RELATION_PAIRS_PER_REQUEST)
+    requests = [(item,) for item in pending]
 
     def judge_one(
         request: tuple[_PendingDecision, ...],
@@ -165,34 +163,6 @@ def validate_candidate_pairs(
             f"relation validation failed for {pair_keys}: {error}"
         ) from error
     return [record for record in records if record is not None]
-
-
-def _pack_requests(
-    pending: list[_PendingDecision],
-    *,
-    limit: int,
-) -> list[tuple[_PendingDecision, ...]]:
-    if limit <= 0:
-        raise ValueError("relation request limit must be positive")
-    remaining = {item.pair.key: item for item in pending}
-    requests: list[tuple[_PendingDecision, ...]] = []
-    while remaining:
-        endpoint_counts = Counter(
-            skill_id for item in remaining.values() for skill_id in item.pair.key
-        )
-        highest_count = max(endpoint_counts.values())
-        anchor = min(
-            skill_id for skill_id, count in endpoint_counts.items() if count == highest_count
-        )
-        request = tuple(
-            item
-            for item in sorted(remaining.values(), key=lambda row: row.pair.key)
-            if anchor in item.pair.key
-        )[:limit]
-        requests.append(request)
-        for item in request:
-            remaining.pop(item.pair.key)
-    return requests
 
 
 def _decisions_from_response(
