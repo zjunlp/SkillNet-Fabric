@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def scan_skill_root(skill_root: str | Path) -> list[Path]:
-    """Scan all SKILL.md files under a skill root."""
+    """Scan top-level skill packages under a skill root."""
 
     root = Path(skill_root)
     if not root.exists():
@@ -15,7 +15,11 @@ def scan_skill_root(skill_root: str | Path) -> list[Path]:
         if root.name != "SKILL.md":
             raise ValueError(f"skill file must be named SKILL.md: {root}")
         return [root]
-    return sorted(path for path in root.rglob("SKILL.md") if path.is_file())
+    return sorted(
+        path
+        for path in root.glob("*/SKILL.md")
+        if not path.parent.name.startswith("._") and path.is_file()
+    )
 
 
 def scan_and_parse(skill_root: str | Path):
