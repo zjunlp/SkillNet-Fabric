@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +12,7 @@ import yaml
 
 from skillfabric.registry.models import SkillNode
 
-_NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-_NAME_SEPARATOR_RE = re.compile(r"[^a-z0-9]+")
-_MAX_NAME_LENGTH = 64
+_NAME_RE = re.compile(r"[^\W_]+(?:-[^\W_]+)*")
 
 
 def parse_skill_file(path: str | Path) -> SkillNode:
@@ -26,10 +25,10 @@ def parse_skill_file(path: str | Path) -> SkillNode:
     if not isinstance(name, str) or not name.strip():
         raise ValueError(f"{skill_path} frontmatter name must be a non-empty string")
     name = _normalize_name(name)
-    if len(name) > _MAX_NAME_LENGTH or _NAME_RE.fullmatch(name) is None:
+    if _NAME_RE.fullmatch(name) is None:
         raise ValueError(
-            f"{skill_path} frontmatter name must normalize to at most {_MAX_NAME_LENGTH} "
-            "lowercase letters, numbers, and single hyphens"
+            f"{skill_path} frontmatter name must normalize to lowercase letters, "
+            "numbers, and single hyphens"
         )
     description = frontmatter.get("description")
     if not isinstance(description, str) or not description.strip():
@@ -48,7 +47,18 @@ def parse_skill_file(path: str | Path) -> SkillNode:
 
 
 def _normalize_name(value: str) -> str:
-    return _NAME_SEPARATOR_RE.sub("-", value.strip().lower()).strip("-")
+    normalized = unicodedata.normalize("NFKC", value.strip().casefold())
+    parts: list[str] = []
+    pending_separator = False
+    for character in normalized:
+        if character.isalnum():
+            if pending_separator and parts:
+                parts.append("-")
+            parts.append(character)
+            pending_separator = False
+        else:
+            pending_separator = True
+    return "".join(parts)
 
 
 def _parse_frontmatter(raw_text: str) -> dict[str, Any]:
