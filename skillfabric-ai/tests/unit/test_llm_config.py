@@ -122,6 +122,28 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.max_tokens, 123)
             self.assertEqual(config.reasoning_effort, "medium")
 
+    def test_explicit_build_llm_options_override_env_without_mutation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            original = (
+                "API_KEY=test-key\n"
+                "BASE_URL=https://api.example.test/v1\n"
+                "MODEL=gpt-5.5\n"
+                "SKILLFABRIC_LLM_REASONING_EFFORT=xhigh\n"
+            )
+            env_path.write_text(original, encoding="utf-8")
+
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
+                config = LLMConfig.from_env(
+                    env_path=env_path,
+                    model="openai/responses/gpt-5.6-luna",
+                    reasoning_effort="medium",
+                )
+
+            self.assertEqual(config.model, "openai/responses/gpt-5.6-luna")
+            self.assertEqual(config.reasoning_effort, "medium")
+            self.assertEqual(env_path.read_text(encoding="utf-8"), original)
+
     def test_loads_primary_api_settings_from_skillnet_style_env_names(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"

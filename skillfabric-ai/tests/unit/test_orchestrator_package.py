@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -142,6 +144,34 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     request = json.loads((package_root / "planner_request.json").read_text())
     assert request["expected_schema"] == planner_output_json_schema()
     assert request["estimated_prompt_tokens"] == 1200
+
+
+def test_plan_uses_explicit_runtime_usage_log(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    usage_paths: list[Path] = []
+
+    @contextmanager
+    def capture_usage_context(*, log_path=None, metadata=None):
+        del metadata
+        usage_paths.append(Path(log_path))
+        yield
+
+    monkeypatch.setattr(package_module, "llm_usage_context", capture_usage_context)
+    monkeypatch.setattr(package_module, "litellm_completion", lambda **_kwargs: _planner_response())
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 100)
+    usage_log_path = tmp_path / "run" / "planner_usage.jsonl"
+
+    result = plan_execution_package(
+        workspace,
+        _route(),
+        query="extract financial KPIs",
+        package_root=workspace / "runs" / "usage-test" / "execution_package",
+        usage_log_path=usage_log_path,
+    )
+
+    assert result.prompt_path.is_file()
+    assert usage_paths == [usage_log_path.resolve()]
 
 
 def test_plan_rejects_context_overflow_before_creating_package(tmp_path, monkeypatch) -> None:

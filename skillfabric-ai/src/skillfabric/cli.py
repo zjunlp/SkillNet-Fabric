@@ -165,6 +165,8 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
 
 
 def _add_llm_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--llm-model")
+    parser.add_argument("--llm-reasoning-effort")
     parser.add_argument("--llm-concurrency", type=int)
     parser.add_argument("--llm-rate-limit-per-minute", type=float)
     parser.add_argument("--llm-max-retries", type=int)
@@ -302,6 +304,8 @@ def _build(args: argparse.Namespace) -> None:
                 workspace=args.workspace,
                 llm_env_path=args.env_file,
                 llm_options=jobs,
+                llm_model=args.llm_model,
+                llm_reasoning_effort=args.llm_reasoning_effort,
             ),
             dependencies=_BuildDependencies(
                 embedding_provider=ApiEmbeddingProvider.from_env(

@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.unit.fake_embeddings import FakeEmbeddingProvider
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_ROOT = PACKAGE_ROOT.parent
@@ -262,6 +263,23 @@ class PublicPackageTests(unittest.TestCase):
 
         build_mock.assert_not_called()
 
+    def test_python_facade_forwards_build_only_llm_overrides(self) -> None:
+        from skillfabric import SkillFabric
+
+        client = SkillFabric(workspace=".skillfabric")
+        with patch("skillfabric.api.build_graph") as build_mock:
+            client.build(
+                FIXTURE_SKILLS,
+                skip_wiki=True,
+                embedding_provider=FakeEmbeddingProvider(),
+                llm_model="openai/responses/gpt-5.6-luna",
+                llm_reasoning_effort="medium",
+            )
+
+        config = build_mock.call_args.args[0]
+        self.assertEqual(config.llm_model, "openai/responses/gpt-5.6-luna")
+        self.assertEqual(config.llm_reasoning_effort, "medium")
+
     def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric
 
@@ -338,6 +356,27 @@ class PublicPackageTests(unittest.TestCase):
             self.assertEqual(
                 planner.call_args.kwargs["package_root"],
                 (workspace / "runs" / "relative-package").resolve(),
+            )
+
+    def test_python_facade_forwards_explicit_planner_usage_log(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / ".skillfabric"
+            build_fixture_workspace(workspace)
+            usage_log_path = root / "downstream-run" / "planner_usage.jsonl"
+
+            with patch("skillfabric.api.plan_execution_package") as planner:
+                SkillFabric(workspace=workspace).plan(
+                    "original task",
+                    route=_facade_route(),
+                    usage_log_path=usage_log_path,
+                )
+
+            self.assertEqual(
+                planner.call_args.kwargs["usage_log_path"],
+                usage_log_path.resolve(),
             )
 
     def test_python_facade_rejects_non_string_route_query_artifact(self) -> None:

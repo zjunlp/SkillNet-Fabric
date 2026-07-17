@@ -71,6 +71,8 @@ def test_help_exposes_embedding_and_route_controls() -> None:
     assert build_exit.value.code == 0
     assert route_exit.value.code == 0
     assert "--embedding-model" in build_help.getvalue()
+    assert "--llm-model" in build_help.getvalue()
+    assert "--llm-reasoning-effort" in build_help.getvalue()
     assert "--max-depth" in route_help.getvalue()
 
 

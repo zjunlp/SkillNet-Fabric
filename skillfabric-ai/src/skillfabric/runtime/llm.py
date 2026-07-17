@@ -97,7 +97,13 @@ class LLMConfig:
         _require_positive_float(self.timeout, name="timeout")
 
     @classmethod
-    def from_env(cls, *, env_path: str | Path | None = None) -> LLMConfig:
+    def from_env(
+        cls,
+        *,
+        env_path: str | Path | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMConfig:
         """Read LiteLLM configuration from an env file and process environment."""
 
         values = read_env_file(env_path)
@@ -111,22 +117,21 @@ class LLMConfig:
             ("SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"),
             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         )
-        model = _normalize_litellm_model(
-            _first_config_value(
-                values,
-                ("SKILLFABRIC_LLM_MODEL", "MODEL"),
-                ("ANTHROPIC_MODEL",),
-                default=DEFAULT_MODEL,
-            ),
+        configured_model = model or _first_config_value(
+            values,
+            ("SKILLFABRIC_LLM_MODEL", "MODEL"),
+            ("ANTHROPIC_MODEL",),
+            default=DEFAULT_MODEL,
+        )
+        resolved_model = _normalize_litellm_model(
+            configured_model,
             values=values,
             credential_key=credential_key,
             api_base_key=api_base_key,
         )
-        api_base = _normalize_api_base(api_base or DEFAULT_API_BASE, model=model)
-        reasoning_effort = _first_value(
-            values,
-            "SKILLFABRIC_LLM_REASONING_EFFORT",
-            default=DEFAULT_REASONING_EFFORT,
+        api_base = _normalize_api_base(api_base or DEFAULT_API_BASE, model=resolved_model)
+        resolved_reasoning_effort = reasoning_effort or _first_value(
+            values, "SKILLFABRIC_LLM_REASONING_EFFORT", default=DEFAULT_REASONING_EFFORT
         )
         max_tokens = int(
             _first_value(
@@ -144,9 +149,9 @@ class LLMConfig:
         return cls(
             api_base=api_base,
             api_key=api_key,
-            model=model,
+            model=resolved_model,
             credential_source=_credential_source(credential_key),
-            reasoning_effort=reasoning_effort,
+            reasoning_effort=resolved_reasoning_effort,
             max_tokens=max_tokens,
             timeout=timeout,
         )

@@ -59,6 +59,7 @@ def plan_execution_package(
     query: str,
     env_file: str | Path = ".env",
     package_root: str | Path | None = None,
+    usage_log_path: str | Path | None = None,
     planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
     planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
@@ -78,6 +79,11 @@ def plan_execution_package(
         name="planner_retry_delay_seconds",
     )
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
+    planner_usage_path = (
+        workspace.reports_dir / "llm_usage.jsonl"
+        if usage_log_path is None
+        else Path(usage_log_path).expanduser().resolve()
+    )
     root = _package_root(workspace, query=task, package_root=package_root)
     if root.exists():
         raise FileExistsError(f"execution package already exists: {root}")
@@ -107,7 +113,7 @@ def plan_execution_package(
         attempt_errors: list[str] = []
         try:
             with llm_usage_transaction() as usage:
-                with llm_usage_context(log_path=workspace.reports_dir / "llm_usage.jsonl"):
+                with llm_usage_context(log_path=planner_usage_path):
                     response = litellm_completion(
                         messages=messages,
                         config=llm_config,

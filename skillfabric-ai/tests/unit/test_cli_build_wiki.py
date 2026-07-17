@@ -148,3 +148,34 @@ def test_build_cli_skip_wiki_does_not_invoke_wiki_materialization(tmp_path) -> N
     payload = json.loads(output.getvalue())
     assert build_wiki_mock.call_count == 0
     assert "wiki" not in payload["artifacts"]
+
+
+def test_build_cli_forwards_build_only_llm_overrides(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    env_file = tmp_path / ".env.test"
+    _env_file(env_file)
+
+    with (
+        patch("skillfabric.cli.build_graph", return_value=_build_result(workspace)) as build_mock,
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        cli_main(
+            [
+                "build",
+                "--skill-root",
+                str(FIXTURE_SKILLS),
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+                "--llm-model",
+                "openai/responses/gpt-5.6-luna",
+                "--llm-reasoning-effort",
+                "medium",
+                "--skip-wiki",
+            ]
+        )
+
+    config = build_mock.call_args.args[0]
+    assert config.llm_model == "openai/responses/gpt-5.6-luna"
+    assert config.llm_reasoning_effort == "medium"

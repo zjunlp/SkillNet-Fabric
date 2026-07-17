@@ -61,6 +61,64 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
     }
 
 
+class FormalFakeEmbeddingProvider(FakeEmbeddingProvider):
+    model_id = "openai/bge-m3"
+    batch_size = 16
+    concurrency = 4
+    timeout = 30.0
+    max_retries = 8
+
+    def __init__(self) -> None:
+        super().__init__(dimension=1024)
+
+
+def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    provider_model = "openai/responses/gpt-5.6-luna"
+
+    result = build_graph(
+        BuildConfig(
+            skill_root=FIXTURE_SKILLS,
+            workspace=workspace,
+            llm_model=provider_model,
+            llm_reasoning_effort="medium",
+        ),
+        dependencies=_BuildDependencies(
+            contract_extractor=FixtureContractExtractor(model_id=provider_model),
+            relation_judge=FixtureRelationJudge(model_id=provider_model),
+            embedding_provider=FormalFakeEmbeddingProvider(),
+            build_id="luna-test-build",
+        ),
+    )
+
+    summary = json.loads(
+        (result.workspace.reports_dir / "build_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["builder"] == {
+        "model": "gpt-5.6-luna",
+        "provider_model": provider_model,
+        "reasoning_effort": "medium",
+    }
+    assert {
+        key: summary["embedding"][key]
+        for key in (
+            "model_id",
+            "dimension",
+            "batch_size",
+            "concurrency",
+            "timeout_seconds",
+            "max_retries",
+        )
+    } == {
+        "model_id": "openai/bge-m3",
+        "dimension": 1024,
+        "batch_size": 16,
+        "concurrency": 4,
+        "timeout_seconds": 30.0,
+        "max_retries": 8,
+    }
+
+
 def test_fixture_build_recovers_operational_chains_without_similarity_noise(tmp_path) -> None:
     result = _build(tmp_path / ".skillfabric")
     edges = {(edge.source, edge.target, edge.type) for edge in result.graph.edges}

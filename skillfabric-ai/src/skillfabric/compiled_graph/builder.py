@@ -36,7 +36,7 @@ from skillfabric.indexing.embeddings import EmbeddingProvider, default_embedding
 from skillfabric.registry.models import SkillNode
 from skillfabric.registry.scanner import scan_and_parse
 from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.llm import llm_usage_context
+from skillfabric.runtime.llm import LLMConfig, llm_usage_context
 from skillfabric.runtime.usage import load_usage_records, summarize_usage
 from skillfabric.storage import Workspace, atomic_write_text
 
@@ -49,6 +49,8 @@ class BuildConfig:
     workspace: str | Path = ".skillfabric"
     llm_env_path: str | Path = ".env"
     llm_options: LLMJobOptions | None = None
+    llm_model: str | None = None
+    llm_reasoning_effort: str | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +103,18 @@ def build_graph(
     stage = "initialization"
     timer = _StageTimer()
     lock_acquired = False
+    resolved_llm_config: LLMConfig | None = None
+
+    def build_llm_config() -> LLMConfig:
+        nonlocal resolved_llm_config
+        if resolved_llm_config is None:
+            resolved_llm_config = LLMConfig.from_env(
+                env_path=config.llm_env_path,
+                model=config.llm_model,
+                reasoning_effort=config.llm_reasoning_effort,
+            )
+        return resolved_llm_config
+
     try:
         with (
             workspace.lock(),
@@ -110,11 +124,11 @@ def build_graph(
             ),
         ):
             lock_acquired = True
-            contract_extractor = deps.contract_extractor or LiteLLMContractExtractor.from_env(
-                env_path=config.llm_env_path
+            contract_extractor = deps.contract_extractor or LiteLLMContractExtractor(
+                config=build_llm_config()
             )
-            relation_judge = deps.relation_judge or LiteLLMRelationJudge.from_env(
-                env_path=config.llm_env_path
+            relation_judge = deps.relation_judge or LiteLLMRelationJudge(
+                config=build_llm_config()
             )
             embedding_provider = deps.embedding_provider or default_embedding_provider(
                 env_path=config.llm_env_path
@@ -122,7 +136,6 @@ def build_graph(
             cycle_adjudicator = _resolve_cycle_adjudicator(
                 deps,
                 relation_judge,
-                env_path=config.llm_env_path,
             )
             job_options = config.llm_options or LLMJobOptions.from_env(env_path=config.llm_env_path)
             _write_running_status(workspace, build_id, stage="scan")
@@ -212,7 +225,8 @@ def build_graph(
                 "cycle_review_count": projection.cycle_review_count,
                 "contract_model_id": contract_extractor.model_id,
                 "relation_model_id": relation_judge.model_id,
-                "embedding": retrieval.metrics,
+                "builder": _builder_protocol(config, contract_extractor),
+                "embedding": _embedding_protocol(embedding_provider, retrieval.metrics),
                 "stage_wall_time_seconds": timer.timings,
                 "build_wall_time_seconds": timer.total(),
             }
@@ -364,11 +378,36 @@ def _prepare_usage_log(workspace: Workspace) -> None:
 def _resolve_cycle_adjudicator(
     deps: _BuildDependencies,
     relation_judge: RelationJudge,
-    *,
-    env_path: str | Path,
 ) -> CycleAdjudicator | None:
     if deps.cycle_adjudicator is not None:
         return deps.cycle_adjudicator
     if isinstance(relation_judge, LiteLLMRelationJudge):
-        return LiteLLMCycleAdjudicator.from_env(env_path=env_path)
+        return LiteLLMCycleAdjudicator(config=relation_judge.config)
     return None
+
+
+def _builder_protocol(
+    config: BuildConfig,
+    contract_extractor: ContractExtractor,
+) -> dict[str, str | None]:
+    provider_model = contract_extractor.model_id
+    extractor_config = getattr(contract_extractor, "config", None)
+    return {
+        "model": provider_model.rsplit("/", 1)[-1],
+        "provider_model": provider_model,
+        "reasoning_effort": config.llm_reasoning_effort
+        or getattr(extractor_config, "reasoning_effort", None),
+    }
+
+
+def _embedding_protocol(
+    provider: EmbeddingProvider,
+    retrieval_metrics: dict[str, int | float | str],
+) -> dict[str, Any]:
+    return {
+        **retrieval_metrics,
+        "batch_size": getattr(provider, "batch_size", None),
+        "concurrency": getattr(provider, "concurrency", None),
+        "timeout_seconds": getattr(provider, "timeout", None),
+        "max_retries": getattr(provider, "max_retries", None),
+    }

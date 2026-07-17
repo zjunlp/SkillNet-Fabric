@@ -75,6 +75,11 @@ class SkillFabric:
             progress_every=_optional_int(overrides.pop("llm_progress_every", None)),
             batch_size=_optional_int(overrides.pop("llm_batch_size", None)),
         )
+        llm_model = _optional_string(overrides.pop("llm_model", None), name="llm_model")
+        llm_reasoning_effort = _optional_string(
+            overrides.pop("llm_reasoning_effort", None),
+            name="llm_reasoning_effort",
+        )
         if overrides:
             raise TypeError(f"unsupported build option(s): {', '.join(sorted(overrides))}")
         result = build_graph(
@@ -83,6 +88,8 @@ class SkillFabric:
                 workspace=self.workspace.root,
                 llm_env_path=env_file,
                 llm_options=llm_options,
+                llm_model=llm_model,
+                llm_reasoning_effort=llm_reasoning_effort,
             ),
             dependencies=_BuildDependencies(embedding_provider=provider),
         )
@@ -155,6 +162,7 @@ class SkillFabric:
         route: RouteResult | None = None,
         route_file: str | Path | None = None,
         package_root: str | Path | None = None,
+        usage_log_path: str | Path | None = None,
         env_file: str | Path | None = None,
         planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
         planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
@@ -186,12 +194,18 @@ class SkillFabric:
         resolved_root = package_root if package_root is not None else default_root
         if resolved_root is not None:
             resolved_root = self._runs_path(resolved_root, label="package_root")
+        resolved_usage_log = (
+            None
+            if usage_log_path is None
+            else Path(usage_log_path).expanduser().resolve()
+        )
         return plan_execution_package(
             self.workspace,
             resolved_route,
             query=resolved_query,
             env_file=env_file or self.env_file,
             package_root=resolved_root,
+            usage_log_path=resolved_usage_log,
             planner_context_max_tokens=planner_context_max_tokens,
             planner_max_attempts=planner_max_attempts,
             planner_retry_delay_seconds=planner_retry_delay_seconds,
