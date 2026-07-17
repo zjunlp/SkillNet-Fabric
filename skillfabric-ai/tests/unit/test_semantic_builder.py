@@ -117,6 +117,11 @@ def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> Non
         "timeout_seconds": 30.0,
         "max_retries": 8,
     }
+    assert set(summary["skill_pool"]) == {
+        "graph_input_sha256",
+        "package_sha256",
+    }
+    assert all(len(value) == 64 for value in summary["skill_pool"].values())
 
 
 def test_fixture_build_recovers_operational_chains_without_similarity_noise(tmp_path) -> None:

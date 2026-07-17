@@ -34,6 +34,7 @@ from skillfabric.compiled_graph.semantic.validation import (
 from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import EmbeddingProvider, default_embedding_provider
 from skillfabric.registry.models import SkillNode
+from skillfabric.registry.provenance import skill_pool_provenance
 from skillfabric.registry.scanner import scan_and_parse
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import LLMConfig, llm_usage_context
@@ -207,6 +208,7 @@ def build_graph(
             edge_counts = Counter(edge.type for edge in projection.edges)
             stats = {
                 "skill_count": len(skills),
+                "skill_pool": skill_pool_provenance(config.skill_root, skills=skills),
                 "edge_count": len(projection.edges),
                 "edge_counts": {
                     "depend_on": edge_counts.get("depend_on", 0),

@@ -9,8 +9,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from tests.unit.wiki_helpers import build_fixture_workspace
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
+from tests.unit.wiki_helpers import build_fixture_workspace
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_ROOT = PACKAGE_ROOT.parent
