@@ -76,10 +76,11 @@ shared reference.
 
 ## Local Smoke Test
 
-Use a small skill directory and disable only optional wiki summarization:
+Use a small skill directory for a real connectivity and cost smoke test. Wiki
+summaries are derived deterministically from validated contracts:
 
 ```text
-/skillfabric:build ./small-skill-set --workspace .skillfabric-smoke --wiki-summary-mode off
+/skillfabric:build ./small-skill-set --workspace .skillfabric-smoke
 ```
 
 The equivalent CLI command is:
@@ -88,8 +89,7 @@ The equivalent CLI command is:
 skillfabric build \
   --skill-root ./small-skill-set \
   --workspace .skillfabric-smoke \
-  --env-file .env \
-  --wiki-summary-mode off
+  --env-file .env
 ```
 
 This remains a real API build: contract extraction, semantic pair judgment, and

@@ -123,9 +123,9 @@ The build pipeline:
 6. Validates relation direction, uniqueness, and dependency acyclicity.
 7. Materializes the graph, wiki, metrics, and usage artifacts.
 
-Optional wiki summaries are controlled independently with `--wiki-summary-mode off|all`. Disabling them does not skip contract extraction, semantic relation judgment, or embeddings.
+Wiki summaries are derived deterministically from validated contracts. Wiki materialization makes no additional model calls and does not alter contract extraction, semantic relation judgment, or embeddings.
 
-LLM-backed build jobs retry within the compiler. Usage artifacts commit only the accepted attempt for each contract, relation batch, cycle review, or wiki summary, so transient service failures do not inflate method-level token and cost totals.
+LLM-backed build jobs retry within the compiler. Usage artifacts commit only the accepted attempt for each contract, relation batch, or cycle review, so transient service failures do not inflate method-level token and cost totals.
 
 ### 2. Model Skill Relationships
 
@@ -250,7 +250,6 @@ See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installa
 | `SKILLFABRIC_MAX_GRAPH_DEPTH` | Operational graph traversal depth | `2` |
 | `SKILLFABRIC_EXPLORER_MAX_ATTEMPTS` | Maximum explorer calls for one materialized query wiki | `2` |
 | `SKILLFABRIC_EXPLORER_RETRY_DELAY_SECONDS` | Delay between explorer attempts | `1` |
-| `SKILLFABRIC_WIKI_SUMMARY_MODE` | Wiki summary mode: `off` or `all` | `off` |
 
 Project-specific LLM aliases such as `SKILLFABRIC_LLM_API_KEY`, `SKILLFABRIC_LLM_API_BASE`, and `SKILLFABRIC_LLM_MODEL` are also supported. CLI flags override routing defaults where an equivalent option exists.
 

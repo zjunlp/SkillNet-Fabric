@@ -65,8 +65,6 @@ def _build_result(root: Path) -> BuildResult:
 def _wiki_result(root: Path) -> WikiBuildResult:
     return WikiBuildResult(
         pages_written=3,
-        cache_hits=0,
-        llm_calls=0,
         health=WikiHealthReport(),
         workspace=root,
     )
@@ -100,6 +98,11 @@ def test_build_cli_reports_canonical_artifacts(tmp_path) -> None:
 
     payload = json.loads(output.getvalue())
     assert build_wiki_mock.call_count == 1
+    wiki_config = build_wiki_mock.call_args.args[0]
+    assert wiki_config.workspace == workspace
+    assert not hasattr(wiki_config, "env_file")
+    assert not hasattr(wiki_config, "use_llm_summaries")
+    assert not hasattr(wiki_config, "llm_options")
     assert set(payload["graph"]) == {"node_count", "edge_count", "edge_counts"}
     assert payload["graph"]["edge_counts"] == {
         "depend_on": 2,
@@ -119,6 +122,11 @@ def test_build_cli_reports_canonical_artifacts(tmp_path) -> None:
         "wiki",
     }
     assert payload["artifacts"]["graph"].endswith("graph/graph.json")
+    metrics = json.loads(
+        (workspace / "reports" / "build_summary.json").read_text(encoding="utf-8")
+    )
+    assert metrics["wiki"] == {"pages_written": 3}
+    assert "wiki_summary" not in metrics
 
 
 def test_build_cli_skip_wiki_does_not_invoke_wiki_materialization(tmp_path) -> None:

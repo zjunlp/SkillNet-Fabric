@@ -71,8 +71,6 @@ def append_log(path: Path, *, result: WikiBuildResult, build_id: str) -> None:
     entry = (
         f"## [{now}] wiki-build | build_id={build_id}\n\n"
         f"- pages_written: {result.pages_written}\n"
-        f"- cache_hits: {result.cache_hits}\n"
-        f"- llm_calls: {result.llm_calls}\n"
         f"- health_warnings: {sum(result.health.summary.values())}\n\n"
     )
     atomic_write_text(path, existing.rstrip() + "\n\n" + entry)

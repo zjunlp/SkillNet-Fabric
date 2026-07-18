@@ -16,7 +16,7 @@ from skillfabric.wiki.renderers import (
     _skill_summary_payload,
     _workflow_page,
 )
-from skillfabric.wiki.summarizer import WikiSummarizer
+from skillfabric.wiki.summaries import summary_from_payload
 
 
 def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
@@ -25,8 +25,7 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     workspace = Workspace(config.workspace)
     workspace.ensure()
     source = load_wiki_source(workspace)
-    summarizer = WikiSummarizer(config)
-    pages = _entity_pages(source, config, summarizer, workspace)
+    pages = _entity_pages(source, config, workspace)
     page_summaries = _directory_page_summaries(pages)
     pages.extend(_directory_pages(source, page_summaries, workspace))
     _reset_wiki_output(workspace)
@@ -36,8 +35,6 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     write_wiki_health_report(workspace, health)
     result = WikiBuildResult(
         pages_written=len(pages),
-        cache_hits=summarizer.cache_hits,
-        llm_calls=summarizer.llm_calls,
         health=health,
         workspace=workspace.root,
     )
@@ -48,11 +45,10 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
 def _entity_pages(
     source: WikiSource,
     config: WikiBuildConfig,
-    summarizer: WikiSummarizer,
     workspace: Workspace,
 ) -> list[WikiPage]:
     pages: list[WikiPage] = []
-    summaries = _summary_records(source, summarizer)
+    summaries = _summary_records(source)
     for _skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         pages.append(_skill_page(source, skill, config, summaries, workspace))
         pages.append(_skill_source_page(skill, workspace))
@@ -111,16 +107,13 @@ def _reset_wiki_output(workspace: Workspace) -> None:
 
 def _summary_records(
     source: WikiSource,
-    summarizer: WikiSummarizer,
 ) -> dict[tuple[str, str], WikiSummaryRecord]:
-    requests: list[dict[str, object]] = []
+    summaries: dict[tuple[str, str], WikiSummaryRecord] = {}
     for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
-        requests.append(
-            {
-                "page_type": "skill",
-                "entity_id": skill_id,
-                "content_hash": skill.content_hash,
-                "payload": _skill_summary_payload(skill, source.contracts.get(skill_id)),
-            }
+        summaries[("skill", skill_id)] = summary_from_payload(
+            page_type="skill",
+            entity_id=skill_id,
+            content_hash=skill.content_hash,
+            payload=_skill_summary_payload(skill, source.contracts.get(skill_id)),
         )
-    return summarizer.summarize_many(requests)
+    return summaries

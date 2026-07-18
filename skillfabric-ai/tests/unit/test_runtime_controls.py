@@ -6,31 +6,17 @@ import io
 import pytest
 
 from skillfabric.cli import main as cli_main
-from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.progress import ProgressReporter
 
 
 def test_public_defaults_match_the_documented_workflow() -> None:
-    build = default_build_options()
     router = default_router_options()
 
-    assert build.wiki_summary_mode == "off"
     assert router.max_selected_skills == 8
     assert router.seed_limit == 24
     assert router.expanded_limit == 100
     assert router.max_depth == 2
-
-
-def test_wiki_llm_summaries_remain_an_explicit_opt_in(monkeypatch) -> None:
-    monkeypatch.setenv("SKILLFABRIC_WIKI_SUMMARY_MODE", "all")
-
-    assert default_build_options().wiki_summary_mode == "all"
-
-
-def test_build_defaults_do_not_parse_unrelated_llm_job_environment(monkeypatch) -> None:
-    monkeypatch.setenv("SKILLFABRIC_LLM_CONCURRENCY", "not-an-integer")
-
-    assert default_build_options().wiki_summary_mode == "off"
 
 
 def test_router_defaults_reject_nonfinite_timeout(monkeypatch) -> None:
@@ -73,6 +59,7 @@ def test_help_exposes_embedding_and_route_controls() -> None:
     assert "--embedding-model" in build_help.getvalue()
     assert "--llm-model" in build_help.getvalue()
     assert "--llm-reasoning-effort" in build_help.getvalue()
+    assert "--wiki-summary-mode" not in build_help.getvalue()
     assert "--max-depth" in route_help.getvalue()
 
 

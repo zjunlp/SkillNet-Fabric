@@ -28,9 +28,9 @@ from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
 from skillfabric.router.traces import _new_trace_id, validate_trace_id
-from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.llm import llm_usage_context, read_env_file
+from skillfabric.runtime.llm import read_env_file
 from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.runtime.progress import ProgressReporter
 from skillfabric.storage import Workspace, atomic_write_text
@@ -97,7 +97,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--workspace", default=".skillfabric")
     build_parser.add_argument("--env-file", default=".env")
     build_parser.add_argument("--skip-wiki", action="store_true")
-    build_parser.add_argument("--wiki-summary-mode", choices=("off", "all"))
     build_parser.add_argument("--embedding-model")
     _add_llm_options(build_parser)
     _add_progress_options(build_parser)
@@ -295,7 +294,6 @@ def _write_env_values(path: Path, updates: dict[str, str]) -> None:
 
 
 def _build(args: argparse.Namespace) -> None:
-    options = default_build_options()
     _require_api_configuration(Path(args.env_file))
     jobs = _llm_options(args)
     reporter = _progress_reporter(args)
@@ -318,19 +316,7 @@ def _build(args: argparse.Namespace) -> None:
         )
         wiki_result: WikiBuildResult | None = None
         if not args.skip_wiki:
-            mode = args.wiki_summary_mode or options.wiki_summary_mode
-            with llm_usage_context(
-                log_path=result.workspace.reports_dir / "llm_usage.jsonl",
-                metadata={"build_id": result.graph.build_id},
-            ):
-                wiki_result = build_wiki(
-                    WikiBuildConfig(
-                        workspace=result.workspace.root,
-                        env_file=args.env_file,
-                        use_llm_summaries=mode == "all",
-                        llm_options=jobs,
-                    )
-                )
+            wiki_result = build_wiki(WikiBuildConfig(workspace=result.workspace.root))
             merge_wiki_metrics(result.workspace, wiki_result)
     print(json.dumps(_build_summary(result, wiki_result), ensure_ascii=False, indent=2))
 

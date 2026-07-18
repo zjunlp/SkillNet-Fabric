@@ -16,7 +16,7 @@ class WikiHealthTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
 
             page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(
@@ -37,7 +37,7 @@ class WikiHealthTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
 
             page = workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md"
             page.write_text(

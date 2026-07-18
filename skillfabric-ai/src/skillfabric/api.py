@@ -29,9 +29,8 @@ from skillfabric.orchestrator.package import (
 from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
-from skillfabric.runtime.defaults import default_build_options, default_router_options
+from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.llm import llm_usage_context
 from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
@@ -52,16 +51,10 @@ class SkillFabric:
 
     def build(self, skill_root: str | Path, **overrides: Any) -> BuildResult:
         env_file = overrides.pop("env_file", self.env_file)
-        defaults = default_build_options()
         skip_wiki = _required_bool(
             overrides.pop("skip_wiki", False),
             name="skip_wiki",
         )
-        wiki_summary_mode = overrides.pop("wiki_summary_mode", defaults.wiki_summary_mode)
-        if not isinstance(wiki_summary_mode, str):
-            raise ValueError("wiki_summary_mode must be a string")
-        if wiki_summary_mode not in {"off", "all"}:
-            raise ValueError("wiki_summary_mode must be 'off' or 'all'")
         provider = _embedding_provider(
             overrides.pop("embedding_provider", None),
             env_file=env_file,
@@ -99,18 +92,7 @@ class SkillFabric:
             dependencies=_BuildDependencies(embedding_provider=provider),
         )
         if not skip_wiki:
-            with llm_usage_context(
-                log_path=self.workspace.reports_dir / "llm_usage.jsonl",
-                metadata={"build_id": result.graph.build_id},
-            ):
-                wiki_result = build_wiki(
-                    WikiBuildConfig(
-                        workspace=self.workspace.root,
-                        env_file=env_file,
-                        use_llm_summaries=wiki_summary_mode == "all",
-                        llm_options=llm_options,
-                    )
-                )
+            wiki_result = build_wiki(WikiBuildConfig(workspace=self.workspace.root))
             merge_wiki_metrics(self.workspace, wiki_result)
         return result
 

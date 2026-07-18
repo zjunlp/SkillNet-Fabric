@@ -229,7 +229,7 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:prepare",
             "/skillfabric:run",
             "reuses the latest prepared prompt when available",
-            "--wiki-summary-mode off",
+            "summaries are derived deterministically from validated contracts",
             "Do not paste API keys",
         ):
             self.assertIn(snippet, readme)
@@ -299,6 +299,23 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(config.llm_reasoning_effort, "medium")
         self.assertEqual(config.llm_options.checkpoint_interval, 25)
         self.assertEqual(config.llm_options.circuit_breaker_threshold, 7)
+
+    def test_python_facade_rejects_removed_wiki_summary_mode(self) -> None:
+        from skillfabric import SkillFabric
+
+        client = SkillFabric(workspace=".skillfabric")
+        with (
+            patch("skillfabric.api.build_graph") as build_mock,
+            self.assertRaisesRegex(TypeError, "wiki_summary_mode"),
+        ):
+            client.build(
+                FIXTURE_SKILLS,
+                skip_wiki=True,
+                embedding_provider=FakeEmbeddingProvider(),
+                wiki_summary_mode="off",
+            )
+
+        build_mock.assert_not_called()
 
     def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric

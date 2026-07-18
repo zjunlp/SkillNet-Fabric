@@ -8,11 +8,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class BuildOptions:
-    wiki_summary_mode: str = "off"
-
-
-@dataclass(frozen=True, slots=True)
 class RouterOptions:
     max_selected_skills: int = 8
     seed_limit: int = 24
@@ -53,13 +48,6 @@ class RouterOptions:
             or self.explorer_retry_delay_seconds < 0
         ):
             raise ValueError("explorer_retry_delay_seconds must be finite and non-negative")
-
-
-def default_build_options() -> BuildOptions:
-    mode = os.environ.get("SKILLFABRIC_WIKI_SUMMARY_MODE", "off").strip().lower()
-    if mode not in {"off", "all"}:
-        raise ValueError("SKILLFABRIC_WIKI_SUMMARY_MODE must be 'off' or 'all'")
-    return BuildOptions(wiki_summary_mode=mode)
 
 
 def default_router_options() -> RouterOptions:
@@ -136,8 +124,6 @@ def _require_positive_int(value: object, *, name: str) -> None:
 
 
 __all__ = [
-    "BuildOptions",
     "RouterOptions",
-    "default_build_options",
     "default_router_options",
 ]

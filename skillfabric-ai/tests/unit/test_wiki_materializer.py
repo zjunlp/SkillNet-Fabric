@@ -5,7 +5,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 from skillfabric.wiki.renderers import _first_paragraph
@@ -17,7 +16,7 @@ class WikiMaterializerTests(unittest.TestCase):
         failures = (
             ("skillfabric.wiki.materializer.load_wiki_source", ValueError("invalid graph")),
             (
-                "skillfabric.wiki.materializer.WikiSummarizer.summarize_many",
+                "skillfabric.wiki.materializer.summary_from_payload",
                 RuntimeError("summary failed"),
             ),
         )
@@ -31,34 +30,35 @@ class WikiMaterializerTests(unittest.TestCase):
                 existing.write_text("# Existing wiki\n", encoding="utf-8")
 
                 with patch(target, side_effect=error), self.assertRaises(type(error)):
-                    build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+                    build_wiki(WikiBuildConfig(workspace=workspace))
 
                 self.assertEqual(existing.read_text(encoding="utf-8"), "# Existing wiki\n")
 
-    def test_build_wiki_writes_summary_cache_only_when_summaries_change(self) -> None:
+    def test_build_wiki_is_deterministic_without_summary_cache(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
 
-            with patch(
-                "skillfabric.wiki.summarizer.atomic_write_text",
-                wraps=atomic_write_text,
-            ) as write:
-                build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
+            first_pages = {
+                path.relative_to(workspace / "wiki"): path.read_bytes()
+                for path in sorted((workspace / "wiki").rglob("*.md"))
+            }
+            build_wiki(WikiBuildConfig(workspace=workspace))
+            second_pages = {
+                path.relative_to(workspace / "wiki"): path.read_bytes()
+                for path in sorted((workspace / "wiki").rglob("*.md"))
+            }
 
-            cache_writes = [
-                call
-                for call in write.call_args_list
-                if Path(call.args[0]).name == "wiki_summary_cache.json"
-            ]
-            self.assertEqual(len(cache_writes), 1)
+            self.assertEqual(second_pages, first_pages)
+            self.assertFalse((workspace / "cache" / "wiki_summary_cache.json").exists())
 
     def test_build_wiki_generates_pages_with_links_and_sections(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
 
-            config = WikiBuildConfig(workspace=workspace, use_llm_summaries=False)
+            config = WikiBuildConfig(workspace=workspace)
             build_wiki(config)
             result = build_wiki(config)
 
@@ -109,7 +109,7 @@ class WikiMaterializerTests(unittest.TestCase):
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
 
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
 
             text = (workspace / "wiki" / "skills" / "cards" / "pdf-table-parser.md").read_text(
                 encoding="utf-8"
@@ -136,7 +136,7 @@ class WikiMaterializerTests(unittest.TestCase):
             stale_file = workspace / "wiki" / "unknown-generated-file.md"
             stale_file.write_text("# Stale generated output\n", encoding="utf-8")
 
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
 
             self.assertFalse(stale_file.exists())
 
@@ -148,7 +148,7 @@ class WikiMaterializerTests(unittest.TestCase):
             stale_debug.parent.mkdir(parents=True, exist_ok=True)
             stale_debug.write_text("# stale debug\n", encoding="utf-8")
 
-            build_wiki(WikiBuildConfig(workspace=workspace, use_llm_summaries=False))
+            build_wiki(WikiBuildConfig(workspace=workspace))
 
             self.assertFalse((workspace / "wiki" / "debug").exists())
             self.assertTrue(stale_debug.exists())

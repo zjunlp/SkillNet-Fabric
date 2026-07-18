@@ -59,8 +59,9 @@ near-alternative relation for skills that independently solve the same explicit
 subproblem with equivalent task-level results, even when providers, runtimes, or
 toolchains differ. It is stored in canonical id order.
 
-Use `--wiki-summary-mode off` to derive wiki summaries directly from validated
-contracts. This does not skip contract extraction, pair judgment, or embeddings.
+Wiki summaries are derived deterministically from validated contracts without an
+additional model call. Contract extraction, pair judgment, and embeddings remain
+LLM- or provider-backed build stages as configured.
 
 ## Route And Plan
 
