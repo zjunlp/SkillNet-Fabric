@@ -92,35 +92,38 @@ class FixtureRelationJudge:
     ) -> dict[str, Any]:
         del contracts
         decisions = []
-        for pair in pairs:
+        for pair_index, pair in enumerate(pairs):
             self.calls.append(pair.key)
             relation = _KNOWN_RELATIONS.get(pair.key)
             if relation is None:
                 decisions.append(
                     {
+                        "pair_index": pair_index,
                         "relation": "none",
-                        "source_skill": pair.skill_a,
-                        "target_skill": pair.skill_b,
+                        "direction": "symmetric",
                         "confidence": 0.96,
                         "reason": "The fixture sources do not establish an operational relation.",
-                        "evidence": [],
+                        "evidence": {"skill_a_lines": [], "skill_b_lines": []},
                     }
                 )
                 continue
             relation_type, source, target, source_needle, target_needle = relation
             source_line, _ = _find_line(skills[source], source_needle)
             target_line, _ = _find_line(skills[target], target_needle)
+            lines_by_skill = {source: [source_line], target: [target_line]}
             decisions.append(
                 {
+                    "pair_index": pair_index,
                     "relation": relation_type,
-                    "source_skill": source,
-                    "target_skill": target,
+                    "direction": (
+                        "skill_a_to_skill_b" if source == pair.skill_a else "skill_b_to_skill_a"
+                    ),
                     "confidence": 0.94,
                     "reason": "The fixture sources explicitly support this operational relation.",
-                    "evidence": [
-                        {"skill": source, "line": source_line},
-                        {"skill": target, "line": target_line},
-                    ],
+                    "evidence": {
+                        "skill_a_lines": lines_by_skill[pair.skill_a],
+                        "skill_b_lines": lines_by_skill[pair.skill_b],
+                    },
                 }
             )
         return {"decisions": decisions}

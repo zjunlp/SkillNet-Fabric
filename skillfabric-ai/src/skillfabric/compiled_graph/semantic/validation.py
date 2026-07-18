@@ -16,7 +16,7 @@ from skillfabric.compiled_graph.semantic.models import (
     RelationDecision,
 )
 from skillfabric.compiled_graph.semantic.prompts import (
-    RELATION_PROMPT_FINGERPRINT,
+    RELATION_POLICY_FINGERPRINT,
     RELATION_PROMPT_ID,
     build_relation_judge_messages,
 )
@@ -32,7 +32,17 @@ from skillfabric.storage.checkpoint_cache import (
 _DECISION_KEYS = frozenset(
     {"relation", "source_skill", "target_skill", "confidence", "reason", "evidence"}
 )
+_JUDGE_DECISION_KEYS = frozenset(
+    {"pair_index", "relation", "direction", "confidence", "reason", "evidence"}
+)
+_JUDGE_EVIDENCE_KEYS = frozenset({"skill_a_lines", "skill_b_lines"})
 _RELATIONS = frozenset({"depend_on", "compose_with", "similar_to", "none"})
+_DIRECTIONS = frozenset({"skill_a_to_skill_b", "skill_b_to_skill_a", "symmetric"})
+_COMPATIBLE_CACHE_FINGERPRINTS = {
+    "03a2a93664c79e6203cd853613e71a3540320296208b90fe73cc7cc459e0d411": (
+        "a03308badce7826898845c0576cc4e6af56f6bffe9fc5c17b6429035e32a87ff",
+    ),
+}
 
 
 class RelationValidationError(RuntimeError):
@@ -123,6 +133,22 @@ def validate_candidate_pairs(
         key = _cache_key(pair, skills_by_id, contracts, judge.model_id)
         cached = cache.get(key)
         if cached is None:
+            for compatible_fingerprint in _COMPATIBLE_CACHE_FINGERPRINTS.get(
+                RELATION_POLICY_FINGERPRINT,
+                (),
+            ):
+                cached = cache.get(
+                    _cache_key(
+                        pair,
+                        skills_by_id,
+                        contracts,
+                        judge.model_id,
+                        policy_fingerprint=compatible_fingerprint,
+                    )
+                )
+                if cached is not None:
+                    break
+        if cached is None:
             pending.append(_PendingDecision(index=index, pair=pair, cache_key=key))
             continue
         try:
@@ -203,24 +229,74 @@ def _decisions_from_response(
     raw_decisions = payload.get("decisions")
     if not isinstance(raw_decisions, list):
         raise ValueError("relation judge decisions must be a list")
-    pairs_by_key = {pair.key: pair for pair in pairs}
-    decisions_by_key: dict[tuple[str, str], RelationDecision] = {}
+    decisions_by_index: dict[int, RelationDecision] = {}
     for raw in raw_decisions:
         if not isinstance(raw, dict):
             raise ValueError("relation judge decisions must be objects")
-        source = _required_string(raw.get("source_skill"), "source_skill")
-        target = _required_string(raw.get("target_skill"), "target_skill")
-        key = tuple(sorted((source, target)))
-        if key in decisions_by_key:
-            raise ValueError(f"relation judge returned duplicate candidate pair: {key}")
-        pair = pairs_by_key.get(key)
-        if pair is None:
-            raise ValueError(f"relation judge returned unexpected candidate pair: {key}")
-        decisions_by_key[key] = decision_from_payload(pair, raw, skills)
-    missing = sorted(set(pairs_by_key) - set(decisions_by_key))
+        pair_index = _required_pair_index(raw.get("pair_index"), len(pairs))
+        if pair_index in decisions_by_index:
+            raise ValueError(f"relation judge returned duplicate pair_index: {pair_index}")
+        decisions_by_index[pair_index] = decision_from_judge_payload(
+            pairs[pair_index],
+            raw,
+            skills,
+            pair_index=pair_index,
+        )
+    missing = sorted(set(range(len(pairs))) - set(decisions_by_index))
     if missing:
-        raise ValueError(f"relation judge response is missing candidate pairs: {missing}")
-    return [decisions_by_key[pair.key] for pair in pairs]
+        raise ValueError(f"relation judge response is missing pair_index values: {missing}")
+    return [decisions_by_index[index] for index in range(len(pairs))]
+
+
+def decision_from_judge_payload(
+    pair: CandidatePair,
+    payload: dict[str, Any],
+    skills: dict[str, SkillNode],
+    *,
+    pair_index: int,
+) -> RelationDecision:
+    """Map pair-local judge output to one canonical relation decision."""
+
+    actual_keys = set(payload)
+    if actual_keys != _JUDGE_DECISION_KEYS:
+        _raise_key_mismatch("relation judge decision", actual_keys, _JUDGE_DECISION_KEYS)
+    actual_pair_index = _required_pair_index(payload.get("pair_index"), pair_index + 1)
+    if actual_pair_index != pair_index:
+        raise ValueError(f"relation judge decision must use pair_index {pair_index}")
+    relation = payload.get("relation")
+    if not isinstance(relation, str) or relation not in _RELATIONS:
+        raise ValueError("relation must be depend_on, compose_with, similar_to, or none")
+    direction = payload.get("direction")
+    if not isinstance(direction, str) or direction not in _DIRECTIONS:
+        raise ValueError(
+            "direction must be skill_a_to_skill_b, skill_b_to_skill_a, or symmetric"
+        )
+    if relation in {"depend_on", "compose_with"} and direction == "symmetric":
+        raise ValueError(f"{relation} requires a directed pair-local direction")
+    if relation in {"similar_to", "none"} and direction != "symmetric":
+        raise ValueError(f"{relation} requires symmetric direction")
+    confidence = _validated_confidence(payload.get("confidence"))
+    reason = _required_string(payload.get("reason"), "reason")
+    evidence = _validated_pair_local_evidence(payload.get("evidence"), pair=pair, skills=skills)
+    if relation == "none" and evidence:
+        raise ValueError("none relations require empty evidence line lists")
+    if relation != "none" and {item.skill for item in evidence} != set(pair.key):
+        raise ValueError("non-none relations require evidence from both candidate skills")
+    if direction == "skill_a_to_skill_b":
+        source, target = pair.skill_a, pair.skill_b
+    elif direction == "skill_b_to_skill_a":
+        source, target = pair.skill_b, pair.skill_a
+    else:
+        source, target = pair.key
+    return RelationDecision(
+        candidate=pair,
+        relation=relation,
+        source_skill=source,
+        target_skill=target,
+        confidence=confidence,
+        reason=reason,
+        evidence=tuple(evidence),
+    )
 
 
 def decision_from_payload(
@@ -234,14 +310,7 @@ def decision_from_payload(
 
     actual_keys = set(payload)
     if actual_keys != _DECISION_KEYS:
-        missing = _DECISION_KEYS - actual_keys
-        unexpected = actual_keys - _DECISION_KEYS
-        details = []
-        if missing:
-            details.append(f"missing keys: {', '.join(sorted(missing))}")
-        if unexpected:
-            details.append(f"unexpected keys: {', '.join(sorted(unexpected))}")
-        raise ValueError("relation decision " + "; ".join(details))
+        _raise_key_mismatch("relation decision", actual_keys, _DECISION_KEYS)
     relation = payload.get("relation")
     if not isinstance(relation, str) or relation not in _RELATIONS:
         raise ValueError("relation must be depend_on, compose_with, similar_to, or none")
@@ -249,12 +318,7 @@ def decision_from_payload(
     target = _required_string(payload.get("target_skill"), "target_skill")
     if source == target or {source, target} != set(pair.key):
         raise ValueError("source_skill and target_skill must be the candidate pair")
-    confidence = payload.get("confidence")
-    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        raise ValueError("confidence must be a number")
-    confidence = float(confidence)
-    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
-        raise ValueError("confidence must be between 0 and 1")
+    confidence = _validated_confidence(payload.get("confidence"))
     reason = _required_string(payload.get("reason"), "reason")
     evidence = _validated_evidence(payload.get("evidence"), pair=pair, skills=skills)
     if relation != "none" and {item.skill for item in evidence} != set(pair.key):
@@ -307,6 +371,81 @@ def _validated_evidence(
     return evidence
 
 
+def _validated_pair_local_evidence(
+    value: Any,
+    *,
+    pair: CandidatePair,
+    skills: dict[str, SkillNode],
+) -> list[EvidenceRef]:
+    if not isinstance(value, dict) or set(value) != _JUDGE_EVIDENCE_KEYS:
+        raise ValueError("evidence must contain exactly skill_a_lines and skill_b_lines")
+    return [
+        *_validated_line_evidence(
+            value["skill_a_lines"],
+            label="evidence.skill_a_lines",
+            skill_id=pair.skill_a,
+            skills=skills,
+        ),
+        *_validated_line_evidence(
+            value["skill_b_lines"],
+            label="evidence.skill_b_lines",
+            skill_id=pair.skill_b,
+            skills=skills,
+        ),
+    ]
+
+
+def _validated_line_evidence(
+    value: Any,
+    *,
+    label: str,
+    skill_id: str,
+    skills: dict[str, SkillNode],
+) -> list[EvidenceRef]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list")
+    source_lines = skills[skill_id].raw_text.splitlines()
+    evidence: list[EvidenceRef] = []
+    for index, line in enumerate(value):
+        if isinstance(line, bool) or not isinstance(line, int):
+            raise ValueError(f"{label}[{index}] must be an integer")
+        if line < 1 or line > len(source_lines):
+            raise ValueError(f"{label}[{index}] is outside the skill source")
+        source_text = source_lines[line - 1]
+        if not source_text.strip():
+            raise ValueError(f"{label}[{index}] must reference a non-empty source line")
+        evidence.append(EvidenceRef(skill=skill_id, line=line, text=source_text))
+    return evidence
+
+
+def _validated_confidence(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("confidence must be a number")
+    confidence = float(value)
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+    return confidence
+
+
+def _required_pair_index(value: Any, pair_count: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("pair_index must be an integer")
+    if value < 0 or value >= pair_count:
+        raise ValueError(f"relation judge returned unexpected pair_index: {value}")
+    return value
+
+
+def _raise_key_mismatch(label: str, actual: set[str], expected: frozenset[str]) -> None:
+    missing = expected - actual
+    unexpected = actual - expected
+    details = []
+    if missing:
+        details.append(f"missing keys: {', '.join(sorted(missing))}")
+    if unexpected:
+        details.append(f"unexpected keys: {', '.join(sorted(unexpected))}")
+    raise ValueError(f"{label} " + "; ".join(details))
+
+
 def _required_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
@@ -318,10 +457,13 @@ def _cache_key(
     skills: dict[str, SkillNode],
     contracts: dict[str, SkillContract],
     model_id: str,
+    *,
+    policy_fingerprint: str | None = None,
 ) -> str:
+    resolved_policy_fingerprint = policy_fingerprint or RELATION_POLICY_FINGERPRINT
     payload = {
         "prompt_name": RELATION_PROMPT_ID,
-        "prompt_fingerprint": RELATION_PROMPT_FINGERPRINT,
+        "prompt_fingerprint": resolved_policy_fingerprint,
         "model_id": model_id,
         "pair": list(pair.key),
         "skills": {skill_id: skills[skill_id].content_hash for skill_id in pair.key},

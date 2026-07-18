@@ -13,7 +13,7 @@ from skillfabric.compiled_graph.semantic.models import (
     RelationDecision,
 )
 from skillfabric.compiled_graph.semantic.prompts import build_cycle_adjudication_messages
-from skillfabric.compiled_graph.semantic.validation import decision_from_payload
+from skillfabric.compiled_graph.semantic.validation import decision_from_judge_payload
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion
@@ -58,30 +58,34 @@ class LiteLLMCycleAdjudicator:
         payload = parse_json_response(response)
         if set(payload) != {"decisions"} or not isinstance(payload["decisions"], list):
             raise DependencyCycleError("cycle adjudication must return a decisions list")
-        original = {decision.candidate.key: decision for decision in decisions}
-        replacements: dict[tuple[str, str], RelationDecision] = {}
+        replacements: dict[int, RelationDecision] = {}
         for raw in payload["decisions"]:
             if not isinstance(raw, dict):
                 raise DependencyCycleError("cycle replacement decisions must be objects")
-            source = str(raw.get("source_skill", ""))
-            target = str(raw.get("target_skill", ""))
-            key = tuple(sorted((source, target)))
-            decision = original.get(key)
-            if decision is None:
-                raise DependencyCycleError("cycle adjudication returned an unknown candidate pair")
+            pair_index = raw.get("pair_index")
+            if (
+                isinstance(pair_index, bool)
+                or not isinstance(pair_index, int)
+                or pair_index < 0
+                or pair_index >= len(decisions)
+            ):
+                raise DependencyCycleError("cycle adjudication returned an unknown pair_index")
+            if pair_index in replacements:
+                raise DependencyCycleError("cycle adjudication returned a duplicate pair_index")
             try:
-                replacements[key] = decision_from_payload(
-                    decision.candidate,
+                replacements[pair_index] = decision_from_judge_payload(
+                    decisions[pair_index].candidate,
                     raw,
                     skills,
+                    pair_index=pair_index,
                 )
             except ValueError as exc:
                 raise DependencyCycleError(f"invalid cycle replacement: {exc}") from exc
-        if set(replacements) != set(original):
+        if set(replacements) != set(range(len(decisions))):
             raise DependencyCycleError(
                 "cycle adjudication must replace every cycle pair exactly once"
             )
-        return [replacements[decision.candidate.key] for decision in decisions]
+        return [replacements[index] for index in range(len(decisions))]
 
 
 def project_relation_decisions(

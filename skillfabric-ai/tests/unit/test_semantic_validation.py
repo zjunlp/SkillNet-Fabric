@@ -20,6 +20,8 @@ from tests.unit.relation_helpers import make_skill
 from tests.unit.semantic_fixtures import StaticRelationJudge
 from tests.unit.semantic_helpers import (
     dependency_payload,
+    none_payload,
+    pair_local_dependency_payload,
     semantic_pair,
     semantic_skills_and_contracts,
 )
@@ -44,6 +46,28 @@ def test_dependency_direction_follows_execution_order() -> None:
     assert decision.target_skill == "skill:consumer"
 
 
+def test_pair_local_output_maps_to_canonical_skill_ids() -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={semantic_pair().key: pair_local_dependency_payload()},
+    )
+
+    decision = validate_candidate_pairs(
+        [semantic_pair()],
+        skills,
+        contracts,
+        judge=judge,
+    )[0]
+
+    assert decision.source_skill == "skill:producer"
+    assert decision.target_skill == "skill:consumer"
+    assert {item.skill for item in decision.evidence} == {
+        "skill:consumer",
+        "skill:producer",
+    }
+
+
 def test_relation_is_not_rejected_by_a_deterministic_confidence_threshold() -> None:
     skills, contracts = semantic_skills_and_contracts()
     judge = StaticRelationJudge(
@@ -64,14 +88,7 @@ def test_relation_is_not_rejected_by_a_deterministic_confidence_threshold() -> N
 
 def test_valid_none_decision_is_audited_without_evidence() -> None:
     skills, contracts = semantic_skills_and_contracts()
-    response = {
-        "relation": "none",
-        "source_skill": "skill:consumer",
-        "target_skill": "skill:producer",
-        "confidence": 0.98,
-        "reason": "The candidate evidence is topical only.",
-        "evidence": [],
-    }
+    response = none_payload(confidence=0.98)
     judge = StaticRelationJudge(
         model_id="relation-test-model",
         responses={semantic_pair().key: response},
@@ -91,9 +108,9 @@ def test_valid_none_decision_is_audited_without_evidence() -> None:
 def test_workflow_relation_preserves_execution_direction() -> None:
     skills, contracts = semantic_skills_and_contracts()
     response = {
+        "pair_index": 0,
         "relation": "compose_with",
-        "source_skill": "skill:producer",
-        "target_skill": "skill:consumer",
+        "direction": "skill_b_to_skill_a",
         "confidence": 0.88,
         "reason": "The capabilities form a useful workflow without a hard prerequisite.",
         "evidence": dependency_payload()["evidence"],
@@ -120,25 +137,25 @@ def test_workflow_relation_preserves_execution_direction() -> None:
     ("mutator", "message"),
     [
         (lambda payload: {**payload, "accepted": True}, "unexpected keys"),
-        (lambda payload: {**payload, "source_skill": "skill:other"}, "candidate pair"),
-        (lambda payload: {**payload, "evidence": payload["evidence"][:1]}, "both candidate skills"),
+        (lambda payload: {**payload, "direction": "sideways"}, "direction must be"),
         (
             lambda payload: {
                 **payload,
-                "evidence": [
-                    *payload["evidence"][:-1],
-                    {"skill": "skill:producer", "line": 1, "text": "Paraphrased."},
-                ],
+                "evidence": {**payload["evidence"], "skill_b_lines": []},
             },
-            "exactly skill and line",
+            "both candidate skills",
         ),
         (
             lambda payload: {
                 **payload,
-                "evidence": [
-                    *payload["evidence"][:-1],
-                    {"skill": "skill:producer", "line": 99},
-                ],
+                "evidence": {**payload["evidence"], "skill": "skill:producer"},
+            },
+            "exactly skill_a_lines and skill_b_lines",
+        ),
+        (
+            lambda payload: {
+                **payload,
+                "evidence": {**payload["evidence"], "skill_b_lines": [99]},
             },
             "outside the skill source",
         ),
@@ -159,7 +176,7 @@ def test_relation_evidence_line_must_not_be_blank() -> None:
     skills, contracts = semantic_skills_and_contracts()
     skills[0].raw_text = "Produces a normalized table.\n\nUse the parser command."
     response = dependency_payload()
-    response["evidence"][1] = {"skill": "skill:producer", "line": 2}
+    response["evidence"]["skill_b_lines"] = [2]
     judge = StaticRelationJudge(
         model_id="relation-test-model",
         responses={semantic_pair().key: response},
@@ -205,6 +222,80 @@ def test_validated_decision_cache_avoids_duplicate_calls(tmp_path) -> None:
     assert "candidate_channels" not in second[0].to_dict()
 
 
+def test_missing_pair_is_judged_when_previous_relation_cache_is_reused(tmp_path) -> None:
+    skills, contracts = semantic_skills_and_contracts()
+    other = make_skill("skill:other", "other", "Perform an unrelated operation.")
+    contracts[other.id] = SkillContract.from_extraction(
+        other,
+        {
+            "capability": "Perform an unrelated operation.",
+            "when_to_use": "Use for an unrelated operation.",
+            "requires": [],
+            "produces": [],
+            "tools": [],
+            "evidence": [{"line": 1}],
+        },
+    )
+    skills.append(other)
+    missing_pair = CandidatePair(
+        skill_a="skill:consumer",
+        skill_b=other.id,
+        hits=(
+            CandidateHit(
+                channel="similarity",
+                query_skill="skill:consumer",
+                matched_skill=other.id,
+                rank=1,
+            ),
+        ),
+    )
+    by_id = {skill.id: skill for skill in skills}
+    legacy_fingerprint = validation_module._COMPATIBLE_CACHE_FINGERPRINTS[
+        validation_module.RELATION_POLICY_FINGERPRINT
+    ][0]
+    legacy_key = validation_module._cache_key(
+        semantic_pair(),
+        by_id,
+        contracts,
+        "relation-test-model",
+        policy_fingerprint=legacy_fingerprint,
+    )
+    cache = tmp_path / "relation_decisions.json"
+    cache.write_text(
+        json.dumps(
+            {
+                legacy_key: {
+                    "relation": "depend_on",
+                    "source_skill": "skill:producer",
+                    "target_skill": "skill:consumer",
+                    "confidence": 0.91,
+                    "reason": "The producer supplies the normalized table.",
+                    "evidence": [
+                        {"skill": "skill:consumer", "line": 1},
+                        {"skill": "skill:producer", "line": 1},
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={missing_pair.key: none_payload()},
+    )
+
+    decisions = validate_candidate_pairs(
+        [semantic_pair(), missing_pair],
+        skills,
+        contracts,
+        judge=judge,
+        cache_path=cache,
+    )
+
+    assert [decision.cache_hit for decision in decisions] == [True, False]
+    assert judge.calls == [(missing_pair.key,)]
+
+
 def test_relation_judges_each_uncached_pair_in_its_own_request() -> None:
     skills, contracts = semantic_skills_and_contracts()
     other = make_skill("skill:other", "other", "Perform an unrelated operation.")
@@ -236,14 +327,7 @@ def test_relation_judges_each_uncached_pair_in_its_own_request() -> None:
         model_id="relation-test-model",
         responses={
             semantic_pair().key: dependency_payload(),
-            second_pair.key: {
-                "relation": "none",
-                "source_skill": second_pair.skill_a,
-                "target_skill": second_pair.skill_b,
-                "confidence": 0.99,
-                "reason": "The skills are unrelated.",
-                "evidence": [],
-            },
+            second_pair.key: none_payload(),
         },
     )
 
@@ -332,14 +416,7 @@ def test_successful_decisions_are_cached_when_another_request_fails(tmp_path) ->
     )
     cache = tmp_path / "relation_decisions.json"
     checkpoint_dir = tmp_path / "relation_decisions.checkpoints"
-    failed_payload = {
-        "relation": "none",
-        "source_skill": failed_pair.skill_a,
-        "target_skill": failed_pair.skill_b,
-        "confidence": 0.99,
-        "reason": "The skills are unrelated.",
-        "evidence": [],
-    }
+    failed_payload = none_payload()
 
     class PartiallyFailingJudge:
         model_id = "relation-test-model"
@@ -469,13 +546,23 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     schema = json.loads(schema_text)
     assert set(schema) == {"decisions"}
     assert set(schema["decisions"][0]) == {
+        "pair_index",
         "relation",
-        "source_skill",
-        "target_skill",
+        "direction",
         "confidence",
         "reason",
         "evidence",
     }
+    assert schema["decisions"][0]["direction"] == (
+        "skill_a_to_skill_b|skill_b_to_skill_a|symmetric"
+    )
+    assert set(schema["decisions"][0]["evidence"]) == {
+        "skill_a_lines",
+        "skill_b_lines",
+    }
+    assert "source_skill" not in schema_text
+    assert "target_skill" not in schema_text
+    assert '"skill": "candidate skill id"' not in schema_text
 
 
 def test_relation_prompt_escapes_profile_xml_boundaries() -> None:
@@ -510,7 +597,7 @@ def test_relation_cache_identity_includes_prompt_policy(tmp_path, monkeypatch) -
         judge=judge,
         cache_path=cache,
     )[0]
-    monkeypatch.setattr(validation_module, "RELATION_PROMPT_FINGERPRINT", "changed-policy")
+    monkeypatch.setattr(validation_module, "RELATION_POLICY_FINGERPRINT", "changed-policy")
     second = validate_candidate_pairs(
         [semantic_pair()],
         skills,
@@ -536,39 +623,7 @@ def test_relation_request_requires_exact_pair_coverage(
     message,
 ) -> None:
     skills, contracts = semantic_skills_and_contracts()
-    other = make_skill("skill:other", "other", "Perform an unrelated operation.")
-    contracts[other.id] = SkillContract.from_extraction(
-        other,
-        {
-            "capability": "Perform an unrelated operation.",
-            "when_to_use": "Use for an unrelated operation.",
-            "requires": [],
-            "produces": [],
-            "tools": [],
-            "evidence": [{"line": 1}],
-        },
-    )
-    skills.append(other)
-    second_pair = CandidatePair(
-        skill_a="skill:consumer",
-        skill_b=other.id,
-        hits=(
-            CandidateHit(
-                channel="similarity",
-                query_skill="skill:consumer",
-                matched_skill=other.id,
-                rank=1,
-            ),
-        ),
-    )
-    second_decision = {
-        "relation": "none",
-        "source_skill": second_pair.skill_a,
-        "target_skill": second_pair.skill_b,
-        "confidence": 0.99,
-        "reason": "The skills are unrelated.",
-        "evidence": [],
-    }
+    second_decision = none_payload(pair_index=1)
     decisions = {
         "missing": [],
         "duplicate": [dependency_payload(), dependency_payload()],
@@ -630,14 +685,7 @@ def test_cached_pairs_are_removed_before_request_packing(tmp_path) -> None:
             ),
         ),
     )
-    second_payload = {
-        "relation": "none",
-        "source_skill": second_pair.skill_a,
-        "target_skill": second_pair.skill_b,
-        "confidence": 0.99,
-        "reason": "The skills are unrelated.",
-        "evidence": [],
-    }
+    second_payload = none_payload()
     second_judge = StaticRelationJudge(
         model_id="relation-test-model",
         responses={second_pair.key: second_payload},

@@ -64,16 +64,34 @@ def semantic_pair() -> CandidatePair:
 
 
 def dependency_payload(*, confidence: float = 0.91) -> dict[str, Any]:
+    return pair_local_dependency_payload(confidence=confidence)
+
+
+def pair_local_dependency_payload(*, confidence: float = 0.91) -> dict[str, Any]:
     return {
+        "pair_index": 0,
         "relation": "depend_on",
-        "source_skill": "skill:producer",
-        "target_skill": "skill:consumer",
+        "direction": "skill_b_to_skill_a",
         "confidence": confidence,
         "reason": "The producer supplies the normalized table consumed by the consumer.",
-        "evidence": [
-            {"skill": "skill:consumer", "line": 1},
-            {"skill": "skill:producer", "line": 1},
-        ],
+        "evidence": {
+            "skill_a_lines": [1],
+            "skill_b_lines": [1],
+        },
+    }
+
+
+def none_payload(*, pair_index: int = 0, confidence: float = 0.99) -> dict[str, Any]:
+    return {
+        "pair_index": pair_index,
+        "relation": "none",
+        "direction": "symmetric",
+        "confidence": confidence,
+        "reason": "The skills are unrelated.",
+        "evidence": {
+            "skill_a_lines": [],
+            "skill_b_lines": [],
+        },
     }
 
 

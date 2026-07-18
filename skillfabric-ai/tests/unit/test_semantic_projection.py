@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
 
+import skillfabric.compiled_graph.semantic.projection as projection_module
 from skillfabric.compiled_graph.models import EvidenceRef
 from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.compiled_graph.semantic.projection import (
     DependencyCycleError,
+    LiteLLMCycleAdjudicator,
     project_relation_decisions,
 )
+from skillfabric.compiled_graph.semantic.prompts import build_cycle_adjudication_messages
 from skillfabric.compiled_graph.semantic.validation import validate_candidate_pairs
+from skillfabric.runtime.llm import LLMConfig
 from tests.unit.relation_helpers import make_skill
 from tests.unit.semantic_fixtures import StaticCycleAdjudicator, StaticRelationJudge
 from tests.unit.semantic_helpers import (
@@ -104,6 +109,74 @@ def test_adjudicator_that_preserves_cycle_fails_closed() -> None:
             skills,
             cycle_adjudicator=adjudicator,
         )
+
+
+def test_llm_cycle_adjudicator_uses_pair_local_output(monkeypatch) -> None:
+    skills, decisions = _cyclic_decisions()
+    raw_decisions = [
+        {
+            "pair_index": index,
+            "relation": "none",
+            "direction": "symmetric",
+            "confidence": 0.95,
+            "reason": "The apparent dependency is not required.",
+            "evidence": {"skill_a_lines": [], "skill_b_lines": []},
+        }
+        for index in range(len(decisions))
+    ]
+    monkeypatch.setattr(
+        projection_module,
+        "litellm_completion",
+        lambda **_kwargs: {"content": json.dumps({"decisions": raw_decisions})},
+    )
+    adjudicator = LiteLLMCycleAdjudicator(
+        LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/responses/gpt-5.6-luna",
+        )
+    )
+
+    replacements = adjudicator.adjudicate(
+        tuple(decisions),
+        {skill.id: skill for skill in skills},
+    )
+
+    assert [decision.candidate.key for decision in replacements] == [
+        decision.candidate.key for decision in decisions
+    ]
+    assert all(decision.relation == "none" for decision in replacements)
+    assert all(decision.evidence == () for decision in replacements)
+
+
+def test_cycle_prompt_excludes_blank_source_lines() -> None:
+    skills, decisions = _cyclic_decisions()
+    skills[1].raw_text = "Skill B source.\n\nAdditional evidence."
+
+    user_prompt = build_cycle_adjudication_messages(
+        tuple(decisions),
+        {skill.id: skill for skill in skills},
+    )[1]["content"]
+    serialized_sources = user_prompt.split("<skill_sources>\n", 1)[1].split(
+        "\n</skill_sources>", 1
+    )[0]
+    sources = json.loads(serialized_sources)
+
+    assert sources["skill:b"] == [
+        {"line": 1, "text": "Skill B source."},
+        {"line": 3, "text": "Additional evidence."},
+    ]
+
+
+def test_cycle_prompt_limits_evidence_to_listed_source_lines() -> None:
+    skills, decisions = _cyclic_decisions()
+
+    user_prompt = build_cycle_adjudication_messages(
+        tuple(decisions),
+        {skill.id: skill for skill in skills},
+    )[1]["content"]
+
+    assert "Cite only line numbers explicitly listed" in user_prompt
 
 
 def _cyclic_decisions():

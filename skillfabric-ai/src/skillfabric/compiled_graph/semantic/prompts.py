@@ -16,14 +16,21 @@ from skillfabric.runtime.prompting import (
 RELATION_PROMPT_ID = "semantic_relation_judge"
 CYCLE_PROMPT_ID = "dependency_cycle_adjudicator"
 
-_OUTPUT_SCHEMA = {
+_JUDGE_OUTPUT_SCHEMA = {
+    "pair_index": 0,
     "relation": "depend_on|compose_with|similar_to|none",
-    "source_skill": "one of the two candidate skill ids",
-    "target_skill": "the other candidate skill id",
+    "direction": "skill_a_to_skill_b|skill_b_to_skill_a|symmetric",
     "confidence": 0.0,
     "reason": "concise evidence-grounded explanation",
-    "evidence": [{"skill": "candidate skill id", "line": 1}],
+    "evidence": {"skill_a_lines": [1], "skill_b_lines": [1]},
 }
+_JUDGE_OUTPUT_RULES = (
+    "Return every pair_index exactly once and return no unlisted pair_index.",
+    "Use skill_a_to_skill_b or skill_b_to_skill_a only for depend_on and compose_with. Use symmetric only for similar_to and none.",
+    "For a non-none relation, cite exact supporting line numbers from both pair endpoints. For none, return empty line lists.",
+    "Cite only line numbers explicitly listed in source_evidence or skill_sources; omitted and blank lines are invalid evidence.",
+    "Never return global skill ids in a decision. pair_index, direction, skill_a_lines, and skill_b_lines are the only endpoint references.",
+)
 _RELATION_TASK = (
     "Independently assign exactly one final relation to every listed candidate pair.",
     "Candidate retrieval only selects pairs for review; it is never proof of a relation.",
@@ -58,7 +65,7 @@ def build_relation_judge_messages(
     if not pairs:
         raise ValueError("relation request must contain at least one candidate pair")
     skill_ids = sorted({skill_id for pair in pairs for skill_id in pair.key})
-    output_schema = {"decisions": [_OUTPUT_SCHEMA]}
+    output_schema = {"decisions": [_JUDGE_OUTPUT_SCHEMA]}
     user = "\n".join(
         [
             "<skill_profiles>",
@@ -75,7 +82,7 @@ def build_relation_judge_messages(
             "</skill_profiles>",
             "<candidate_pairs>",
             render_untrusted_json(
-                [_candidate_pair_profile(pair) for pair in pairs],
+                [_candidate_pair_profile(pair, index) for index, pair in enumerate(pairs)],
             ),
             "</candidate_pairs>",
             "<task>",
@@ -88,9 +95,7 @@ def build_relation_judge_messages(
             json.dumps(output_schema, ensure_ascii=False, indent=2),
             "</output_schema>",
             "Return one JSON object with exactly these keys and no surrounding text.",
-            "Return each listed candidate pair exactly once and return no unlisted pair.",
-            "Preserve execution direction for depend_on and compose_with. Use canonical id order only for similar_to and none.",
-            "For a non-none relation, cite exact supporting line numbers from both skills.",
+            *_JUDGE_OUTPUT_RULES,
         ]
     )
     system = "\n".join(
@@ -115,11 +120,16 @@ def build_cycle_adjudication_messages(
     """Build a full-evidence prompt for one concrete dependency cycle."""
 
     skill_ids = sorted({skill_id for decision in decisions for skill_id in decision.candidate.key})
-    schema = {"decisions": [_OUTPUT_SCHEMA]}
+    schema = {"decisions": [_JUDGE_OUTPUT_SCHEMA]}
     user = "\n".join(
         [
             "<cycle_decisions>",
-            render_untrusted_json([decision.to_dict() for decision in decisions]),
+            render_untrusted_json(
+                [
+                    {"pair_index": index, **decision.to_dict()}
+                    for index, decision in enumerate(decisions)
+                ]
+            ),
             "</cycle_decisions>",
             "<skill_sources>",
             render_untrusted_json(
@@ -135,6 +145,7 @@ def build_cycle_adjudication_messages(
             json.dumps(schema, ensure_ascii=False, indent=2),
             "</output_schema>",
             "Return one JSON object with no reasoning or surrounding text.",
+            *_JUDGE_OUTPUT_RULES,
         ]
     )
     system = "\n".join(
@@ -198,8 +209,9 @@ def _relation_examples() -> str:
     )
 
 
-def _candidate_pair_profile(pair: CandidatePair) -> dict[str, object]:
+def _candidate_pair_profile(pair: CandidatePair, pair_index: int) -> dict[str, object]:
     return {
+        "pair_index": pair_index,
         "skill_a": pair.skill_a,
         "skill_b": pair.skill_b,
         "retrieval_hints": [
@@ -220,6 +232,7 @@ def _line_numbered_source(skill: SkillNode) -> list[dict[str, int | str]]:
     return [
         {"line": number, "text": text}
         for number, text in enumerate(skill.raw_text.splitlines(), start=1)
+        if text.strip()
     ]
 
 
@@ -278,11 +291,10 @@ def _profile_source_evidence(
     return [{"line": line, "text": source_lines[line - 1]} for line in sorted(line_numbers)]
 
 
-RELATION_PROMPT_FINGERPRINT = prompt_fingerprint(
+RELATION_POLICY_FINGERPRINT = prompt_fingerprint(
     RELATION_PROMPT_ID,
     _RELATION_SYSTEM_POLICY,
     _RELATION_TASK,
-    {"decisions": [_OUTPUT_SCHEMA]},
     _relation_semantics(),
     _decision_process(),
     _relation_examples(),
