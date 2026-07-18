@@ -99,6 +99,32 @@ result = sf.plan(task, route=route, planner_context_max_tokens=100_000)
 print(result.prompt_path)
 ```
 
+Routing uses the Claude Code explorer by default. Install the optional Codex
+dependency and inject its backend when an isolated Codex app-server is required:
+
+```python
+from skillfabric import SkillFabric
+from skillfabric.wiki.explorer.backends import CodexWikiExplorerBackend
+
+backend = CodexWikiExplorerBackend(
+    env_file=".env",
+    max_selected_skills=5,
+    model="your-codex-model",
+    reasoning_effort="medium",
+)
+route = SkillFabric(workspace=".skillfabric").route(
+    task,
+    max_selected_skills=5,
+    explorer_backend=backend,
+)
+```
+
+The Codex backend creates a fresh ephemeral thread for each attempt, exposes the
+query wiki read-only, disables network, Web, MCP, plugins, and Skills, and accepts
+results only when the observed event stream stays within the declared
+`exec_command` policy. The shared explorer owns package validation and bounded
+recovery; the backend does not add another retry loop.
+
 The context limit is checked before the Planner call. Each route and planner has
 at most two attempts by default, and token/cost summaries include only accepted
 attempts. Overflow, missing credentials, and exhausted provider or validation

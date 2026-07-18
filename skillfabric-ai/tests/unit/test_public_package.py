@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import tarfile
 import tomllib
@@ -27,6 +28,21 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.build))
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
+
+    def test_python_facade_exposes_and_forwards_explorer_backend(self) -> None:
+        from skillfabric import SkillFabric
+
+        backend = object()
+        self.assertIn("explorer_backend", inspect.signature(SkillFabric.route).parameters)
+
+        with patch("skillfabric.api.route_task", return_value=_facade_route()) as route:
+            result = SkillFabric(workspace=".skillfabric").route(
+                "extract KPIs",
+                explorer_backend=backend,
+            )
+
+        self.assertEqual(result, _facade_route())
+        self.assertIs(route.call_args.kwargs["explorer_backend"], backend)
 
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))

@@ -32,6 +32,9 @@ dependencies = [
 claude = [
   "claude-agent-sdk>=0.2.110",
 ]
+codex = [
+  "openai-codex",
+]
 dev = [
   "build>=1.2",
   "pytest>=8.0",
@@ -39,6 +42,7 @@ dev = [
 ]
 all = [
   "claude-agent-sdk>=0.2.110",
+  "openai-codex",
   "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.8",

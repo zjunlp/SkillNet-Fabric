@@ -19,6 +19,10 @@ Unit coverage includes:
 - Planner schema, dependency preservation, and prompt-package finalization.
 - CLI, Python facade, Claude Code plugin, caching, usage, and secret handling.
 
+Real coding-agent checks are opt-in. The Codex smoke test requires
+`SKILLFABRIC_REAL_CODEX_SDK=1`, `SKILLFABRIC_REAL_ENV_FILE`, and
+`SKILLFABRIC_REAL_CODEX_MODEL`; it is skipped during normal test runs.
+
 Common local checks:
 
 ```bash

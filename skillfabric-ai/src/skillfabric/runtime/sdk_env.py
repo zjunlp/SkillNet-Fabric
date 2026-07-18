@@ -1,11 +1,66 @@
-"""Environment helpers for Claude Code SDK adapters."""
+"""Environment helpers for coding-agent SDK adapters."""
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from skillfabric.runtime.llm import read_env_file
+
+DEFAULT_CODEX_API_BASE = "https://api.openai.com/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class CodexSdkEnvironment:
+    """Isolated app-server environment and its explicit OpenAI API base."""
+
+    env: dict[str, str]
+    api_base: str
+
+
+def build_codex_sdk_env(
+    env_file: str | Path,
+    *,
+    codex_home: str | Path,
+) -> CodexSdkEnvironment:
+    """Resolve experiment-only Codex credentials without personal auth fallback."""
+
+    home = Path(codex_home).expanduser().resolve()
+    if not home.is_dir():
+        raise FileNotFoundError(f"Codex home does not exist: {home}")
+    shell_env = {key: value for key, value in os.environ.items() if value}
+    env_file_values = {key: value for key, value in read_env_file(env_file).items() if value}
+    api_key = _first_env_value(
+        shell_env,
+        env_file_values,
+        "SKILLFABRIC_LLM_API_KEY",
+        "API_KEY",
+        "OPENAI_API_KEY",
+    )
+    if not api_key:
+        raise ValueError(
+            "missing API key. Set SKILLFABRIC_LLM_API_KEY, API_KEY, or OPENAI_API_KEY."
+        )
+    api_base = _first_env_value(
+        shell_env,
+        env_file_values,
+        "SKILLFABRIC_LLM_API_BASE",
+        "BASE_URL",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+    ) or DEFAULT_CODEX_API_BASE
+    return CodexSdkEnvironment(
+        env={
+            "OPENAI_API_KEY": api_key,
+            "CODEX_API_KEY": "",
+            "CODEX_ACCESS_TOKEN": "",
+            "CODEX_HOME": str(home),
+            "CODEX_SQLITE_HOME": str(home),
+            "HOME": str(home),
+        },
+        api_base=api_base.rstrip("/"),
+    )
 
 
 def build_claude_code_sdk_env(

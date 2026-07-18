@@ -11,6 +11,7 @@ from skillfabric.router.models import RouteResult
 from skillfabric.router.traces import _create_trace_dir, _new_trace_id
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
+from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
 from skillfabric.wiki.explorer.validation import route_from_skill_package
 from skillfabric.wiki.query_wiki import materialize_query_wiki
 
@@ -20,9 +21,12 @@ def route_task(
     *,
     sdk_runtime: RouterSdkRuntime | None = None,
     embedding_provider: EmbeddingProvider | None = None,
+    explorer_backend: WikiExplorerBackend | None = None,
 ) -> RouteResult:
     """Route one task through retrieval, semantic expansion, and strict exploration."""
 
+    if sdk_runtime is not None and explorer_backend is not None:
+        raise TypeError("sdk_runtime and explorer_backend cannot be used together")
     if not isinstance(config.query, str) or not config.query.strip():
         raise ValueError("route query must be a non-empty string")
     workspace = Workspace(config.workspace)
@@ -60,6 +64,7 @@ def route_task(
         query_wiki_root=query_wiki.root,
         trace_dir=trace_dir,
         sdk_runtime=sdk_runtime,
+        backend=explorer_backend,
     )
     validation = explorer_run.validation
     if not validation.valid:

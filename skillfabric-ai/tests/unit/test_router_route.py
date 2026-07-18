@@ -10,6 +10,7 @@ import skillfabric.router.traces as trace_module
 from skillfabric.router.config import RouterConfig
 from skillfabric.router.routing import route_task
 from skillfabric.router.traces import _new_trace_id
+from skillfabric.wiki.explorer.skill_package import SkillPackage
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 from tests.unit.wiki_helpers import build_fixture_workspace
 
@@ -181,6 +182,50 @@ def test_route_retries_invalid_skill_package_on_the_same_query_wiki(tmp_path) ->
         "skill:pdf-table-parser",
         "skill:financial-kpi-extractor",
     ]
+
+
+def test_route_uses_an_explicit_explorer_backend(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def explore(self, **kwargs: object) -> SkillPackage:
+            self.calls.append(kwargs)
+            return SkillPackage.from_dict(_package())
+
+    backend = Backend()
+    result = route_task(
+        RouterConfig(
+            workspace=workspace,
+            query="extract KPIs",
+            trace_id="explicit-explorer-backend",
+        ),
+        explorer_backend=backend,
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+
+    assert result.selected_skill_ids == [
+        "skill:pdf-table-parser",
+        "skill:financial-kpi-extractor",
+    ]
+    assert len(backend.calls) == 1
+    assert backend.calls[0]["query"] == "extract KPIs"
+    assert backend.calls[0]["query_wiki_root"] == (
+        workspace / "runs" / "explicit-explorer-backend" / "query_wiki"
+    )
+
+
+def test_route_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None:
+    with pytest.raises(TypeError, match=r"sdk_runtime.*explorer_backend"):
+        route_task(
+            RouterConfig(workspace=tmp_path, query="extract KPIs"),
+            sdk_runtime=object(),
+            explorer_backend=object(),
+            embedding_provider=FakeEmbeddingProvider(),
+        )
 
 
 def test_graph_dependency_does_not_expand_explorer_selection(tmp_path) -> None:

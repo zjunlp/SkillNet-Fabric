@@ -68,14 +68,20 @@ def explore_query_wiki(
 ) -> WikiExplorerRun:
     """Retry exploration until the selected package passes validation."""
 
-    resolved_backend = backend or ClaudeCodeWikiExplorerBackend(
-        env_file=config.env_file,
-        max_selected_skills=config.max_selected_skills,
-        model=config.model,
-        sdk_runtime=sdk_runtime,
-        max_turns=config.max_turns,
-        load_timeout_ms=config.load_timeout_ms,
-        execution_timeout_seconds=config.execution_timeout_seconds,
+    if sdk_runtime is not None and backend is not None:
+        raise TypeError("sdk_runtime and backend cannot be used together")
+    resolved_backend = (
+        backend
+        if backend is not None
+        else ClaudeCodeWikiExplorerBackend(
+            env_file=config.env_file,
+            max_selected_skills=config.max_selected_skills,
+            model=config.model,
+            sdk_runtime=sdk_runtime,
+            max_turns=config.max_turns,
+            load_timeout_ms=config.load_timeout_ms,
+            execution_timeout_seconds=config.execution_timeout_seconds,
+        )
     )
     if not query_wiki_root.is_dir():
         raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")

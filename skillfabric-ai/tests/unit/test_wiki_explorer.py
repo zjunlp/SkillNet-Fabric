@@ -4,12 +4,13 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
-from skillfabric.wiki.explorer.skill_package import skill_package_json_schema
+from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
 
 def _empty_package() -> dict[str, Any]:
@@ -286,6 +287,75 @@ def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path,
     assert package.package.coverage_gaps
     assert runtime.calls == 2
     assert "explorer_retry attempt=1/2" in caplog.text
+
+
+def test_injected_backend_failure_uses_the_existing_outer_recovery(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("transient Codex SDK failure")
+            return SkillPackage.from_dict(_empty_package())
+
+    backend = Backend()
+    run = explore_query_wiki(
+        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
+        query="find a skill",
+        query_wiki_root=root,
+        trace_dir=tmp_path / "trace",
+        backend=backend,
+    )
+
+    assert backend.calls == 2
+    assert run.package.to_dict() == _empty_package()
+
+
+def test_explorer_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            return SkillPackage.from_dict(_empty_package())
+
+    with pytest.raises(TypeError, match=r"sdk_runtime.*backend"):
+        explore_query_wiki(
+            WikiExplorerConfig(),
+            query="find a skill",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            sdk_runtime=object(),
+            backend=Backend(),
+        )
+
+
+def test_explorer_uses_an_explicit_falsey_backend(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def __bool__(self) -> bool:
+            return False
+
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            return SkillPackage.from_dict(_empty_package())
+
+    with patch(
+        "skillfabric.wiki.explorer.agent.ClaudeCodeWikiExplorerBackend",
+        side_effect=AssertionError("explicit backend was ignored"),
+    ):
+        run = explore_query_wiki(
+            WikiExplorerConfig(),
+            query="find a skill",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            backend=Backend(),
+        )
+
+    assert run.package.to_dict() == _empty_package()
 
 
 def test_non_retryable_failure_propagates_and_is_redacted_in_trace(tmp_path) -> None:

@@ -34,6 +34,7 @@ from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import llm_usage_context
 from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.storage import Workspace
+from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 
@@ -113,7 +114,13 @@ class SkillFabric:
             merge_wiki_metrics(self.workspace, wiki_result)
         return result
 
-    def route(self, query: str, **overrides: Any) -> RouteResult:
+    def route(
+        self,
+        query: str,
+        *,
+        explorer_backend: WikiExplorerBackend | None = None,
+        **overrides: Any,
+    ) -> RouteResult:
         defaults = default_router_options()
         sdk_runtime = overrides.pop("sdk_runtime", None)
         embedding_provider = overrides.pop("embedding_provider", None)
@@ -157,6 +164,7 @@ class SkillFabric:
             config,
             sdk_runtime=sdk_runtime,
             embedding_provider=embedding_provider,
+            explorer_backend=explorer_backend,
         )
 
     def plan(
