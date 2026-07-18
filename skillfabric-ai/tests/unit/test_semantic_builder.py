@@ -12,6 +12,7 @@ from skillfabric.compiled_graph.builder import (
     build_graph,
 )
 from skillfabric.compiled_graph.semantic.candidates import CandidateRetrievalError
+from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.usage import LLMUsageTracker
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 from tests.unit.semantic_fixtures import (
@@ -82,6 +83,10 @@ def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> Non
             workspace=workspace,
             llm_model=provider_model,
             llm_reasoning_effort="medium",
+            llm_options=LLMJobOptions(
+                checkpoint_interval=25,
+                circuit_breaker_threshold=7,
+            ),
         ),
         dependencies=_BuildDependencies(
             contract_extractor=FixtureContractExtractor(model_id=provider_model),
@@ -98,6 +103,10 @@ def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> Non
         "model": "gpt-5.6-luna",
         "provider_model": provider_model,
         "reasoning_effort": "medium",
+    }
+    assert summary["llm_reliability"] == {
+        "checkpoint_interval": 25,
+        "circuit_breaker_threshold": 7,
     }
     assert {
         key: summary["embedding"][key]

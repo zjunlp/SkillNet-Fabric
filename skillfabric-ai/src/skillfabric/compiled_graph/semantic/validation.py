@@ -21,10 +21,13 @@ from skillfabric.compiled_graph.semantic.prompts import (
     build_relation_judge_messages,
 )
 from skillfabric.registry.models import SkillNode
-from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, LLMJobOutcome, run_llm_jobs
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion
-from skillfabric.storage import atomic_write_text
+from skillfabric.storage.checkpoint_cache import (
+    CheckpointCacheError,
+    JsonObjectCheckpointCache,
+)
 
 _DECISION_KEYS = frozenset(
     {"relation", "source_skill", "target_skill", "confidence", "reason", "evidence"}
@@ -105,7 +108,15 @@ def validate_candidate_pairs(
     ordered_pairs = list(pairs)
     if len({pair.key for pair in ordered_pairs}) != len(ordered_pairs):
         raise RelationValidationError("each unordered candidate pair may be judged only once")
-    cache = _load_cache(cache_path)
+    options = (job_options or LLMJobOptions()).normalized()
+    checkpoint_cache = JsonObjectCheckpointCache(
+        cache_path,
+        interval=options.checkpoint_interval,
+    )
+    try:
+        cache = checkpoint_cache.load()
+    except CheckpointCacheError as exc:
+        raise RelationValidationError(f"invalid relation cache: {exc}") from exc
     records: list[RelationDecision | None] = [None] * len(ordered_pairs)
     pending: list[_PendingDecision] = []
     for index, pair in enumerate(ordered_pairs):
@@ -136,11 +147,9 @@ def validate_candidate_pairs(
         decisions = _decisions_from_response(request_pairs, raw, skills_by_id)
         return list(zip(request, decisions, strict=True))
 
-    outcomes = run_llm_jobs(requests, judge_one, options=job_options, label="relation")
-    additions: dict[str, dict[str, Any]] = {}
-    for outcome in outcomes:
-        if not outcome.ok:
-            continue
+    def accept(
+        outcome: LLMJobOutcome[list[tuple[_PendingDecision, RelationDecision]]],
+    ) -> None:
         request_decisions = outcome.value
         if not isinstance(request_decisions, list):
             raise RelationValidationError("relation validation returned an invalid internal result")
@@ -150,10 +159,25 @@ def validate_candidate_pairs(
                     "relation validation returned an invalid internal result"
                 )
             records[pending_item.index] = decision
-            additions[pending_item.cache_key] = decision.judge_dict()
-    if additions:
-        cache.update(additions)
-        _write_cache(cache_path, cache)
+            checkpoint_cache.record(pending_item.cache_key, decision.judge_dict())
+
+    try:
+        outcomes = run_llm_jobs(
+            requests,
+            judge_one,
+            options=options,
+            label="relation",
+            on_success=accept,
+        )
+    except Exception as exc:
+        _flush_checkpoint(checkpoint_cache)
+        if isinstance(exc, RelationValidationError):
+            raise
+        raise RelationValidationError(f"relation validation aborted: {exc}") from exc
+    except BaseException:
+        _flush_checkpoint(checkpoint_cache)
+        raise
+    _flush_checkpoint(checkpoint_cache)
     failures = [outcome for outcome in outcomes if not outcome.ok]
     if failures:
         first = failures[0]
@@ -162,6 +186,10 @@ def validate_candidate_pairs(
         raise RelationValidationError(
             f"relation validation failed for {pair_keys}: {error}"
         ) from error
+    try:
+        checkpoint_cache.compact()
+    except CheckpointCacheError as exc:
+        raise RelationValidationError(f"failed to compact relation cache: {exc}") from exc
     return [record for record in records if record is not None]
 
 
@@ -303,24 +331,8 @@ def _cache_key(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _load_cache(path: str | Path | None) -> dict[str, dict[str, Any]]:
-    if path is None or not Path(path).exists():
-        return {}
+def _flush_checkpoint(cache: JsonObjectCheckpointCache) -> None:
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RelationValidationError(f"failed to read relation cache: {exc}") from exc
-    if not isinstance(payload, dict) or any(
-        not isinstance(value, dict) for value in payload.values()
-    ):
-        raise RelationValidationError("relation cache must map keys to decision objects")
-    return {str(key): value for key, value in payload.items()}
-
-
-def _write_cache(path: str | Path | None, cache: dict[str, dict[str, Any]]) -> None:
-    if path is None:
-        return
-    atomic_write_text(
-        Path(path),
-        json.dumps(cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-    )
+        cache.flush()
+    except CheckpointCacheError as exc:
+        raise RelationValidationError(f"failed to checkpoint relation cache: {exc}") from exc

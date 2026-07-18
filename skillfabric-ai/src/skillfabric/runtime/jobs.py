@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 import os
+import queue
 import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from skillfabric.runtime.llm import LLMRequestError, llm_usage_transaction, read
 
 T = TypeVar("T")
 R = TypeVar("R")
+_PERMANENT_HTTP_STATUS_CODES = frozenset({401, 403, 404})
 
 
 @dataclass(slots=True)
@@ -30,6 +32,8 @@ class LLMJobOptions:
     retry_backoff_seconds: float = 1.0
     progress_every: int = 10
     batch_size: int | None = None
+    checkpoint_interval: int = 100
+    circuit_breaker_threshold: int = 10
 
     @classmethod
     def from_env(
@@ -42,6 +46,8 @@ class LLMJobOptions:
         retry_backoff_seconds: float | None = None,
         progress_every: int | None = None,
         batch_size: int | None = None,
+        checkpoint_interval: int | None = None,
+        circuit_breaker_threshold: int | None = None,
     ) -> LLMJobOptions:
         values = read_env_file(env_path)
         options = cls(
@@ -64,6 +70,18 @@ class LLMJobOptions:
                 values,
                 "SKILLFABRIC_LLM_BATCH_SIZE",
                 batch_size,
+            ),
+            checkpoint_interval=_int_value(
+                values,
+                "SKILLFABRIC_LLM_CHECKPOINT_INTERVAL",
+                checkpoint_interval,
+                100,
+            ),
+            circuit_breaker_threshold=_int_value(
+                values,
+                "SKILLFABRIC_LLM_CIRCUIT_BREAKER_THRESHOLD",
+                circuit_breaker_threshold,
+                10,
             ),
         )
         return options.normalized()
@@ -93,6 +111,16 @@ class LLMJobOptions:
         )
         if batch_size < concurrency:
             raise ValueError("batch_size must be at least concurrency")
+        checkpoint_interval = _require_int(
+            self.checkpoint_interval,
+            name="checkpoint_interval",
+            minimum=1,
+        )
+        circuit_breaker_threshold = _require_int(
+            self.circuit_breaker_threshold,
+            name="circuit_breaker_threshold",
+            minimum=1,
+        )
         return LLMJobOptions(
             concurrency=concurrency,
             rate_limit_per_minute=rate_limit,
@@ -100,6 +128,8 @@ class LLMJobOptions:
             retry_backoff_seconds=retry_backoff,
             progress_every=progress_every,
             batch_size=batch_size,
+            checkpoint_interval=checkpoint_interval,
+            circuit_breaker_threshold=circuit_breaker_threshold,
         )
 
 
@@ -113,6 +143,25 @@ class LLMJobOutcome(Generic[R]):
     value: R | None = None
     error: BaseException | None = None
     attempts: int = 0
+
+
+class LLMJobBatchAbortedError(RuntimeError):
+    """Raised after a provider-wide failure stops an LLM job batch."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        label: str,
+        reason: str,
+        error: BaseException,
+        consecutive_failures: int,
+    ) -> None:
+        super().__init__(message)
+        self.label = label
+        self.reason = reason
+        self.error = error
+        self.consecutive_failures = consecutive_failures
 
 
 class _RateLimiter:
@@ -165,15 +214,22 @@ def run_llm_jobs(
                     index=index, item=item, ok=True, value=value, attempts=attempts
                 )
             except Exception as exc:  # noqa: BLE001 - caller normalizes final failures.
-                if isinstance(exc, LLMRequestError) or attempts > job_options.max_retries:
+                should_retry = attempts <= job_options.max_retries and (
+                    not isinstance(exc, LLMRequestError) or exc.retryable
+                )
+                if not should_retry:
                     return LLMJobOutcome(
                         index=index, item=item, ok=False, error=exc, attempts=attempts
                     )
                 _sleep_before_retry(job_options.retry_backoff_seconds, attempts)
 
+    aborted: LLMJobBatchAbortedError | None = None
+    consecutive_error_key: tuple[str, int | str] | None = None
+    consecutive_failures = 0
     with ThreadPoolExecutor(max_workers=job_options.concurrency) as executor:
         next_index = 0
         futures: dict[Future[LLMJobOutcome[R]], int] = {}
+        completed_futures: queue.SimpleQueue[Future[LLMJobOutcome[R]]] = queue.SimpleQueue()
         max_queued = min(job_options.batch_size or total, total)
 
         def submit_next() -> None:
@@ -183,24 +239,91 @@ def run_llm_jobs(
             index = next_index
             next_index += 1
             context = copy_context()
-            futures[executor.submit(context.run, run_one, index, job_items[index])] = index
+            future = executor.submit(context.run, run_one, index, job_items[index])
+            futures[future] = index
+            future.add_done_callback(completed_futures.put)
 
         for _ in range(max_queued):
             submit_next()
 
         while futures:
-            done, _pending = wait(futures, return_when=FIRST_COMPLETED)
-            for future in done:
-                futures.pop(future, None)
-                outcome = future.result()
-                outcomes[outcome.index] = outcome
-                if outcome.ok and on_success is not None:
-                    on_success(outcome)
-                completed += 1
-                _log_progress(label, completed, total, job_options.progress_every)
+            future = completed_futures.get()
+            futures.pop(future, None)
+            if future.cancelled():
+                continue
+            outcome = future.result()
+            outcomes[outcome.index] = outcome
+            if outcome.ok and on_success is not None:
+                on_success(outcome)
+            if outcome.ok:
+                consecutive_error_key = None
+                consecutive_failures = 0
+            elif aborted is None:
+                error = outcome.error or RuntimeError("unknown LLM job failure")
+                status_code = getattr(error, "status_code", None)
+                if status_code in _PERMANENT_HTTP_STATUS_CODES:
+                    aborted = LLMJobBatchAbortedError(
+                        f"{label} LLM job batch aborted after permanent provider "
+                        f"error {status_code} ({_error_type(error)})",
+                        label=label,
+                        reason="permanent_provider_error",
+                        error=error,
+                        consecutive_failures=1,
+                    )
+                else:
+                    error_key = _transient_error_key(error)
+                    if error_key is None:
+                        consecutive_error_key = None
+                        consecutive_failures = 0
+                    elif error_key == consecutive_error_key:
+                        consecutive_failures += 1
+                    else:
+                        consecutive_error_key = error_key
+                        consecutive_failures = 1
+                    if consecutive_failures >= job_options.circuit_breaker_threshold:
+                        aborted = LLMJobBatchAbortedError(
+                            f"{label} LLM job circuit breaker opened after "
+                            f"{consecutive_failures} consecutive {_error_type(error)} "
+                            f"errors{_status_suffix(status_code)}",
+                            label=label,
+                            reason="circuit_breaker_open",
+                            error=error,
+                            consecutive_failures=consecutive_failures,
+                        )
+            completed += 1
+            _log_progress(label, completed, total, job_options.progress_every)
+
+            if aborted is not None:
+                for pending in futures:
+                    pending.cancel()
+            else:
                 submit_next()
 
+    if aborted is not None:
+        raise aborted from aborted.error
     return [outcome for outcome in outcomes if outcome is not None]
+
+
+def _transient_error_key(error: BaseException) -> tuple[str, int | str] | None:
+    if isinstance(error, LLMRequestError) and error.retryable:
+        if error.status_code is not None:
+            return ("status_code", error.status_code)
+        return ("error_type", error.error_type)
+    if isinstance(error, TimeoutError):
+        return ("error_type", type(error).__name__)
+    return None
+
+
+def _error_type(error: BaseException) -> str:
+    if isinstance(error, LLMRequestError):
+        return error.error_type
+    return type(error).__name__
+
+
+def _status_suffix(status_code: object) -> str:
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        return f" (HTTP {status_code})"
+    return ""
 
 
 def _sleep_before_retry(base_delay: float, attempts: int) -> None:

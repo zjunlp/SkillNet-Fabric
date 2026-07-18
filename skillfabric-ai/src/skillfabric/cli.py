@@ -173,6 +173,8 @@ def _add_llm_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--llm-retry-backoff-seconds", type=float)
     parser.add_argument("--llm-progress-every", type=int)
     parser.add_argument("--llm-batch-size", type=int)
+    parser.add_argument("--llm-checkpoint-interval", type=int)
+    parser.add_argument("--llm-circuit-breaker-threshold", type=int)
 
 
 def _add_progress_options(parser: argparse.ArgumentParser) -> None:
@@ -636,6 +638,8 @@ def _llm_options(args: argparse.Namespace) -> LLMJobOptions:
         retry_backoff_seconds=args.llm_retry_backoff_seconds,
         progress_every=args.llm_progress_every,
         batch_size=args.llm_batch_size,
+        checkpoint_interval=args.llm_checkpoint_interval,
+        circuit_breaker_threshold=args.llm_circuit_breaker_threshold,
     )
 
 

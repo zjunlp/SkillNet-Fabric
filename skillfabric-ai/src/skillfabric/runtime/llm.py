@@ -30,6 +30,7 @@ DEFAULT_REASONING_EFFORT = "medium"
 DEFAULT_MAX_TOKENS = 32768
 DEFAULT_TIMEOUT = 120
 DEFAULT_NETWORK_RETRIES = 2
+TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 502, 503, 504})
 LOGGER = logging.getLogger(__name__)
 
 
@@ -63,6 +64,19 @@ class LLMUsageTransaction:
 
 class LLMRequestError(RuntimeError):
     """Raised after LiteLLM exhausts its request-level retry policy."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_type: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_type = error_type or type(self).__name__
+        self.retryable = retryable
 
 
 def _current_usage_context() -> LLMUsageContext:
@@ -271,7 +285,13 @@ def litellm_completion(
             metadata=metadata,
             usage_log_path=usage_log_path,
         )
-        raise LLMRequestError(f"{type(exc).__name__}: {exc}") from exc
+        status_code = _exception_status_code(exc)
+        raise LLMRequestError(
+            f"{type(exc).__name__}: {exc}",
+            status_code=status_code,
+            error_type=type(exc).__name__,
+            retryable=(status_code in TRANSIENT_HTTP_STATUS_CODES or _is_timeout_exception(exc)),
+        ) from exc
     _record_usage(
         model=resolved_model,
         messages=provider_messages,
@@ -292,6 +312,34 @@ def _direct_litellm_completion(call_kwargs: dict[str, Any], timeout: float) -> A
     litellm.suppress_debug_info = True
     litellm.request_timeout = timeout
     return litellm.completion(**call_kwargs)
+
+
+def _exception_status_code(exc: BaseException) -> int | None:
+    for candidate in _exception_chain(exc):
+        for value in (
+            getattr(candidate, "status_code", None),
+            getattr(candidate, "http_status", None),
+            getattr(getattr(candidate, "response", None), "status_code", None),
+        ):
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+    return None
+
+
+def _is_timeout_exception(exc: BaseException) -> bool:
+    return any(
+        isinstance(candidate, TimeoutError) or "timeout" in type(candidate).__name__.lower()
+        for candidate in _exception_chain(exc)
+    )
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
 
 
 def _should_use_process_timeout(timeout: float) -> bool:

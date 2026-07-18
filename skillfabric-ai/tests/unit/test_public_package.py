@@ -274,11 +274,15 @@ class PublicPackageTests(unittest.TestCase):
                 embedding_provider=FakeEmbeddingProvider(),
                 llm_model="openai/responses/gpt-5.6-luna",
                 llm_reasoning_effort="medium",
+                llm_checkpoint_interval=25,
+                llm_circuit_breaker_threshold=7,
             )
 
         config = build_mock.call_args.args[0]
         self.assertEqual(config.llm_model, "openai/responses/gpt-5.6-luna")
         self.assertEqual(config.llm_reasoning_effort, "medium")
+        self.assertEqual(config.llm_options.checkpoint_interval, 25)
+        self.assertEqual(config.llm_options.circuit_breaker_threshold, 7)
 
     def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric
@@ -286,6 +290,11 @@ class PublicPackageTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
             build_fixture_workspace(workspace)
+            env_file = Path(tmp) / ".env.test"
+            env_file.write_text(
+                "API_KEY=test-key\nBASE_URL=https://example.test/v1\n",
+                encoding="utf-8",
+            )
             client = SkillFabric(workspace=workspace)
             with patch(
                 "skillfabric.orchestrator.package.litellm_completion",
@@ -300,6 +309,7 @@ class PublicPackageTests(unittest.TestCase):
                 result = client.plan(
                     "extract financial KPIs from a PDF report",
                     route=_facade_route(),
+                    env_file=env_file,
                 )
 
             planner.assert_called_once()

@@ -128,9 +128,7 @@ def build_graph(
             contract_extractor = deps.contract_extractor or LiteLLMContractExtractor(
                 config=build_llm_config()
             )
-            relation_judge = deps.relation_judge or LiteLLMRelationJudge(
-                config=build_llm_config()
-            )
+            relation_judge = deps.relation_judge or LiteLLMRelationJudge(config=build_llm_config())
             embedding_provider = deps.embedding_provider or default_embedding_provider(
                 env_path=config.llm_env_path
             )
@@ -138,7 +136,9 @@ def build_graph(
                 deps,
                 relation_judge,
             )
-            job_options = config.llm_options or LLMJobOptions.from_env(env_path=config.llm_env_path)
+            job_options = (
+                config.llm_options or LLMJobOptions.from_env(env_path=config.llm_env_path)
+            ).normalized()
             _write_running_status(workspace, build_id, stage="scan")
 
             stage = "scan"
@@ -228,6 +228,7 @@ def build_graph(
                 "contract_model_id": contract_extractor.model_id,
                 "relation_model_id": relation_judge.model_id,
                 "builder": _builder_protocol(config, contract_extractor),
+                "llm_reliability": _llm_reliability_protocol(job_options),
                 "embedding": _embedding_protocol(embedding_provider, retrieval.metrics),
                 "stage_wall_time_seconds": timer.timings,
                 "build_wall_time_seconds": timer.total(),
@@ -412,4 +413,11 @@ def _embedding_protocol(
         "concurrency": getattr(provider, "concurrency", None),
         "timeout_seconds": getattr(provider, "timeout", None),
         "max_retries": getattr(provider, "max_retries", None),
+    }
+
+
+def _llm_reliability_protocol(options: LLMJobOptions) -> dict[str, int]:
+    return {
+        "checkpoint_interval": options.checkpoint_interval,
+        "circuit_breaker_threshold": options.circuit_breaker_threshold,
     }

@@ -74,6 +74,10 @@ class SkillFabric:
             retry_backoff_seconds=_optional_float(overrides.pop("llm_retry_backoff_seconds", None)),
             progress_every=_optional_int(overrides.pop("llm_progress_every", None)),
             batch_size=_optional_int(overrides.pop("llm_batch_size", None)),
+            checkpoint_interval=_optional_int(overrides.pop("llm_checkpoint_interval", None)),
+            circuit_breaker_threshold=_optional_int(
+                overrides.pop("llm_circuit_breaker_threshold", None)
+            ),
         )
         llm_model = _optional_string(overrides.pop("llm_model", None), name="llm_model")
         llm_reasoning_effort = _optional_string(
@@ -195,9 +199,7 @@ class SkillFabric:
         if resolved_root is not None:
             resolved_root = self._runs_path(resolved_root, label="package_root")
         resolved_usage_log = (
-            None
-            if usage_log_path is None
-            else Path(usage_log_path).expanduser().resolve()
+            None if usage_log_path is None else Path(usage_log_path).expanduser().resolve()
         )
         return plan_execution_package(
             self.workspace,

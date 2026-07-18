@@ -118,7 +118,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_quality_v2"
     messages = calls[0]["messages"]
     prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
     assert "skill:pdf-table-parser" in prompt
@@ -129,6 +129,16 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "source before target" in prompt
     assert "producer-to-consumer handoff" in prompt
     assert "complete, task-specific execution plan" in prompt
+    assert "deliverable checklist" in prompt
+    assert "target path" in prompt
+    assert "acceptance criteria" in prompt
+    assert "verification action" in prompt
+    assert "recompute or cross-check" in prompt
+    assert "open or render" in prompt
+    assert "inspect" in prompt
+    assert "revise" in prompt
+    assert "Do not ask the user for credentials and then claim success" in prompt
+    assert "account for every selected skill" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
     execution_prompt = result.prompt_path.read_text()

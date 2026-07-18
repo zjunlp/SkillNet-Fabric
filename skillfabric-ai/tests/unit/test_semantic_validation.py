@@ -331,32 +331,78 @@ def test_successful_decisions_are_cached_when_another_request_fails(tmp_path) ->
         ),
     )
     cache = tmp_path / "relation_decisions.json"
+    checkpoint_dir = tmp_path / "relation_decisions.checkpoints"
+    failed_payload = {
+        "relation": "none",
+        "source_skill": failed_pair.skill_a,
+        "target_skill": failed_pair.skill_b,
+        "confidence": 0.99,
+        "reason": "The skills are unrelated.",
+        "evidence": [],
+    }
 
     class PartiallyFailingJudge:
         model_id = "relation-test-model"
 
+        def __init__(self) -> None:
+            self.fail = True
+            self.checkpoint_seen = False
+            self.calls: list[tuple[str, str]] = []
+
         def judge(self, pairs, _skills, _contracts):
             pair = pairs[0]
+            self.calls.append(pair.key)
             if pair.key == semantic_pair().key:
                 return {"decisions": [dependency_payload()]}
-            raise RuntimeError("transient provider failure")
+            checkpoints = sorted(checkpoint_dir.glob("*.json"))
+            self.checkpoint_seen = bool(checkpoints)
+            if self.fail:
+                raise RuntimeError("transient provider failure")
+            return {"decisions": [failed_payload]}
+
+    judge = PartiallyFailingJudge()
 
     with pytest.raises(RelationValidationError, match="transient provider failure"):
         validate_candidate_pairs(
             [semantic_pair(), failed_pair],
             skills,
             contracts,
-            judge=PartiallyFailingJudge(),
+            judge=judge,
             cache_path=cache,
             job_options=LLMJobOptions(
                 concurrency=1,
                 max_retries=0,
                 progress_every=0,
+                batch_size=1,
+                checkpoint_interval=1,
             ),
         )
 
-    assert cache.is_file()
-    assert len(json.loads(cache.read_text(encoding="utf-8"))) == 1
+    assert judge.checkpoint_seen is True
+    assert not cache.exists()
+    assert len(list(checkpoint_dir.glob("*.json"))) == 1
+
+    judge.fail = False
+    judge.calls.clear()
+    decisions = validate_candidate_pairs(
+        [semantic_pair(), failed_pair],
+        skills,
+        contracts,
+        judge=judge,
+        cache_path=cache,
+        job_options=LLMJobOptions(
+            concurrency=1,
+            max_retries=0,
+            progress_every=0,
+            batch_size=1,
+            checkpoint_interval=1,
+        ),
+    )
+
+    assert judge.calls == [failed_pair.key]
+    assert [decision.cache_hit for decision in decisions] == [True, False]
+    assert len(json.loads(cache.read_text(encoding="utf-8"))) == 2
+    assert not checkpoint_dir.exists()
 
 
 def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema() -> None:

@@ -172,6 +172,10 @@ def test_build_cli_forwards_build_only_llm_overrides(tmp_path) -> None:
                 "openai/responses/gpt-5.6-luna",
                 "--llm-reasoning-effort",
                 "medium",
+                "--llm-checkpoint-interval",
+                "25",
+                "--llm-circuit-breaker-threshold",
+                "7",
                 "--skip-wiki",
             ]
         )
@@ -179,3 +183,5 @@ def test_build_cli_forwards_build_only_llm_overrides(tmp_path) -> None:
     config = build_mock.call_args.args[0]
     assert config.llm_model == "openai/responses/gpt-5.6-luna"
     assert config.llm_reasoning_effort == "medium"
+    assert config.llm_options.checkpoint_interval == 25
+    assert config.llm_options.circuit_breaker_threshold == 7

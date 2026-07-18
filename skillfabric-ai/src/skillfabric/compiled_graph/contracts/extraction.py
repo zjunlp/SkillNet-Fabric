@@ -15,10 +15,13 @@ from skillfabric.compiled_graph.contracts.prompts import (
     build_contract_extraction_messages,
 )
 from skillfabric.registry.models import SkillNode
-from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions, LLMJobOutcome, run_llm_jobs
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion
-from skillfabric.storage import atomic_write_text
+from skillfabric.storage.checkpoint_cache import (
+    CheckpointCacheError,
+    JsonObjectCheckpointCache,
+)
 
 
 class ContractExtractionError(RuntimeError):
@@ -75,7 +78,15 @@ def extract_skill_contracts(
 ) -> list[ContractExtractionRecord]:
     """Extract all contracts, failing the batch if any result is invalid."""
 
-    cache = _load_cache(cache_path)
+    options = (job_options or LLMJobOptions()).normalized()
+    checkpoint_cache = JsonObjectCheckpointCache(
+        cache_path,
+        interval=options.checkpoint_interval,
+    )
+    try:
+        cache = checkpoint_cache.load()
+    except CheckpointCacheError as exc:
+        raise ContractExtractionError(f"invalid contract cache: {exc}") from exc
     records: list[ContractExtractionRecord | None] = [None] * len(skills)
     pending: list[tuple[int, SkillNode, str]] = []
     for index, skill in enumerate(skills):
@@ -101,26 +112,31 @@ def extract_skill_contracts(
             raise ContractSchemaError("contract extractor output must be an object")
         return SkillContract.from_extraction(skill, raw)
 
-    outcomes = run_llm_jobs(
-        pending,
-        extract_one,
-        options=job_options,
-        label="contract",
-    )
-    additions: dict[str, dict[str, Any]] = {}
-    for outcome in outcomes:
-        if not outcome.ok:
-            continue
+    def accept(outcome: LLMJobOutcome[SkillContract]) -> None:
         index, _skill, key = outcome.item
         contract = outcome.value
         if not isinstance(contract, SkillContract):
             raise ContractExtractionError("contract extraction returned an invalid internal result")
         records[index] = ContractExtractionRecord(contract=contract)
-        additions[key] = contract.to_dict()
+        checkpoint_cache.record(key, contract.to_dict())
 
-    if additions:
-        cache.update(additions)
-        _write_cache(cache_path, cache)
+    try:
+        outcomes = run_llm_jobs(
+            pending,
+            extract_one,
+            options=options,
+            label="contract",
+            on_success=accept,
+        )
+    except Exception as exc:
+        _flush_checkpoint(checkpoint_cache)
+        if isinstance(exc, ContractExtractionError):
+            raise
+        raise ContractExtractionError(f"contract extraction aborted: {exc}") from exc
+    except BaseException:
+        _flush_checkpoint(checkpoint_cache)
+        raise
+    _flush_checkpoint(checkpoint_cache)
     failures = [outcome for outcome in outcomes if not outcome.ok]
     if failures:
         first = failures[0]
@@ -129,6 +145,10 @@ def extract_skill_contracts(
         raise ContractExtractionError(
             f"contract extraction failed for {skill.id}: {error}"
         ) from error
+    try:
+        checkpoint_cache.compact()
+    except CheckpointCacheError as exc:
+        raise ContractExtractionError(f"failed to compact contract cache: {exc}") from exc
     return [record for record in records if record is not None]
 
 
@@ -154,27 +174,8 @@ def _validate_cached_identity(
         raise ContractSchemaError("cached content_hash does not match the source skill")
 
 
-def _load_cache(path: str | Path | None) -> dict[str, dict[str, Any]]:
-    if path is None:
-        return {}
-    target = Path(path)
-    if not target.exists():
-        return {}
+def _flush_checkpoint(cache: JsonObjectCheckpointCache) -> None:
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ContractExtractionError(f"failed to read contract cache: {exc}") from exc
-    if not isinstance(payload, dict) or any(
-        not isinstance(value, dict) for value in payload.values()
-    ):
-        raise ContractExtractionError("contract cache must map keys to contract objects")
-    return {str(key): value for key, value in payload.items()}
-
-
-def _write_cache(path: str | Path | None, cache: dict[str, dict[str, Any]]) -> None:
-    if path is None:
-        return
-    atomic_write_text(
-        Path(path),
-        json.dumps(cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-    )
+        cache.flush()
+    except CheckpointCacheError as exc:
+        raise ContractExtractionError(f"failed to checkpoint contract cache: {exc}") from exc

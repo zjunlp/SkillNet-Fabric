@@ -653,6 +653,42 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], LLMRequestError)
         self.assertIsInstance(errors[0].__cause__, TimeoutError)
+        self.assertIsNone(getattr(errors[0], "status_code", None))
+        self.assertEqual(getattr(errors[0], "error_type", None), "TimeoutError")
+        self.assertIs(getattr(errors[0], "retryable", None), True)
+
+    def test_litellm_completion_preserves_structured_provider_error_metadata(self) -> None:
+        class ProviderUnavailableError(RuntimeError):
+            status_code = 503
+
+        fake_litellm = types.SimpleNamespace(
+            completion=lambda **_kwargs: (_ for _ in ()).throw(
+                ProviderUnavailableError("capacity exhausted")
+            ),
+            suppress_debug_info=False,
+            request_timeout=None,
+        )
+        config = LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="sk-test",
+            model="openai/test-model",
+        )
+
+        with (
+            patch.dict(sys.modules, {"litellm": fake_litellm}),
+            self.assertRaises(LLMRequestError) as captured,
+        ):
+            litellm_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                config=config,
+            )
+
+        self.assertEqual(getattr(captured.exception, "status_code", None), 503)
+        self.assertEqual(
+            getattr(captured.exception, "error_type", None),
+            "ProviderUnavailableError",
+        )
+        self.assertIs(getattr(captured.exception, "retryable", None), True)
 
     def test_litellm_completion_records_failure_usage_for_timeout(self) -> None:
         errors: list[BaseException] = []

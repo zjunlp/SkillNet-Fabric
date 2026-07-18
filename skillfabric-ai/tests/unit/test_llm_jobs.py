@@ -21,6 +21,20 @@ from skillfabric.runtime.usage import load_usage_records
 
 
 class LLMJobRunnerTests(unittest.TestCase):
+    @staticmethod
+    def _request_error(
+        *,
+        status_code: int | None = None,
+        error_type: str = "ProviderError",
+        retryable: bool = False,
+    ) -> LLMRequestError:
+        return LLMRequestError(
+            f"{error_type}: provider request failed",
+            status_code=status_code,
+            error_type=error_type,
+            retryable=retryable,
+        )
+
     def test_job_options_reject_invalid_runtime_limits(self) -> None:
         invalid_options = [
             LLMJobOptions(concurrency=0),
@@ -31,6 +45,8 @@ class LLMJobRunnerTests(unittest.TestCase):
             LLMJobOptions(retry_backoff_seconds=-1),
             LLMJobOptions(progress_every=-1),
             LLMJobOptions(batch_size=0),
+            LLMJobOptions(checkpoint_interval=0),
+            LLMJobOptions(circuit_breaker_threshold=0),
         ]
 
         for options in invalid_options:
@@ -40,6 +56,26 @@ class LLMJobRunnerTests(unittest.TestCase):
     def test_job_options_reject_batch_smaller_than_concurrency(self) -> None:
         with self.assertRaisesRegex(ValueError, "batch_size"):
             LLMJobOptions(concurrency=3, batch_size=2).normalized()
+
+    def test_job_options_default_to_formal_checkpoint_and_breaker_intervals(self) -> None:
+        options = LLMJobOptions().normalized()
+
+        self.assertEqual(options.checkpoint_interval, 100)
+        self.assertEqual(options.circuit_breaker_threshold, 10)
+
+    def test_job_options_load_checkpoint_and_breaker_intervals_from_env_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "SKILLFABRIC_LLM_CHECKPOINT_INTERVAL=25\n"
+                "SKILLFABRIC_LLM_CIRCUIT_BREAKER_THRESHOLD=7\n",
+                encoding="utf-8",
+            )
+
+            options = LLMJobOptions.from_env(env_path=env_path)
+
+        self.assertEqual(options.checkpoint_interval, 25)
+        self.assertEqual(options.circuit_breaker_threshold, 7)
 
     def test_retries_failed_jobs_and_preserves_input_order(self) -> None:
         attempts: dict[str, int] = {}
@@ -112,7 +148,7 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertFalse(outcomes[0].ok)
         self.assertIsInstance(outcomes[0].error, TimeoutError)
 
-    def test_provider_request_failure_is_not_retried_by_job_runner(self) -> None:
+    def test_retryable_provider_request_failure_uses_job_retry_limit(self) -> None:
         provider_calls = 0
 
         def completion(**kwargs):
@@ -151,9 +187,84 @@ class LLMJobRunnerTests(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(provider_calls, 1)
+        self.assertEqual(provider_calls, 3)
         self.assertFalse(outcomes[0].ok)
         self.assertIsInstance(outcomes[0].error, LLMRequestError)
+
+    def test_ten_consecutive_matching_transient_errors_open_circuit(self) -> None:
+        calls: list[int] = []
+
+        def worker(item: int) -> None:
+            calls.append(item)
+            raise self._request_error(status_code=503, retryable=True)
+
+        with self.assertRaisesRegex(RuntimeError, "circuit breaker.*10 consecutive"):
+            run_llm_jobs(
+                range(30),
+                worker,
+                options=LLMJobOptions(
+                    concurrency=1,
+                    max_retries=0,
+                    retry_backoff_seconds=0,
+                    progress_every=0,
+                    batch_size=20,
+                    circuit_breaker_threshold=10,
+                ),
+                label="relation",
+            )
+
+        self.assertGreaterEqual(len(calls), 10)
+        self.assertLess(len(calls), 30)
+
+    def test_success_resets_consecutive_transient_error_count(self) -> None:
+        calls: list[int] = []
+
+        def worker(item: int) -> int:
+            calls.append(item)
+            if item == 9:
+                return item
+            raise self._request_error(status_code=503, retryable=True)
+
+        outcomes = run_llm_jobs(
+            range(19),
+            worker,
+            options=LLMJobOptions(
+                concurrency=1,
+                max_retries=0,
+                retry_backoff_seconds=0,
+                progress_every=0,
+                batch_size=19,
+                circuit_breaker_threshold=10,
+            ),
+            label="relation",
+        )
+
+        self.assertEqual(calls, list(range(19)))
+        self.assertEqual(len(outcomes), 19)
+        self.assertTrue(outcomes[9].ok)
+
+    def test_permanent_provider_error_stops_batch_immediately(self) -> None:
+        calls: list[int] = []
+
+        def worker(item: int) -> None:
+            calls.append(item)
+            raise self._request_error(status_code=401, retryable=False)
+
+        with self.assertRaisesRegex(RuntimeError, "permanent.*401"):
+            run_llm_jobs(
+                range(10),
+                worker,
+                options=LLMJobOptions(
+                    concurrency=1,
+                    max_retries=8,
+                    retry_backoff_seconds=0,
+                    progress_every=0,
+                    batch_size=1,
+                ),
+                label="contract",
+            )
+
+        self.assertEqual(calls, [0])
 
     def test_uses_concurrent_workers(self) -> None:
         active = 0

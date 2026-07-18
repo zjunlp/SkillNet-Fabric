@@ -27,7 +27,7 @@ from skillfabric.wiki.contract_pages import render_contract_card, render_untrust
 from skillfabric.wiki.loader import load_wiki_source
 from skillfabric.wiki.pages import slug
 
-PLANNER_PROMPT_ID = "skillfabric_execution_planner"
+PLANNER_PROMPT_ID = "skillfabric_execution_planner_quality_v2"
 DEFAULT_PLANNER_CONTEXT_MAX_TOKENS = 100_000
 DEFAULT_PLANNER_MAX_ATTEMPTS = 2
 DEFAULT_PLANNER_RETRY_DELAY_SECONDS = 1.0
@@ -243,9 +243,12 @@ after the original task. Do not execute the task.
   concrete producer-to-consumer handoff; `compose_with` represents adjacent workflow stages whose
   order is useful but not a mandatory data dependency.
 - Preserve explicit coverage gaps as cautions or unresolved requirements.
-- Produce the simplest effective execution approach. Use serial work for real prerequisites and
-  parallel work only for independent operations with a clear synthesis point.
-- Include concrete verification against the task's requested outputs and source evidence.
+- Build for complete, high-quality delivery. Use serial work for real prerequisites and parallel
+  work only for independent operations with a clear synthesis point.
+- Check external dependency readiness before dependent work. Use a local fallback only when it
+  satisfies the same task constraints. Do not ask the user for credentials and then claim success.
+- Include concrete verification against requested outputs and source evidence, and account for
+  every selected skill with a task-specific role rather than silently discarding it.
 </trusted_policy>
 
 <planning_capabilities>
@@ -256,11 +259,19 @@ These are planning concepts, not required steps or an output schema.
 </planning_capabilities>
 
 <decision_process>
-1. Identify the requested deliverables, constraints, and unresolved coverage gaps.
-2. Determine how each selected skill contributes and ignore relation evidence irrelevant to the task.
-3. Choose serial or parallel execution from actual data and state dependencies.
-4. Add synthesis and verification where they improve correctness.
-5. Write one complete operational plan that the executor can apply directly to the original task.
+1. Build a deliverable checklist from every explicit output, filename, format, and constraint.
+2. For each checklist item, bind a production action, exact target path, acceptance criteria, and
+   verification action.
+3. Determine how each selected skill contributes, account for every selected skill, and ignore
+   relation evidence irrelevant to the task.
+4. Check external-tool readiness before dependent work. If no equivalent compliant fallback exists,
+   plan an explicit failure instead of false success.
+5. Choose serial or parallel execution from actual data and state dependencies, then synthesize all
+   intermediate results required by the deliverables.
+6. Verify content as well as file existence: recompute or cross-check structured and numeric results;
+   open or render documents, webpages, images, and video; inspect defects; revise; and verify again.
+7. Write one complete operational plan that finishes only after every checklist item passes or is
+   explicitly reported failed.
 </decision_process>
 
 <output_contract>
