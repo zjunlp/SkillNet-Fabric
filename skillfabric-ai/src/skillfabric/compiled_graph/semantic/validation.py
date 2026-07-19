@@ -38,11 +38,6 @@ _JUDGE_DECISION_KEYS = frozenset(
 _JUDGE_EVIDENCE_KEYS = frozenset({"skill_a_lines", "skill_b_lines"})
 _RELATIONS = frozenset({"depend_on", "compose_with", "similar_to", "none"})
 _DIRECTIONS = frozenset({"skill_a_to_skill_b", "skill_b_to_skill_a", "symmetric"})
-_COMPATIBLE_CACHE_FINGERPRINTS = {
-    "03a2a93664c79e6203cd853613e71a3540320296208b90fe73cc7cc459e0d411": (
-        "a03308badce7826898845c0576cc4e6af56f6bffe9fc5c17b6429035e32a87ff",
-    ),
-}
 
 
 class RelationValidationError(RuntimeError):
@@ -132,22 +127,6 @@ def validate_candidate_pairs(
     for index, pair in enumerate(ordered_pairs):
         key = _cache_key(pair, skills_by_id, contracts, judge.model_id)
         cached = cache.get(key)
-        if cached is None:
-            for compatible_fingerprint in _COMPATIBLE_CACHE_FINGERPRINTS.get(
-                RELATION_POLICY_FINGERPRINT,
-                (),
-            ):
-                cached = cache.get(
-                    _cache_key(
-                        pair,
-                        skills_by_id,
-                        contracts,
-                        judge.model_id,
-                        policy_fingerprint=compatible_fingerprint,
-                    )
-                )
-                if cached is not None:
-                    break
         if cached is None:
             pending.append(_PendingDecision(index=index, pair=pair, cache_key=key))
             continue
@@ -268,9 +247,7 @@ def decision_from_judge_payload(
         raise ValueError("relation must be depend_on, compose_with, similar_to, or none")
     direction = payload.get("direction")
     if not isinstance(direction, str) or direction not in _DIRECTIONS:
-        raise ValueError(
-            "direction must be skill_a_to_skill_b, skill_b_to_skill_a, or symmetric"
-        )
+        raise ValueError("direction must be skill_a_to_skill_b, skill_b_to_skill_a, or symmetric")
     if relation in {"depend_on", "compose_with"} and direction == "symmetric":
         raise ValueError(f"{relation} requires a directed pair-local direction")
     if relation in {"similar_to", "none"} and direction != "symmetric":
@@ -457,13 +434,10 @@ def _cache_key(
     skills: dict[str, SkillNode],
     contracts: dict[str, SkillContract],
     model_id: str,
-    *,
-    policy_fingerprint: str | None = None,
 ) -> str:
-    resolved_policy_fingerprint = policy_fingerprint or RELATION_POLICY_FINGERPRINT
     payload = {
         "prompt_name": RELATION_PROMPT_ID,
-        "prompt_fingerprint": resolved_policy_fingerprint,
+        "prompt_fingerprint": RELATION_POLICY_FINGERPRINT,
         "model_id": model_id,
         "pair": list(pair.key),
         "skills": {skill_id: skills[skill_id].content_hash for skill_id in pair.key},

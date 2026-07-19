@@ -222,9 +222,7 @@ def test_validated_decision_cache_avoids_duplicate_calls(tmp_path) -> None:
     assert "candidate_channels" not in second[0].to_dict()
 
 
-def test_missing_pair_is_judged_when_previous_relation_cache_is_reused(
-    tmp_path, monkeypatch
-) -> None:
+def test_missing_pair_is_judged_when_current_relation_cache_is_reused(tmp_path) -> None:
     skills, contracts = semantic_skills_and_contracts()
     other = make_skill("skill:other", "other", "Perform an unrelated operation.")
     contracts[other.id] = SkillContract.from_extraction(
@@ -251,41 +249,17 @@ def test_missing_pair_is_judged_when_previous_relation_cache_is_reused(
             ),
         ),
     )
-    by_id = {skill.id: skill for skill in skills}
-    compatible_fingerprint, legacy_fingerprints = next(
-        iter(validation_module._COMPATIBLE_CACHE_FINGERPRINTS.items())
-    )
-    monkeypatch.setattr(
-        validation_module,
-        "RELATION_POLICY_FINGERPRINT",
-        compatible_fingerprint,
-    )
-    legacy_fingerprint = legacy_fingerprints[0]
-    legacy_key = validation_module._cache_key(
-        semantic_pair(),
-        by_id,
-        contracts,
-        "relation-test-model",
-        policy_fingerprint=legacy_fingerprint,
-    )
     cache = tmp_path / "relation_decisions.json"
-    cache.write_text(
-        json.dumps(
-            {
-                legacy_key: {
-                    "relation": "depend_on",
-                    "source_skill": "skill:producer",
-                    "target_skill": "skill:consumer",
-                    "confidence": 0.91,
-                    "reason": "The producer supplies the normalized table.",
-                    "evidence": [
-                        {"skill": "skill:consumer", "line": 1},
-                        {"skill": "skill:producer", "line": 1},
-                    ],
-                }
-            }
-        ),
-        encoding="utf-8",
+    initial_judge = StaticRelationJudge(
+        model_id="relation-test-model",
+        responses={semantic_pair().key: dependency_payload()},
+    )
+    initial = validate_candidate_pairs(
+        [semantic_pair()],
+        skills,
+        contracts,
+        judge=initial_judge,
+        cache_path=cache,
     )
     judge = StaticRelationJudge(
         model_id="relation-test-model",
@@ -300,6 +274,7 @@ def test_missing_pair_is_judged_when_previous_relation_cache_is_reused(
         cache_path=cache,
     )
 
+    assert initial[0].cache_hit is False
     assert [decision.cache_hit for decision in decisions] == [True, False]
     assert judge.calls == [(missing_pair.key,)]
 
