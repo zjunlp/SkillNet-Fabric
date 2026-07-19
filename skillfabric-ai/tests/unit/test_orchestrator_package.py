@@ -77,12 +77,50 @@ def _planner_response() -> str:
     return json.dumps(
         {
             "execution_prompt": (
-                "First parse the PDF tables, then extract the requested KPIs. Run independent "
-                "checks in parallel when they do not share mutable state, synthesize the results, "
-                "and verify every value against the source."
+                "Load and follow `skill:pdf-table-parser` to parse the PDF tables, then load and "
+                "follow `skill:financial-kpi-extractor` to extract the requested KPIs. Run "
+                "independent checks in parallel when they do not share mutable state, synthesize "
+                "the results, and verify every value against the source."
             )
         }
     )
+
+
+def _planner_contract_prompt() -> str:
+    messages = package_module._planner_messages(
+        query="Create the requested deliverables.",
+        route=_route(),
+        contexts=[],
+    )
+    prompt = "\n".join(str(message["content"]) for message in messages)
+    return " ".join(prompt.split())
+
+
+def test_planner_makes_supported_selected_skills_the_primary_workflow() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "evidence-backed capability candidates" in prompt
+    assert "exact `skill_id`" in prompt
+    assert "default, authoritative execution path" in prompt
+    assert "account for every selected skill" in prompt
+    assert "load and follow its instructions" in prompt
+    assert "Do not replace a usable planned Skill" in prompt
+    assert "not an exclusive tool list or a mandatory workflow" not in prompt
+
+
+def test_planner_does_not_promote_method_dependencies_to_task_dependencies() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "not automatically a task dependency" in prompt
+    assert "concrete execution-time blocker" in prompt
+    assert "only after that evidence exists" in prompt
+    assert "built-in tools or local libraries" in prompt
+    assert "same task constraints, deliverables, acceptance criteria, and verification" in prompt
+    assert "Do not conclude that no compliant alternative exists solely" in prompt
+    assert "only after reasonable available alternatives have been attempted" in prompt
+    assert "plan an explicit failure" not in prompt
+    assert "OPENROUTER" not in prompt
+    assert "visual_creation_task" not in prompt
 
 
 def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatch) -> None:
@@ -118,7 +156,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_quality_v2"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_skill_first_delivery"
     messages = calls[0]["messages"]
     prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
     assert "skill:pdf-table-parser" in prompt
@@ -128,7 +166,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "relation_evidence" in prompt
     assert "source before target" in prompt
     assert "producer-to-consumer handoff" in prompt
-    assert "complete, task-specific execution plan" in prompt
+    assert "complete, task-specific delivery plan" in prompt
     assert "deliverable checklist" in prompt
     assert "target path" in prompt
     assert "acceptance criteria" in prompt
@@ -138,13 +176,14 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "inspect" in prompt
     assert "revise" in prompt
     assert "Do not ask the user for credentials and then claim success" in prompt
-    assert "account for every selected skill" in prompt
+    assert "default, authoritative execution path" in prompt
+    assert "load and follow its instructions" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
     execution_prompt = result.prompt_path.read_text()
     assert execution_prompt.startswith(f"<original_task>\n{query}\n</original_task>")
     assert f"<original_task>\n{query}\n</original_task>" in execution_prompt
-    assert "<execution_plan>\nFirst parse the PDF tables" in execution_prompt
+    assert "<execution_plan>\nLoad and follow `skill:pdf-table-parser`" in execution_prompt
     assert execution_prompt.index("<original_task>") < execution_prompt.index("<execution_plan>")
     assert "<execution_contract>" not in execution_prompt
     assert execution_prompt.count(query) == 1
@@ -362,6 +401,32 @@ def test_planner_schema_contains_only_execution_prompt() -> None:
     assert schema["required"] == ["execution_prompt"]
     assert set(schema["properties"]) == {"execution_prompt"}
     assert schema["additionalProperties"] is False
+
+
+def test_planner_output_must_reference_every_selected_skill_id() -> None:
+    errors = validate_planner_output(
+        {"execution_prompt": "Use `skill:pdf-table-parser` for the extraction."},
+        required_skill_ids=(
+            "skill:pdf-table-parser",
+            "skill:financial-kpi-extractor",
+        ),
+    )
+
+    assert errors == [
+        "execution_prompt must reference selected skill: skill:financial-kpi-extractor"
+    ]
+
+
+def test_planner_skill_id_validation_rejects_prefix_collisions() -> None:
+    errors = validate_planner_output(
+        {"execution_prompt": "Use `skill:accessibility-compliance` for the audit."},
+        required_skill_ids=(
+            "skill:accessibility",
+            "skill:accessibility-compliance",
+        ),
+    )
+
+    assert errors == ["execution_prompt must reference selected skill: skill:accessibility"]
 
 
 def test_route_loader_rejects_non_object_items() -> None:

@@ -334,7 +334,9 @@ class PublicPackageTests(unittest.TestCase):
                 return_value=json.dumps(
                     {
                         "execution_prompt": (
-                            "Parse the PDF, extract the KPIs, and verify each value."
+                            "Use `skill:pdf-table-parser` to parse the PDF, then use "
+                            "`skill:financial-kpi-extractor` to extract the KPIs and verify "
+                            "each value."
                         )
                     }
                 ),
@@ -350,7 +352,7 @@ class PublicPackageTests(unittest.TestCase):
             self.assertTrue(result.prompt_path.exists())
             prompt = result.prompt_path.read_text(encoding="utf-8")
             self.assertIn("extract financial KPIs from a PDF report", prompt)
-            self.assertIn("Parse the PDF, extract the KPIs", prompt)
+            self.assertIn("`skill:pdf-table-parser` to parse the PDF", prompt)
 
     def test_python_facade_rejects_route_file_query_mismatch(self) -> None:
         from skillfabric import SkillFabric
