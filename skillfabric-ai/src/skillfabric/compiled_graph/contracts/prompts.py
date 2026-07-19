@@ -50,18 +50,26 @@ _CONTRACT_SEMANTICS = (
     "format when the source supports it.",
     "- tools: commands, libraries, APIs, applications, and environment actions used to execute "
     "the skill.",
+    "Treat requires and produces as atomic fields at the skill's public workflow boundary: "
+    "record what a caller must supply or establish and what downstream work can use after the "
+    "skill succeeds.",
+    "Name each field with a stable, concrete noun phrase centered on the artifact, data, "
+    "resource, or state itself rather than a one-off task purpose or incidental wording.",
     "Keep the contract complete but nonredundant. Merge synonyms, but do not collapse materially "
     "different inputs, outputs, formats, or states.",
+    "Do not infer a field only because a tool could accept or return it, an example or background "
+    "passage mentions it, or it would enable a plausible optional downstream use. Retain it only "
+    "when the source presents it as part of the skill's inputs, prerequisites, outputs, or "
+    "successful state.",
     "Do not place tools, credentials, internal reasoning, temporary implementation state, or "
     "generic task intent in requires or produces. Do not invent cross-skill handoffs.",
     "Every retained field and the top-level capability need exact supporting source lines.",
 )
 _DECISION_PROCESS = (
     "1. Identify the operational capability and selection condition.",
-    "2. Enumerate every distinct source-supported external input, output, resource, and reusable "
-    "execution state.",
-    "3. Preserve materially different external formats instead of replacing them with a generic "
-    "payload label.",
+    "2. Enumerate the distinct source-supported fields at the public workflow boundary.",
+    "3. Use stable artifact, data, resource, and state names while preserving materially "
+    "different external formats instead of replacing them with a generic payload label.",
     "4. Separate tools and credentials from transferable artifacts and states.",
     "5. Merge duplicate concepts without targeting a fixed number of fields.",
     "6. Verify that every evidence line directly supports its field before returning JSON.",
@@ -74,6 +82,8 @@ _EXAMPLES = (
     "- An authenticated browser skill may require credentials as a tool input while producing an "
     "authenticated session state for downstream work; credentials are not a produced artifact.",
     "- Planning to inspect a file is internal intent, not a reusable execution state.",
+    "- A library mentioned in setup may support many file types; those types are not skill inputs "
+    "or outputs unless the skill's public workflow explicitly accepts or returns them.",
 )
 _CONTRACT_TASK = (
     "Extract one complete but nonredundant SkillContract for graph construction, routing, "
