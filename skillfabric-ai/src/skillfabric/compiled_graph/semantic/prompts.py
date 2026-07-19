@@ -16,7 +16,7 @@ from skillfabric.runtime.prompting import (
 RELATION_PROMPT_ID = "semantic_relation_judge"
 CYCLE_PROMPT_ID = "dependency_cycle_adjudicator"
 
-_JUDGE_OUTPUT_SCHEMA = {
+_RELATION_OUTPUT_SCHEMA = {
     "pair_index": 0,
     "relation": "depend_on|compose_with|similar_to|none",
     "direction": "skill_a_to_skill_b|skill_b_to_skill_a|symmetric",
@@ -24,12 +24,28 @@ _JUDGE_OUTPUT_SCHEMA = {
     "reason": "concise evidence-grounded explanation",
     "evidence": {"skill_a_lines": [1], "skill_b_lines": [1]},
 }
-_JUDGE_OUTPUT_RULES = (
+_RELATION_OUTPUT_RULES = (
     "Return every pair_index exactly once and return no unlisted pair_index.",
     "Use skill_a_to_skill_b or skill_b_to_skill_a only for depend_on and compose_with. Use symmetric only for similar_to and none.",
     "For a non-none relation, cite exact supporting line numbers from both pair endpoints. For none, return empty line lists.",
     "Cite only line numbers explicitly listed in source_evidence or skill_sources; omitted and blank lines are invalid evidence.",
     "Never return global skill ids in a decision. pair_index, direction, skill_a_lines, and skill_b_lines are the only endpoint references.",
+)
+_CYCLE_OUTPUT_SCHEMA = {
+    "pair_index": 0,
+    "action": "keep|downgrade_to_compose|remove",
+    "confidence": 0.0,
+    "reason": "concise evidence-grounded explanation",
+}
+_CYCLE_ACTION_SEMANTICS = (
+    "- keep: the original directed hard dependency is explicitly supported and remains unchanged.",
+    "- downgrade_to_compose: the original direction is supported as adjacent reusable workflow stages, but the target does not require a concrete handoff from the source.",
+    "- remove: neither the original hard dependency nor a directed adjacent workflow is adequately supported.",
+)
+_CYCLE_OUTPUT_RULES = (
+    "Return every pair_index exactly once and return no unlisted pair_index.",
+    "Use only keep, downgrade_to_compose, or remove.",
+    "Do not generate skill ids, directions, relations, or evidence; projection reuses the validated original decision fields.",
 )
 _RELATION_TASK = (
     "Independently assign exactly one final relation to every listed candidate pair.",
@@ -44,8 +60,8 @@ _RELATION_SYSTEM_POLICY = (
     "Return only the requested JSON object.",
 )
 _CYCLE_TASK = (
-    "Review every decision in one dependency cycle and reclassify unsupported hard dependencies.",
-    "Return one replacement decision for every listed candidate pair and no other pair.",
+    "Review every hard dependency in one concrete dependency cycle.",
+    "Choose one monotonic action for every listed pair and no other pair.",
     "Do not break the cycle merely to satisfy acyclicity; preserve depend_on when the evidence requires it.",
 )
 _CYCLE_SYSTEM_POLICY = (
@@ -65,7 +81,7 @@ def build_relation_judge_messages(
     if not pairs:
         raise ValueError("relation request must contain at least one candidate pair")
     skill_ids = sorted({skill_id for pair in pairs for skill_id in pair.key})
-    output_schema = {"decisions": [_JUDGE_OUTPUT_SCHEMA]}
+    output_schema = {"decisions": [_RELATION_OUTPUT_SCHEMA]}
     user = "\n".join(
         [
             "<skill_profiles>",
@@ -95,7 +111,7 @@ def build_relation_judge_messages(
             json.dumps(output_schema, ensure_ascii=False, indent=2),
             "</output_schema>",
             "Return one JSON object with exactly these keys and no surrounding text.",
-            *_JUDGE_OUTPUT_RULES,
+            *_RELATION_OUTPUT_RULES,
         ]
     )
     system = "\n".join(
@@ -120,7 +136,7 @@ def build_cycle_adjudication_messages(
     """Build a full-evidence prompt for one concrete dependency cycle."""
 
     skill_ids = sorted({skill_id for decision in decisions for skill_id in decision.candidate.key})
-    schema = {"decisions": [_JUDGE_OUTPUT_SCHEMA]}
+    schema = {"decisions": [_CYCLE_OUTPUT_SCHEMA]}
     user = "\n".join(
         [
             "<cycle_decisions>",
@@ -139,13 +155,14 @@ def build_cycle_adjudication_messages(
             "<task>",
             *_CYCLE_TASK,
             "</task>",
-            _relation_semantics(),
-            _decision_process(),
+            "<action_semantics>",
+            *_CYCLE_ACTION_SEMANTICS,
+            "</action_semantics>",
             "<output_schema>",
             json.dumps(schema, ensure_ascii=False, indent=2),
             "</output_schema>",
             "Return one JSON object with no reasoning or surrounding text.",
-            *_JUDGE_OUTPUT_RULES,
+            *_CYCLE_OUTPUT_RULES,
         ]
     )
     system = "\n".join(

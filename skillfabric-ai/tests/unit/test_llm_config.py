@@ -6,6 +6,7 @@ import sys
 import threading
 import types
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -689,6 +690,60 @@ class LLMConfigTests(unittest.TestCase):
             "ProviderUnavailableError",
         )
         self.assertIs(getattr(captured.exception, "retryable", None), True)
+
+    def test_litellm_completion_preserves_provider_status_across_process_boundary(self) -> None:
+        class BadGatewayHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = b'{"error":{"message":"Upstream request failed","type":"upstream_error"}}'
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), BadGatewayHandler)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        errors: list[BaseException] = []
+
+        def call_in_thread() -> None:
+            try:
+                litellm_completion(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    config=LLMConfig(
+                        api_base=f"http://127.0.0.1:{server.server_port}/v1",
+                        api_key="sk-test",
+                        model="openai/test-model",
+                        reasoning_effort="",
+                        timeout=2,
+                    ),
+                )
+            except BaseException as exc:  # noqa: BLE001 - test captures provider metadata.
+                errors.append(exc)
+
+        try:
+            worker = threading.Thread(target=call_in_thread)
+            worker.start()
+            worker.join(timeout=15)
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], LLMRequestError)
+        self.assertEqual(
+            (
+                getattr(errors[0], "status_code", None),
+                getattr(errors[0], "error_type", None),
+                getattr(errors[0], "retryable", None),
+            ),
+            (502, "BadGatewayError", True),
+        )
 
     def test_litellm_completion_records_failure_usage_for_timeout(self) -> None:
         errors: list[BaseException] = []

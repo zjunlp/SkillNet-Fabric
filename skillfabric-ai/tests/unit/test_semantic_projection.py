@@ -111,42 +111,133 @@ def test_adjudicator_that_preserves_cycle_fails_closed() -> None:
         )
 
 
-def test_llm_cycle_adjudicator_uses_pair_local_output(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        lambda original: replace(
+            original,
+            source_skill=original.target_skill,
+            target_skill=original.source_skill,
+        ),
+        lambda original: replace(original, evidence=tuple(reversed(original.evidence))),
+        lambda original: replace(
+            original,
+            relation="similar_to",
+            source_skill=original.candidate.skill_a,
+            target_skill=original.candidate.skill_b,
+        ),
+    ],
+)
+def test_cycle_adjudicator_cannot_rewrite_validated_relation_fields(replacement) -> None:
+    skills, decisions = _cyclic_decisions()
+    first = decisions[0]
+    adjudicator = StaticCycleAdjudicator(
+        replacements={first.candidate.key: replacement(first)},
+    )
+
+    with pytest.raises(DependencyCycleError, match="monotonically weaken"):
+        project_relation_decisions(
+            decisions,
+            skills,
+            cycle_adjudicator=adjudicator,
+        )
+
+
+def test_llm_cycle_adjudicator_applies_monotonic_actions(monkeypatch) -> None:
     skills, decisions = _cyclic_decisions()
     raw_decisions = [
         {
-            "pair_index": index,
-            "relation": "none",
-            "direction": "symmetric",
-            "confidence": 0.95,
-            "reason": "The apparent dependency is not required.",
-            "evidence": {"skill_a_lines": [], "skill_b_lines": []},
-        }
-        for index in range(len(decisions))
+            "pair_index": 0,
+            "action": "keep",
+            "confidence": 0.91,
+            "reason": "The hard handoff remains source-grounded.",
+        },
+        {
+            "pair_index": 1,
+            "action": "downgrade_to_compose",
+            "confidence": 0.87,
+            "reason": "The stages are adjacent but the handoff is optional.",
+        },
+        {
+            "pair_index": 2,
+            "action": "remove",
+            "confidence": 0.96,
+            "reason": "The apparent dependency is unsupported.",
+        },
     ]
-    monkeypatch.setattr(
-        projection_module,
-        "litellm_completion",
-        lambda **_kwargs: {"content": json.dumps({"decisions": raw_decisions})},
-    )
-    adjudicator = LiteLLMCycleAdjudicator(
-        LLMConfig(
-            api_base="https://example.test/v1",
-            api_key="test-key",
-            model="openai/responses/gpt-5.6-luna",
-        )
-    )
+    adjudicator = _llm_cycle_adjudicator(monkeypatch, raw_decisions)
 
     replacements = adjudicator.adjudicate(
         tuple(decisions),
         {skill.id: skill for skill in skills},
     )
 
-    assert [decision.candidate.key for decision in replacements] == [
-        decision.candidate.key for decision in decisions
+    kept, downgraded, removed = replacements
+    assert kept.candidate == decisions[0].candidate
+    assert (kept.relation, kept.source_skill, kept.target_skill, kept.evidence) == (
+        "depend_on",
+        decisions[0].source_skill,
+        decisions[0].target_skill,
+        decisions[0].evidence,
+    )
+    assert (kept.confidence, kept.reason) == (0.91, raw_decisions[0]["reason"])
+    assert downgraded.candidate == decisions[1].candidate
+    assert (
+        downgraded.relation,
+        downgraded.source_skill,
+        downgraded.target_skill,
+        downgraded.evidence,
+    ) == (
+        "compose_with",
+        decisions[1].source_skill,
+        decisions[1].target_skill,
+        decisions[1].evidence,
+    )
+    assert (downgraded.confidence, downgraded.reason) == (
+        0.87,
+        raw_decisions[1]["reason"],
+    )
+    assert removed.candidate == decisions[2].candidate
+    assert (removed.relation, removed.source_skill, removed.target_skill, removed.evidence) == (
+        "none",
+        decisions[2].candidate.skill_a,
+        decisions[2].candidate.skill_b,
+        (),
+    )
+    assert (removed.confidence, removed.reason) == (0.96, raw_decisions[2]["reason"])
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda rows: [{**rows[0], "unexpected": True}, *rows[1:]], "unexpected keys"),
+        (lambda rows: [{**rows[0], "action": "reverse"}, *rows[1:]], "action must be"),
+        (lambda rows: [{**rows[0], "confidence": True}, *rows[1:]], "confidence must be"),
+        (lambda rows: [{**rows[0], "confidence": 1.1}, *rows[1:]], "between 0 and 1"),
+        (lambda rows: [{**rows[0], "reason": " "}, *rows[1:]], "reason must be"),
+        (lambda rows: [rows[0], {**rows[1], "pair_index": 0}, rows[2]], "duplicate"),
+        (lambda rows: rows[:-1], "replace every cycle pair"),
+        (lambda rows: [{**rows[0], "pair_index": 3}, *rows[1:]], "unknown pair_index"),
+    ],
+)
+def test_llm_cycle_adjudicator_rejects_invalid_actions(monkeypatch, mutator, message) -> None:
+    skills, decisions = _cyclic_decisions()
+    rows = [
+        {
+            "pair_index": index,
+            "action": "keep",
+            "confidence": 0.9,
+            "reason": "The dependency remains supported.",
+        }
+        for index in range(len(decisions))
     ]
-    assert all(decision.relation == "none" for decision in replacements)
-    assert all(decision.evidence == () for decision in replacements)
+    adjudicator = _llm_cycle_adjudicator(monkeypatch, mutator(rows))
+
+    with pytest.raises(DependencyCycleError, match=message):
+        adjudicator.adjudicate(
+            tuple(decisions),
+            {skill.id: skill for skill in skills},
+        )
 
 
 def test_cycle_prompt_excludes_blank_source_lines() -> None:
@@ -168,15 +259,44 @@ def test_cycle_prompt_excludes_blank_source_lines() -> None:
     ]
 
 
-def test_cycle_prompt_limits_evidence_to_listed_source_lines() -> None:
+def test_cycle_prompt_uses_action_only_output() -> None:
     skills, decisions = _cyclic_decisions()
 
     user_prompt = build_cycle_adjudication_messages(
         tuple(decisions),
         {skill.id: skill for skill in skills},
     )[1]["content"]
+    serialized_schema = user_prompt.split("<output_schema>\n", 1)[1].split(
+        "\n</output_schema>", 1
+    )[0]
+    schema = json.loads(serialized_schema)
 
-    assert "Cite only line numbers explicitly listed" in user_prompt
+    assert schema == {
+        "decisions": [
+            {
+                "pair_index": 0,
+                "action": "keep|downgrade_to_compose|remove",
+                "confidence": 0.0,
+                "reason": "concise evidence-grounded explanation",
+            }
+        ]
+    }
+    assert "Do not generate skill ids, directions, relations, or evidence" in user_prompt
+
+
+def _llm_cycle_adjudicator(monkeypatch, raw_decisions) -> LiteLLMCycleAdjudicator:
+    monkeypatch.setattr(
+        projection_module,
+        "litellm_completion",
+        lambda **_kwargs: {"content": json.dumps({"decisions": raw_decisions})},
+    )
+    return LiteLLMCycleAdjudicator(
+        LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/responses/gpt-5.6-luna",
+        )
+    )
 
 
 def _cyclic_decisions():

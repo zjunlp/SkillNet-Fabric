@@ -286,11 +286,17 @@ def litellm_completion(
             usage_log_path=usage_log_path,
         )
         status_code = _exception_status_code(exc)
+        error_type = exc.error_type if isinstance(exc, LLMRequestError) else type(exc).__name__
+        retryable = (
+            exc.retryable
+            if isinstance(exc, LLMRequestError)
+            else status_code in TRANSIENT_HTTP_STATUS_CODES or _is_timeout_exception(exc)
+        )
         raise LLMRequestError(
-            f"{type(exc).__name__}: {exc}",
+            str(exc) if isinstance(exc, LLMRequestError) else f"{type(exc).__name__}: {exc}",
             status_code=status_code,
-            error_type=type(exc).__name__,
-            retryable=(status_code in TRANSIENT_HTTP_STATUS_CODES or _is_timeout_exception(exc)),
+            error_type=error_type,
+            retryable=retryable,
         ) from exc
     _record_usage(
         model=resolved_model,
@@ -380,7 +386,12 @@ def _completion_with_process_timeout(call_kwargs: dict[str, Any], timeout: float
         if process.is_alive():
             process.join(timeout=1.0)
     if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "LLM subprocess failed"))
+        raise LLMRequestError(
+            str(result.get("error") or "LLM subprocess failed"),
+            status_code=result.get("status_code"),
+            error_type=result.get("error_type"),
+            retryable=result.get("retryable") is True,
+        )
     return result.get("response")
 
 
@@ -396,10 +407,16 @@ def _completion_process_worker(
         response = _direct_litellm_completion(call_kwargs, timeout)
         output.put({"ok": True, "response": response_to_jsonable(response)})
     except BaseException as exc:  # noqa: BLE001 - subprocess boundary normalizes failures.
+        status_code = _exception_status_code(exc)
         output.put(
             {
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
+                "status_code": status_code,
+                "error_type": type(exc).__name__,
+                "retryable": (
+                    status_code in TRANSIENT_HTTP_STATUS_CODES or _is_timeout_exception(exc)
+                ),
             }
         )
 

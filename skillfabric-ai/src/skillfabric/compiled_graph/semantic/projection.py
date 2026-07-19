@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
@@ -13,10 +14,12 @@ from skillfabric.compiled_graph.semantic.models import (
     RelationDecision,
 )
 from skillfabric.compiled_graph.semantic.prompts import build_cycle_adjudication_messages
-from skillfabric.compiled_graph.semantic.validation import decision_from_judge_payload
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion
+
+_CYCLE_ACTION_KEYS = frozenset({"pair_index", "action", "confidence", "reason"})
+_CYCLE_ACTIONS = frozenset({"keep", "downgrade_to_compose", "remove"})
 
 
 class DependencyCycleError(RuntimeError):
@@ -73,10 +76,9 @@ class LiteLLMCycleAdjudicator:
             if pair_index in replacements:
                 raise DependencyCycleError("cycle adjudication returned a duplicate pair_index")
             try:
-                replacements[pair_index] = decision_from_judge_payload(
-                    decisions[pair_index].candidate,
+                replacements[pair_index] = _decision_from_cycle_action(
+                    decisions[pair_index],
                     raw,
-                    skills,
                     pair_index=pair_index,
                 )
             except ValueError as exc:
@@ -86,6 +88,81 @@ class LiteLLMCycleAdjudicator:
                 "cycle adjudication must replace every cycle pair exactly once"
             )
         return [replacements[index] for index in range(len(decisions))]
+
+
+def _decision_from_cycle_action(
+    original: RelationDecision,
+    payload: dict[str, Any],
+    *,
+    pair_index: int,
+) -> RelationDecision:
+    actual_keys = set(payload)
+    if actual_keys != _CYCLE_ACTION_KEYS:
+        missing = _CYCLE_ACTION_KEYS - actual_keys
+        unexpected = actual_keys - _CYCLE_ACTION_KEYS
+        details = []
+        if missing:
+            details.append(f"missing keys: {', '.join(sorted(missing))}")
+        if unexpected:
+            details.append(f"unexpected keys: {', '.join(sorted(unexpected))}")
+        raise ValueError("cycle action " + "; ".join(details))
+    if payload["pair_index"] != pair_index:
+        raise ValueError(f"cycle action must use pair_index {pair_index}")
+    action = payload["action"]
+    if not isinstance(action, str) or action not in _CYCLE_ACTIONS:
+        raise ValueError("action must be keep, downgrade_to_compose, or remove")
+    confidence = payload["confidence"]
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("confidence must be a number")
+    confidence = float(confidence)
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+    reason = payload["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("reason must be a non-empty string")
+    if original.relation != "depend_on":
+        raise ValueError("cycle actions may only review depend_on decisions")
+
+    updates: dict[str, Any] = {
+        "confidence": confidence,
+        "reason": reason.strip(),
+    }
+    if action == "downgrade_to_compose":
+        updates["relation"] = "compose_with"
+    elif action == "remove":
+        updates.update(
+            relation="none",
+            source_skill=original.candidate.skill_a,
+            target_skill=original.candidate.skill_b,
+            evidence=(),
+        )
+    return replace(original, **updates)
+
+
+def _validate_cycle_replacement(
+    original: RelationDecision,
+    replacement: RelationDecision,
+) -> None:
+    if replacement.relation not in {"depend_on", "compose_with", "none"}:
+        raise DependencyCycleError(
+            "cycle adjudication may only monotonically weaken depend_on decisions"
+        )
+    updates: dict[str, Any] = {
+        "relation": replacement.relation,
+        "confidence": replacement.confidence,
+        "reason": replacement.reason,
+    }
+    if replacement.relation == "none":
+        updates.update(
+            source_skill=original.candidate.skill_a,
+            target_skill=original.candidate.skill_b,
+            evidence=(),
+        )
+    expected = replace(original, **updates)
+    if replacement != expected:
+        raise DependencyCycleError(
+            "cycle adjudication may only monotonically weaken depend_on decisions"
+        )
 
 
 def project_relation_decisions(
@@ -125,11 +202,14 @@ def project_relation_decisions(
         seen_dependency_sets.add(signature)
         cycle_decisions = tuple(current[key] for key in cycle_keys)
         replacements = cycle_adjudicator.adjudicate(cycle_decisions, skills_by_id)
-        if {decision.candidate.key for decision in replacements} != set(cycle_keys):
+        if len(replacements) != len(cycle_keys) or {
+            decision.candidate.key for decision in replacements
+        } != set(cycle_keys):
             raise DependencyCycleError(
                 "cycle adjudicator must return one replacement for every cycle pair"
             )
         for replacement in replacements:
+            _validate_cycle_replacement(current[replacement.candidate.key], replacement)
             _validate_projection_decision(replacement, skills_by_id)
             current[replacement.candidate.key] = replacement
         cycle_review_count += 1
