@@ -229,7 +229,7 @@ def _evidence_from_extraction(
             raise ContractSchemaError(f"{item_label}.line is outside the skill source")
         source_text = source_lines[line - 1]
         if not source_text.strip():
-            raise ContractSchemaError(f"{item_label}.line must reference a non-empty source line")
+            continue
         evidence.append(
             EvidenceRef(
                 skill=skill.id,

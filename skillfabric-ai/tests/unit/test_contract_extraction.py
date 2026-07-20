@@ -106,16 +106,37 @@ def test_contract_evidence_line_must_exist_in_source() -> None:
         SkillContract.from_extraction(_skill(), payload)
 
 
-def test_contract_evidence_line_must_not_be_blank() -> None:
+def test_contract_evidence_discards_blank_lines_when_valid_references_remain() -> None:
     skill = make_skill(
         "skill:blank-line",
         "blank-line",
         "Documented capability.\n\nSupporting detail.",
     )
     payload = _payload()
+    payload["requires"][0]["evidence"] = [{"line": 1}, {"line": 2}, {"line": 3}]
+    payload["produces"][0]["evidence"] = [{"line": 3}]
+    payload["tools"][0]["evidence"] = [{"line": 3}]
+    payload["evidence"] = [{"line": 1}]
+
+    contract = SkillContract.from_extraction(skill, payload)
+
+    assert [(item.line, item.text) for item in contract.requires[0].evidence] == [
+        (1, "Documented capability."),
+        (3, "Supporting detail."),
+    ]
+
+
+def test_contract_rejects_evidence_when_all_references_are_blank() -> None:
+    skill = make_skill(
+        "skill:blank-line",
+        "blank-line",
+        "Documented capability.\n\nSupporting detail.",
+    )
+    payload = _payload()
+    payload["produces"][0]["evidence"] = [{"line": 3}]
     payload["evidence"] = [{"line": 2}]
 
-    with pytest.raises(ContractSchemaError, match="non-empty source line"):
+    with pytest.raises(ContractSchemaError, match="must contain at least one source line"):
         SkillContract.from_extraction(skill, payload)
 
 
