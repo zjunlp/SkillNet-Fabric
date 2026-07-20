@@ -358,12 +358,14 @@ def test_contract_prompt_escapes_source_xml_boundaries() -> None:
     assert user.count("</skill_source>") == 1
 
 
-def test_contract_prompt_extracts_only_atomic_public_interface_fields() -> None:
+def test_contract_prompt_covers_public_capability_families_before_compression() -> None:
     rendered = "\n".join(
         message["content"] for message in build_contract_extraction_messages(_skill())
     )
 
     assert "public workflow boundary" in rendered
     assert "stable, concrete noun phrase" in rendered
-    assert "Do not infer a field only because" in rendered
-    assert "optional downstream use" in rendered
+    assert "one or more public capability families" in rendered
+    assert "Coverage comes before compression" in rendered
+    assert "metadata description, overview, and major capability sections" in rendered
+    assert "supported public operation" in rendered

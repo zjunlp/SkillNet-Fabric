@@ -53,10 +53,16 @@ _CONTRACT_SEMANTICS = (
     "Treat requires and produces as atomic fields at the skill's public workflow boundary: "
     "record what a caller must supply or establish and what downstream work can use after the "
     "skill succeeds.",
+    "Treat the source as exposing one or more public capability families. Coverage comes before "
+    "compression: identify every explicitly supported public operation before normalizing its "
+    "interface into concise fields.",
+    "For each supported public operation, retain its distinct public inputs, prerequisites, "
+    "outputs, and reusable states. Preserve differences in modality, format, schema, protocol, "
+    "resource, and state when they change the public interface.",
     "Name each field with a stable, concrete noun phrase centered on the artifact, data, "
     "resource, or state itself rather than a one-off task purpose or incidental wording.",
     "Keep the contract complete but nonredundant. Merge synonyms, but do not collapse materially "
-    "different inputs, outputs, formats, or states.",
+    "different capability families, inputs, outputs, formats, interfaces, or states.",
     "Do not infer a field only because a tool could accept or return it, an example or background "
     "passage mentions it, or it would enable a plausible optional downstream use. Retain it only "
     "when the source presents it as part of the skill's inputs, prerequisites, outputs, or "
@@ -66,13 +72,16 @@ _CONTRACT_SEMANTICS = (
     "Every retained field and the top-level capability need exact supporting source lines.",
 )
 _DECISION_PROCESS = (
-    "1. Identify the operational capability and selection condition.",
-    "2. Enumerate the distinct source-supported fields at the public workflow boundary.",
+    "1. Map the one or more public capability families and their selection conditions.",
+    "2. For each supported public operation, enumerate the distinct source-supported fields at "
+    "the public workflow boundary.",
     "3. Use stable artifact, data, resource, and state names while preserving materially "
     "different external formats instead of replacing them with a generic payload label.",
     "4. Separate tools and credentials from transferable artifacts and states.",
-    "5. Merge duplicate concepts without targeting a fixed number of fields.",
-    "6. Verify that every evidence line directly supports its field before returning JSON.",
+    "5. Merge only duplicate concepts; never target a fixed number of fields or compress away an "
+    "explicit capability family.",
+    "6. Check the metadata description, overview, and major capability sections for omitted "
+    "public operations, then verify that every evidence line directly supports its field.",
 )
 _EXAMPLES = (
     "- A web extractor that explicitly returns Markdown, HTML, screenshots, and structured records "

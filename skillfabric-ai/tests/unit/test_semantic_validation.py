@@ -565,7 +565,7 @@ def test_relation_prompt_escapes_profile_xml_boundaries() -> None:
     assert user.count("</skill_profiles>") == 1
 
 
-def test_relation_prompt_preserves_handoffs_without_literal_name_matching() -> None:
+def test_relation_prompt_balances_direct_handoffs_against_unsupported_connections() -> None:
     skills, contracts = semantic_skills_and_contracts()
     rendered = "\n".join(
         message["content"]
@@ -576,26 +576,18 @@ def test_relation_prompt_preserves_handoffs_without_literal_name_matching() -> N
         )
     )
 
-    assert "Semantic compatibility, not literal field-name equality" in rendered
-    assert "need not name the other skill" in rendered
-    assert "explicitly names the concrete format, schema, protocol, state" in rendered
-    assert "artifact, file, data, image, code, or content" in rendered
-    assert "actually read, transform, inspect, validate, or continue from" in rendered
-    assert "Advice, reference material, style rules, or best practices" in rendered
-    assert "Helpful context is not a hard input" in rendered
-    assert "missing essential intermediate transformation" in rendered
-    assert "supports additional formats or upstream producers" in rendered
-    assert "actual read-and-rewrite or post-processing mechanism" in rendered
-    assert "Do not reverse the handoff direction" in rendered
-    assert "standalone, end-to-end capability at comparable scope" in rendered
-    assert "same carrier type" in rendered
-    assert "skill_a.produces against skill_b.requires" in rendered
+    assert "A direct handoff must establish all four elements" in rendered
+    assert "a concrete source result" in rendered
+    assert "a semantically compatible target input" in rendered
+    assert "an active target consumer operation" in rendered
+    assert "no missing substantive transformation or decision" in rendered
+    assert "Routine transport, serialization, or representation handling" in rendered
+    assert "does not require literal field-name equality" in rendered
+    assert "A shared carrier type does not establish compatibility" in rendered
+    assert "Guidance, policy, style, configuration, and reference material" in rendered
+    assert "Test direct handoffs in both directions" in rendered
     assert "Canonical pair order has no semantic direction" in rendered
-    assert "classify the handoff as depend_on" in rendered
-    assert "Words such as apply, style, or format" in rendered
-    assert "opens or parses the existing artifact and writes" in rendered
-    assert "palette-and-font catalog" in rendered
-    assert "opens an existing deck and writes a restyled deck" in rendered
+    assert "narrowest shared standalone subproblem" in rendered
 
 
 def test_relation_cache_identity_includes_prompt_policy(tmp_path, monkeypatch) -> None:
