@@ -567,6 +567,26 @@ def _uses_component_input_tokens(raw_usage: dict[str, Any]) -> bool:
     )
 
 
+def estimate_cost_usd(
+    *,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cached_prompt_tokens: int = 0,
+    cache_write_prompt_tokens: int = 0,
+) -> float | None:
+    """Estimate USD cost from normalized token counts using the shared pricing table."""
+
+    cost, _pricing_known, _pricing_source = _estimate_cost(
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cached_prompt_tokens=cached_prompt_tokens,
+        cache_write_prompt_tokens=cache_write_prompt_tokens,
+    )
+    return cost
+
+
 def _estimate_cost(
     *,
     model: str,

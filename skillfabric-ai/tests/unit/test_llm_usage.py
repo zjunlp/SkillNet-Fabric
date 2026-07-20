@@ -144,6 +144,16 @@ class LLMUsageTests(unittest.TestCase):
                 self.assertAlmostEqual(record.cost_usd or 0.0, expected_cost, places=10)
                 self.assertEqual(record.pricing_source, "skillfabric_standard_2026_07_13")
 
+    def test_estimate_cost_usd_uses_frozen_cached_input_pricing(self) -> None:
+        cost = usage_module.estimate_cost_usd(
+            model="gpt-5.6-terra",
+            prompt_tokens=36_221,
+            cached_prompt_tokens=25_856,
+            completion_tokens=512,
+        )
+
+        self.assertEqual(cost, 0.0400565)
+
     def test_openai_style_prompt_tokens_are_not_double_counted_with_cache_details(self) -> None:
         record = LLMUsageTracker().record_completion(
             model="gpt-5.6-luna",
