@@ -424,6 +424,27 @@ class PublicPackageTests(unittest.TestCase):
                 usage_log_path.resolve(),
             )
 
+    def test_python_facade_forwards_explicit_planner_runtime_identity(self) -> None:
+        from skillfabric import SkillFabric
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+
+            with patch("skillfabric.api.plan_execution_package") as planner:
+                SkillFabric(workspace=workspace).plan(
+                    "original task",
+                    route=_facade_route(),
+                    llm_model="gpt-5.5",
+                    llm_reasoning_effort="xhigh",
+                )
+
+            self.assertEqual(planner.call_args.kwargs["llm_model"], "gpt-5.5")
+            self.assertEqual(
+                planner.call_args.kwargs["llm_reasoning_effort"],
+                "xhigh",
+            )
+
     def test_python_facade_rejects_non_string_route_query_artifact(self) -> None:
         from skillfabric import SkillFabric
 

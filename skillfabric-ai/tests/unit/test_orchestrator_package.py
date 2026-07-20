@@ -195,6 +195,45 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert request["estimated_prompt_tokens"] == 1200
 
 
+def test_plan_uses_explicit_runtime_identity_instead_of_env_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    captured: dict[str, object] = {}
+    config = package_module.LLMConfig(
+        api_base="https://example.test/v1",
+        api_key="test-key",
+        model="openai/responses/gpt-5.5",
+        reasoning_effort="xhigh",
+    )
+
+    def from_env(**kwargs):
+        captured.update(kwargs)
+        return config
+
+    monkeypatch.setattr(package_module.LLMConfig, "from_env", from_env)
+    monkeypatch.setattr(package_module, "litellm_completion", lambda **_kwargs: _planner_response())
+
+    env_file = tmp_path / "runtime.env"
+    plan_execution_package(
+        workspace,
+        _route(),
+        query="Extract financial KPIs from a PDF report.",
+        env_file=env_file,
+        package_root=workspace / "runs" / "explicit-runtime" / "execution_package",
+        llm_model="gpt-5.5",
+        llm_reasoning_effort="xhigh",
+    )
+
+    assert captured == {
+        "env_path": env_file,
+        "model": "gpt-5.5",
+        "reasoning_effort": "xhigh",
+    }
+
+
 def test_plan_uses_explicit_runtime_usage_log(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)

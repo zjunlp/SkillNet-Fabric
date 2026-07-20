@@ -60,6 +60,8 @@ def plan_execution_package(
     env_file: str | Path = ".env",
     package_root: str | Path | None = None,
     usage_log_path: str | Path | None = None,
+    llm_model: str | None = None,
+    llm_reasoning_effort: str | None = None,
     planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
     planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
@@ -90,7 +92,11 @@ def plan_execution_package(
 
     contexts = _selected_skill_contexts(workspace, route)
     messages = _planner_messages(query=task, route=route, contexts=contexts)
-    llm_config = LLMConfig.from_env(env_path=env_file)
+    llm_config = LLMConfig.from_env(
+        env_path=env_file,
+        model=llm_model,
+        reasoning_effort=llm_reasoning_effort,
+    )
     estimated_prompt_tokens = count_message_tokens(messages, model=llm_config.model)
     if estimated_prompt_tokens > planner_context_max_tokens:
         raise ValueError(
