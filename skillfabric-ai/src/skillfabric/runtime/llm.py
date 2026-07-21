@@ -54,11 +54,22 @@ _USAGE_BUFFER: ContextVar[list[tuple[Path, LLMUsageRecord]] | None] = ContextVar
 
 @dataclass(slots=True)
 class LLMUsageTransaction:
-    """Commit usage only after an LLM-backed operation is accepted."""
+    """Finalize buffered usage after an LLM-backed operation is evaluated."""
 
+    records: list[tuple[Path, LLMUsageRecord]] = field(default_factory=list, repr=False)
     committed: bool = False
 
     def commit(self) -> None:
+        self.committed = True
+
+    def reject(self, error: BaseException) -> None:
+        """Persist billed calls while marking successful responses as locally rejected."""
+
+        message = f"{type(error).__name__}: {error}"
+        for _path, record in self.records:
+            if record.status == "completed":
+                record.status = "rejected"
+                record.error = message
         self.committed = True
 
 
@@ -204,28 +215,37 @@ def llm_usage_context(
 
 @contextmanager
 def llm_usage_transaction() -> Iterator[LLMUsageTransaction]:
-    """Buffer usage records and persist them only when the caller commits."""
+    """Buffer usage records until the caller accepts or rejects the operation."""
 
     parent = _USAGE_BUFFER.get()
     buffer: list[tuple[Path, LLMUsageRecord]] = []
     token = _USAGE_BUFFER.set(buffer)
-    transaction = LLMUsageTransaction()
+    transaction = LLMUsageTransaction(records=buffer)
     try:
         yield transaction
     except BaseException:
         _USAGE_BUFFER.reset(token)
+        if transaction.committed:
+            _commit_usage_records(parent, buffer)
         raise
     else:
         _USAGE_BUFFER.reset(token)
     if not transaction.committed:
         return
+    _commit_usage_records(parent, buffer)
+
+
+def _commit_usage_records(
+    parent: list[tuple[Path, LLMUsageRecord]] | None,
+    records: list[tuple[Path, LLMUsageRecord]],
+) -> None:
     if parent is not None:
-        parent.extend(buffer)
+        parent.extend(records)
         return
-    for path, record in buffer:
+    for path, record in records:
         try:
             LLMUsageTracker(log_path=path).append(record)
-        except Exception as exc:  # noqa: BLE001 - usage accounting must not break accepted calls.
+        except Exception as exc:  # noqa: BLE001 - accounting must not break LLM jobs.
             LOGGER.warning("usage_write_failed error_type=%s", type(exc).__name__)
             continue
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
 import threading
 import time
 import types
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -17,7 +19,7 @@ from skillfabric.runtime.llm import (
     litellm_completion,
     llm_usage_context,
 )
-from skillfabric.runtime.usage import load_usage_records
+from skillfabric.runtime.usage import load_usage_records, summarize_usage
 
 
 class LLMJobRunnerTests(unittest.TestCase):
@@ -97,6 +99,36 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertTrue(all(outcome.ok for outcome in outcomes))
         self.assertEqual(attempts["alpha"], 2)
         self.assertEqual(attempts["beta"], 1)
+
+    def test_progress_distinguishes_succeeded_and_failed_jobs(self) -> None:
+        def worker(item: str) -> str:
+            if item == "failed":
+                raise RuntimeError("invalid result")
+            return item
+
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            outcomes = run_llm_jobs(
+                ["accepted", "failed"],
+                worker,
+                options=LLMJobOptions(
+                    concurrency=1,
+                    max_retries=0,
+                    progress_every=1,
+                    batch_size=1,
+                ),
+                label="contract",
+            )
+
+        self.assertTrue(outcomes[0].ok)
+        self.assertFalse(outcomes[1].ok)
+        self.assertEqual(
+            stream.getvalue().splitlines(),
+            [
+                "[contract] terminal 1/2 succeeded=1 failed=0",
+                "[contract] terminal 2/2 succeeded=1 failed=1",
+            ],
+        )
 
     def test_timeout_errors_retry_within_configured_limit(self) -> None:
         attempts = 0
@@ -314,7 +346,7 @@ class LLMJobRunnerTests(unittest.TestCase):
         self.assertEqual([outcome.value for outcome in outcomes], [0, 1, 2, 3])
         self.assertEqual(slow_observed_later_start, [True])
 
-    def test_usage_contains_only_the_accepted_attempt(self) -> None:
+    def test_usage_records_rejected_and_accepted_attempts(self) -> None:
         responses = [
             {
                 "choices": [{"message": {"content": "not json"}}],
@@ -361,9 +393,18 @@ class LLMJobRunnerTests(unittest.TestCase):
             records = load_usage_records(usage_path)
 
         self.assertTrue(outcomes[0].ok)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].prompt_tokens, 20)
-        self.assertEqual(records[0].completion_tokens, 3)
+        self.assertEqual(len(records), 2)
+        self.assertEqual([record.status for record in records], ["rejected", "completed"])
+        self.assertIn("JSONDecodeError", records[0].error or "")
+        self.assertEqual(records[0].prompt_tokens, 10)
+        self.assertEqual(records[0].completion_tokens, 2)
+        self.assertEqual(records[1].prompt_tokens, 20)
+        self.assertEqual(records[1].completion_tokens, 3)
+        totals = summarize_usage(records)
+        self.assertEqual(totals.total_calls, 2)
+        self.assertEqual(totals.completed_calls, 1)
+        self.assertEqual(totals.failed_calls, 1)
+        self.assertEqual(totals.total_tokens, 35)
 
     def test_usage_write_failure_does_not_retry_an_accepted_job(self) -> None:
         fake_litellm = types.SimpleNamespace(

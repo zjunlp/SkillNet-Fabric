@@ -199,7 +199,9 @@ def run_llm_jobs(
         return []
     limiter = _RateLimiter(job_options.rate_limit_per_minute)
     outcomes: list[LLMJobOutcome[R] | None] = [None] * total
-    completed = 0
+    terminal = 0
+    succeeded = 0
+    failed = 0
 
     def run_one(index: int, item: T) -> LLMJobOutcome[R]:
         attempts = 0
@@ -208,8 +210,13 @@ def run_llm_jobs(
             try:
                 limiter.wait()
                 with llm_usage_transaction() as usage:
-                    value = worker(item)
-                    usage.commit()
+                    try:
+                        value = worker(item)
+                    except Exception as exc:
+                        usage.reject(exc)
+                        raise
+                    else:
+                        usage.commit()
                 return LLMJobOutcome(
                     index=index, item=item, ok=True, value=value, attempts=attempts
                 )
@@ -290,8 +297,19 @@ def run_llm_jobs(
                             error=error,
                             consecutive_failures=consecutive_failures,
                         )
-            completed += 1
-            _log_progress(label, completed, total, job_options.progress_every)
+            terminal += 1
+            if outcome.ok:
+                succeeded += 1
+            else:
+                failed += 1
+            _log_progress(
+                label,
+                terminal,
+                total,
+                succeeded,
+                failed,
+                job_options.progress_every,
+            )
 
             if aborted is not None:
                 for pending in futures:
@@ -332,12 +350,21 @@ def _sleep_before_retry(base_delay: float, attempts: int) -> None:
     time.sleep(base_delay * max(1, attempts))
 
 
-def _log_progress(label: str, completed: int, total: int, progress_every: int) -> None:
+def _log_progress(
+    label: str,
+    terminal: int,
+    total: int,
+    succeeded: int,
+    failed: int,
+    progress_every: int,
+) -> None:
     if progress_every <= 0:
         return
-    if completed != total and completed % progress_every != 0:
+    if terminal != total and terminal % progress_every != 0:
         return
-    sys.stderr.write(f"[{label}] completed {completed}/{total}\n")
+    sys.stderr.write(
+        f"[{label}] terminal {terminal}/{total} succeeded={succeeded} failed={failed}\n"
+    )
     sys.stderr.flush()
 
 

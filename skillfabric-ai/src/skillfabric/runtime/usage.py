@@ -349,10 +349,10 @@ def summarize_usage(
     )
     for record in selected_records:
         totals.total_calls += 1
-        if record.status == "failed":
-            totals.failed_calls += 1
-        else:
+        if record.status == "completed":
             totals.completed_calls += 1
+        else:
+            totals.failed_calls += 1
         totals.prompt_tokens += record.prompt_tokens
         totals.completion_tokens += record.completion_tokens
         totals.total_tokens += record.total_tokens
@@ -385,8 +385,8 @@ def _summarize_operation(records: list[LLMUsageRecord]) -> dict[str, Any]:
             has_known_cost = True
     return {
         "total_calls": len(records),
-        "completed_calls": sum(1 for item in records if item.status != "failed"),
-        "failed_calls": sum(1 for item in records if item.status == "failed"),
+        "completed_calls": sum(1 for item in records if item.status == "completed"),
+        "failed_calls": sum(1 for item in records if item.status != "completed"),
         "prompt_tokens": sum(item.prompt_tokens for item in records),
         "completion_tokens": sum(item.completion_tokens for item in records),
         "total_tokens": sum(item.total_tokens for item in records),

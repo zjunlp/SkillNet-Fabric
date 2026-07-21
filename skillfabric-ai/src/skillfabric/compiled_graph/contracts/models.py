@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from skillfabric.compiled_graph.models import EvidenceRef
 from skillfabric.registry.models import SkillNode
@@ -31,6 +31,13 @@ _SERIALIZED_KEYS = frozenset(
         "tools",
         "evidence",
     }
+)
+_EMPTY_SOURCE_SERIALIZED_KEYS = _SERIALIZED_KEYS | {"source_status"}
+_EMPTY_SOURCE_CAPABILITY = (
+    "No evidence-grounded capability is available because the skill source is empty."
+)
+_EMPTY_SOURCE_WHEN_TO_USE = (
+    "Do not select from contract evidence because no skill source is available."
 )
 
 
@@ -80,9 +87,10 @@ class SkillContract:
     produces: tuple[ContractField, ...]
     tools: tuple[ContractField, ...]
     evidence: tuple[EvidenceRef, ...]
+    source_status: Literal["available", "empty"] = "available"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "skill_id": self.skill_id,
             "content_hash": self.content_hash,
             "capability": self.capability,
@@ -92,6 +100,27 @@ class SkillContract:
             "tools": [item.to_dict() for item in self.tools],
             "evidence": [item.to_dict() for item in self.evidence],
         }
+        if self.source_status == "empty":
+            payload["source_status"] = "empty"
+        return payload
+
+    @classmethod
+    def from_empty_source(cls, skill: SkillNode) -> SkillContract:
+        """Create a deterministic, non-semantic contract for an empty Skill source."""
+
+        if skill.raw_text.strip():
+            raise ContractSchemaError("empty-source contract received a non-empty source")
+        return cls(
+            skill_id=skill.id,
+            content_hash=skill.content_hash,
+            capability=_EMPTY_SOURCE_CAPABILITY,
+            when_to_use=_EMPTY_SOURCE_WHEN_TO_USE,
+            requires=(),
+            produces=(),
+            tools=(),
+            evidence=(),
+            source_status="empty",
+        )
 
     @classmethod
     def from_extraction(
@@ -149,21 +178,34 @@ class SkillContract:
     def from_dict(cls, payload: dict[str, Any]) -> SkillContract:
         """Load a previously validated canonical contract."""
 
-        _require_exact_keys(payload, _SERIALIZED_KEYS, label="serialized contract")
+        source_status = payload.get("source_status", "available")
+        expected_keys = (
+            _EMPTY_SOURCE_SERIALIZED_KEYS if source_status == "empty" else _SERIALIZED_KEYS
+        )
+        _require_exact_keys(payload, expected_keys, label="serialized contract")
+        requires = tuple(_fields_from_serialized(payload.get("requires"), "requires"))
+        produces = tuple(_fields_from_serialized(payload.get("produces"), "produces"))
+        tools = tuple(_fields_from_serialized(payload.get("tools"), "tools"))
+        evidence = tuple(_evidence_from_serialized(payload.get("evidence")))
+        capability = _required_string(payload, "capability", label="serialized contract")
+        when_to_use = _required_string(payload, "when_to_use", label="serialized contract")
+        if source_status == "empty":
+            if requires or produces or tools or evidence:
+                raise ContractSchemaError("empty-source contract must not contain semantic fields")
+            if capability != _EMPTY_SOURCE_CAPABILITY or when_to_use != _EMPTY_SOURCE_WHEN_TO_USE:
+                raise ContractSchemaError("empty-source contract must use deterministic sentinels")
+        else:
+            evidence = tuple(_require_evidence(list(evidence), label="contract evidence"))
         return cls(
             skill_id=_required_string(payload, "skill_id", label="serialized contract"),
             content_hash=_required_string(payload, "content_hash", label="serialized contract"),
-            capability=_required_string(payload, "capability", label="serialized contract"),
-            when_to_use=_required_string(payload, "when_to_use", label="serialized contract"),
-            requires=tuple(_fields_from_serialized(payload.get("requires"), "requires")),
-            produces=tuple(_fields_from_serialized(payload.get("produces"), "produces")),
-            tools=tuple(_fields_from_serialized(payload.get("tools"), "tools")),
-            evidence=tuple(
-                _require_evidence(
-                    _evidence_from_serialized(payload.get("evidence")),
-                    label="contract evidence",
-                )
-            ),
+            capability=capability,
+            when_to_use=when_to_use,
+            requires=requires,
+            produces=produces,
+            tools=tools,
+            evidence=evidence,
+            source_status=source_status,
         )
 
 
@@ -217,6 +259,7 @@ def _evidence_from_extraction(
     if not isinstance(value, list):
         raise ContractSchemaError(f"{label} must be a list")
     evidence: list[EvidenceRef] = []
+    out_of_range = 0
     for index, item in enumerate(value):
         item_label = f"{label}[{index}]"
         if not isinstance(item, dict):
@@ -226,7 +269,8 @@ def _evidence_from_extraction(
         if isinstance(line, bool) or not isinstance(line, int):
             raise ContractSchemaError(f"{item_label}.line must be an integer")
         if line < 1 or line > len(source_lines):
-            raise ContractSchemaError(f"{item_label}.line is outside the skill source")
+            out_of_range += 1
+            continue
         source_text = source_lines[line - 1]
         if not source_text.strip():
             continue
@@ -236,6 +280,10 @@ def _evidence_from_extraction(
                 line=line,
                 text=source_text,
             )
+        )
+    if not evidence and out_of_range:
+        raise ContractSchemaError(
+            f"{label} contains no valid source lines; source has {len(source_lines)} lines"
         )
     return evidence
 

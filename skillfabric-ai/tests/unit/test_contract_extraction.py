@@ -102,8 +102,19 @@ def test_contract_evidence_line_must_exist_in_source() -> None:
     payload = _payload()
     payload["evidence"] = [{"line": 99}]
 
-    with pytest.raises(ContractSchemaError, match="outside the skill source"):
+    with pytest.raises(ContractSchemaError, match="no valid source lines"):
         SkillContract.from_extraction(_skill(), payload)
+
+
+def test_contract_evidence_discards_out_of_range_lines_when_valid_references_remain() -> None:
+    payload = _payload()
+    payload["produces"][0]["evidence"] = [{"line": 2}, {"line": 99}]
+
+    contract = SkillContract.from_extraction(_skill(), payload)
+
+    assert [(item.line, item.text) for item in contract.produces[0].evidence] == [
+        (2, "Produces a normalized CSV table."),
+    ]
 
 
 def test_contract_evidence_discards_blank_lines_when_valid_references_remain() -> None:
@@ -155,6 +166,26 @@ def test_contract_capability_requires_source_evidence() -> None:
 
     with pytest.raises(ContractSchemaError, match="evidence"):
         SkillContract.from_extraction(_skill(), payload)
+
+
+def test_empty_source_contract_is_explicit_and_round_trips() -> None:
+    skill = make_skill("skill:empty", "empty", "")
+
+    contract = SkillContract.from_empty_source(skill)
+    serialized = contract.to_dict()
+
+    assert contract.source_status == "empty"
+    assert contract.requires == ()
+    assert contract.produces == ()
+    assert contract.tools == ()
+    assert contract.evidence == ()
+    assert serialized["source_status"] == "empty"
+    assert SkillContract.from_dict(serialized) == contract
+
+
+def test_empty_source_contract_rejects_nonempty_source() -> None:
+    with pytest.raises(ContractSchemaError, match="non-empty source"):
+        SkillContract.from_empty_source(_skill())
 
 
 def test_extraction_fails_closed_and_does_not_cache_invalid_contract(tmp_path) -> None:
