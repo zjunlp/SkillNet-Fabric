@@ -44,6 +44,25 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(result, _facade_route())
         self.assertIs(route.call_args.kwargs["explorer_backend"], backend)
 
+    def test_python_facade_forwards_explicit_planner_credentials(self) -> None:
+        from skillfabric import SkillFabric
+
+        expected = object()
+        with patch("skillfabric.api.plan_execution_package", return_value=expected) as planner:
+            result = SkillFabric(workspace=".skillfabric").plan(
+                "extract KPIs",
+                route=_facade_route(),
+                llm_api_key="skillsbench-key",
+                llm_api_base="https://skillsbench.example/v1",
+            )
+
+        self.assertIs(result, expected)
+        self.assertEqual(planner.call_args.kwargs["llm_api_key"], "skillsbench-key")
+        self.assertEqual(
+            planner.call_args.kwargs["llm_api_base"],
+            "https://skillsbench.example/v1",
+        )
+
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         dependencies = {

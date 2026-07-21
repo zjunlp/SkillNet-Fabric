@@ -117,20 +117,28 @@ class LLMConfig:
         env_path: str | Path | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
     ) -> LLMConfig:
         """Read LiteLLM configuration from an env file and process environment."""
 
         values = read_env_file(env_path)
-        api_base, api_base_key = _first_config_entry(
+        configured_api_base, api_base_key = _first_config_entry(
             values,
             ("SKILLFABRIC_LLM_API_BASE", "BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"),
             ("ANTHROPIC_BASE_URL",),
         )
-        api_key, credential_key = _first_config_entry(
+        configured_api_key, credential_key = _first_config_entry(
             values,
             ("SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"),
             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         )
+        resolved_api_key = configured_api_key if api_key is None else api_key
+        resolved_api_base = configured_api_base if api_base is None else api_base
+        if api_key is not None:
+            credential_key = "OPENAI_API_KEY"
+        if api_base is not None:
+            api_base_key = "OPENAI_BASE_URL"
         configured_model = model or _first_config_value(
             values,
             ("SKILLFABRIC_LLM_MODEL", "MODEL"),
@@ -143,7 +151,10 @@ class LLMConfig:
             credential_key=credential_key,
             api_base_key=api_base_key,
         )
-        api_base = _normalize_api_base(api_base or DEFAULT_API_BASE, model=resolved_model)
+        resolved_api_base = _normalize_api_base(
+            resolved_api_base or DEFAULT_API_BASE,
+            model=resolved_model,
+        )
         resolved_reasoning_effort = reasoning_effort or _first_value(
             values, "SKILLFABRIC_LLM_REASONING_EFFORT", default=DEFAULT_REASONING_EFFORT
         )
@@ -155,14 +166,14 @@ class LLMConfig:
         timeout = float(
             _first_value(values, "SKILLFABRIC_LLM_TIMEOUT", "TIMEOUT", default=str(DEFAULT_TIMEOUT))
         )
-        if not api_key:
+        if not resolved_api_key:
             raise ValueError(
                 "missing API key. Set API_KEY, OPENAI_API_KEY, or ANTHROPIC_AUTH_TOKEN. "
                 "Run `skillfabric help config` for details."
             )
         return cls(
-            api_base=api_base,
-            api_key=api_key,
+            api_base=resolved_api_base,
+            api_key=resolved_api_key,
             model=resolved_model,
             credential_source=_credential_source(credential_key),
             reasoning_effort=resolved_reasoning_effort,

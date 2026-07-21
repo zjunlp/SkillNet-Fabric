@@ -96,16 +96,38 @@ def _planner_contract_prompt() -> str:
     return " ".join(prompt.split())
 
 
-def test_planner_makes_supported_selected_skills_the_primary_workflow() -> None:
+def test_planner_makes_task_outcomes_authoritative_and_assigns_skill_roles() -> None:
     prompt = _planner_contract_prompt()
 
-    assert "evidence-backed capability candidates" in prompt
+    assert "quality of the final deliverables" in prompt
+    assert "The original task defines success" in prompt
+    assert "evidence-backed methods and constraints" in prompt
     assert "exact `skill_id`" in prompt
-    assert "default, authoritative execution path" in prompt
-    assert "account for every selected skill" in prompt
-    assert "load and follow its instructions" in prompt
-    assert "Do not replace a usable planned Skill" in prompt
-    assert "not an exclusive tool list or a mandatory workflow" not in prompt
+    assert "primary method for its assigned role" in prompt
+    assert "must not reduce task quality" in prompt
+    assert "Do not repeat Skill source text" in prompt
+
+
+def test_planner_preserves_open_requirements_and_handles_missing_information() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "minimum required coverage" in prompt
+    assert "closed schema" in prompt
+    assert "reasonable, conservative, internally consistent assumptions" in prompt
+    assert "Use placeholders only when" in prompt
+    assert "does not mean the executor lacks the ability" in prompt
+
+
+def test_planner_requires_a_complete_candidate_and_inspection_repair_cycle() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "complete end-to-end candidate early" in prompt
+    assert "inspection-and-repair cycle" in prompt
+    assert "highest-impact defect or weakest quality dimension" in prompt
+    assert "repair it" in prompt
+    assert "inspect the final version again" in prompt
+    assert "Validation without an allocated repair pass is incomplete" in prompt
+    assert "Prefer 800-1600 words" in prompt
 
 
 def test_planner_does_not_promote_method_dependencies_to_task_dependencies() -> None:
@@ -113,11 +135,8 @@ def test_planner_does_not_promote_method_dependencies_to_task_dependencies() -> 
 
     assert "not automatically a task dependency" in prompt
     assert "concrete execution-time blocker" in prompt
-    assert "only after that evidence exists" in prompt
-    assert "built-in tools or local libraries" in prompt
-    assert "same task constraints, deliverables, acceptance criteria, and verification" in prompt
-    assert "Do not conclude that no compliant alternative exists solely" in prompt
-    assert "only after reasonable available alternatives have been attempted" in prompt
+    assert "only after observing that evidence" in prompt
+    assert "preserve the deliverables, acceptance criteria, and unaffected workflow" in prompt
     assert "plan an explicit failure" not in prompt
     assert "OPENROUTER" not in prompt
     assert "visual_creation_task" not in prompt
@@ -156,7 +175,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_skill_first_delivery"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_outcome_first_quality_loop"
     messages = calls[0]["messages"]
     prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
     assert "skill:pdf-table-parser" in prompt
@@ -166,18 +185,12 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "relation_evidence" in prompt
     assert "source before target" in prompt
     assert "producer-to-consumer handoff" in prompt
-    assert "complete, task-specific delivery plan" in prompt
-    assert "deliverable checklist" in prompt
-    assert "target path" in prompt
+    assert "compact, task-specific execution prompt" in prompt
+    assert "requirement ledger" in prompt
     assert "acceptance criteria" in prompt
-    assert "verification action" in prompt
-    assert "recompute or cross-check" in prompt
-    assert "open or render" in prompt
-    assert "inspect" in prompt
-    assert "revise" in prompt
-    assert "Do not ask the user for credentials and then claim success" in prompt
-    assert "default, authoritative execution path" in prompt
-    assert "load and follow its instructions" in prompt
+    assert "Blueprint, Production, and Inspection and Repair" in prompt
+    assert "actual inspection of the final artifacts" in prompt
+    assert "repaired final artifacts pass" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
     execution_prompt = result.prompt_path.read_text()
@@ -225,12 +238,16 @@ def test_plan_uses_explicit_runtime_identity_instead_of_env_model(
         package_root=workspace / "runs" / "explicit-runtime" / "execution_package",
         llm_model="gpt-5.5",
         llm_reasoning_effort="xhigh",
+        llm_api_key="skillsbench-key",
+        llm_api_base="https://skillsbench.example/v1",
     )
 
     assert captured == {
         "env_path": env_file,
         "model": "gpt-5.5",
         "reasoning_effort": "xhigh",
+        "api_key": "skillsbench-key",
+        "api_base": "https://skillsbench.example/v1",
     }
 
 

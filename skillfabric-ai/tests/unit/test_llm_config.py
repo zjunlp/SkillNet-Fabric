@@ -145,6 +145,27 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.reasoning_effort, "medium")
             self.assertEqual(env_path.read_text(encoding="utf-8"), original)
 
+    def test_explicit_credentials_override_env_without_mutation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            original = (
+                "API_KEY=graph-key\n"
+                "BASE_URL=https://graph.example.test/v1\n"
+                "MODEL=openai/test-model\n"
+            )
+            env_path.write_text(original, encoding="utf-8")
+
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
+                config = LLMConfig.from_env(
+                    env_path=env_path,
+                    api_key="skillsbench-key",
+                    api_base="https://skillsbench.example.test/v1",
+                )
+
+            self.assertEqual(config.api_key, "skillsbench-key")
+            self.assertEqual(config.api_base, "https://skillsbench.example.test/v1")
+            self.assertEqual(env_path.read_text(encoding="utf-8"), original)
+
     def test_loads_primary_api_settings_from_skillnet_style_env_names(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
