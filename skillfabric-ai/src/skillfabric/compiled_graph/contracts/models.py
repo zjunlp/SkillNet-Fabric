@@ -228,7 +228,7 @@ def _fields_from_extraction(
         name = _required_string(item, "name", label=label)
         normalized_name = " ".join(name.lower().replace("_", " ").replace("-", " ").split())
         if normalized_name in seen_names:
-            raise ContractSchemaError(f"{field_name} contains duplicate name: {name}")
+            continue
         seen_names.add(normalized_name)
         evidence = _require_evidence(
             _evidence_from_extraction(

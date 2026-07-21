@@ -137,6 +137,30 @@ def test_contract_evidence_discards_blank_lines_when_valid_references_remain() -
     ]
 
 
+def test_contract_extraction_keeps_first_normalized_duplicate_field() -> None:
+    payload = _payload()
+    payload["tools"] = [
+        {
+            "name": "nix_shell",
+            "description": "Primary source-grounded tool description.",
+            "evidence": [{"line": 3}],
+        },
+        {
+            "name": "NIX-SHELL",
+            "description": "Redundant spelling of the same tool.",
+            "evidence": [{"line": 99}],
+        },
+    ]
+
+    contract = SkillContract.from_extraction(_skill(), payload)
+
+    assert [field.name for field in contract.tools] == ["nix_shell"]
+    assert contract.tools[0].description == "Primary source-grounded tool description."
+    assert [(item.line, item.text) for item in contract.tools[0].evidence] == [
+        (3, "Use pdfplumber for extraction."),
+    ]
+
+
 def test_contract_rejects_evidence_when_all_references_are_blank() -> None:
     skill = make_skill(
         "skill:blank-line",
