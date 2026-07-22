@@ -28,6 +28,7 @@ class RouterConfig:
     explorer_timeout_seconds: float = 300.0
     explorer_max_attempts: int = 2
     explorer_retry_delay_seconds: float = 1.0
+    explorer_reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if self.trace_id is not None:

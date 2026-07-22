@@ -132,6 +132,24 @@ class CodexSdkEnvTests(unittest.TestCase):
 
 
 class ClaudeCodeSdkEnvPrecedenceTests(unittest.TestCase):
+    def test_explicit_model_and_reasoning_override_env_file_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "MODEL=gpt-5.4-mini\nSKILLFABRIC_LLM_REASONING_EFFORT=medium\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, _cleared_sdk_env(), clear=False):
+                env = build_claude_code_sdk_env(
+                    env_path,
+                    model="gpt-5.6-terra",
+                    reasoning_effort="xhigh",
+                )
+
+        self.assertEqual(env["ANTHROPIC_MODEL"], "gpt-5.6-terra")
+        self.assertEqual(env["ANTHROPIC_REASONING_EFFORT"], "xhigh")
+
     def test_env_file_overrides_existing_claude_code_shell_values(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"

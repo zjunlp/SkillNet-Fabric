@@ -59,6 +59,7 @@ class ClaudeCodeWikiExplorerBackend:
     load_timeout_ms: int = 30_000
     execution_timeout_seconds: float = 300.0
     tool_budget: dict[str, int] | None = None
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         _require_int_at_least(
@@ -82,6 +83,10 @@ class ClaudeCodeWikiExplorerBackend:
             raise ValueError("execution_timeout_seconds must be finite and at least 1")
         if self.model is not None and not self.model.strip():
             raise ValueError("model must be a non-empty string when provided")
+        if self.reasoning_effort is not None and (
+            not isinstance(self.reasoning_effort, str) or not self.reasoning_effort.strip()
+        ):
+            raise ValueError("reasoning_effort must be a non-empty string when provided")
         self.tool_budget = _normalize_tool_budget(
             self.tool_budget,
             max_selected_skills=self.max_selected_skills,
@@ -180,7 +185,11 @@ class ClaudeCodeWikiExplorerBackend:
             cwd=query_wiki_root,
             model=self.model,
             read_roots=[query_wiki_root],
-            env=_sdk_env(self.env_file),
+            env=_sdk_env(
+                self.env_file,
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+            ),
             event_dir=cc_dir,
             max_turns=self.max_turns,
             load_timeout_ms=self.load_timeout_ms,
@@ -345,8 +354,17 @@ def _require_int_at_least(value: Any, *, name: str, minimum: int) -> None:
         raise ValueError(f"{name} must be an integer at least {minimum}")
 
 
-def _sdk_env(env_file: str | Path) -> dict[str, str]:
-    return build_claude_code_sdk_env(env_file)
+def _sdk_env(
+    env_file: str | Path,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> dict[str, str]:
+    return build_claude_code_sdk_env(
+        env_file,
+        model=model,
+        reasoning_effort=reasoning_effort,
+    )
 
 
 def _run_sdk_query_sync(

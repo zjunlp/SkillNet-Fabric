@@ -119,6 +119,7 @@ class SkillFabric:
             max_depth=overrides.pop("max_depth", defaults.max_depth),
             trace_id=overrides.pop("trace_id", None),
             explorer_model=overrides.pop("explorer_model", None),
+            explorer_reasoning_effort=overrides.pop("explorer_reasoning_effort", None),
             explorer_max_turns=overrides.pop(
                 "explorer_max_turns",
                 defaults.explorer_max_turns,

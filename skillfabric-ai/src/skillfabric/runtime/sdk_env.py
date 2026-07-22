@@ -67,6 +67,8 @@ def build_claude_code_sdk_env(
     env_file: str | Path,
     *,
     runtime_env_path: str | Path | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, str]:
     """Resolve Claude Code SDK env with env-file values taking precedence."""
 
@@ -88,16 +90,11 @@ def build_claude_code_sdk_env(
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
     )
-    llm_model = _first_env_value(
-        shell_env,
-        env_file_values,
-        "SKILLFABRIC_LLM_MODEL",
-        "MODEL",
+    llm_model = model or _first_env_value(
+        shell_env, env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL"
     )
-    llm_reasoning_effort = _first_env_value(
-        shell_env,
-        env_file_values,
-        "SKILLFABRIC_LLM_REASONING_EFFORT",
+    llm_reasoning_effort = reasoning_effort or _first_env_value(
+        shell_env, env_file_values, "SKILLFABRIC_LLM_REASONING_EFFORT"
     )
     if llm_api_key:
         env["OPENAI_API_KEY"] = llm_api_key
@@ -123,14 +120,20 @@ def build_claude_code_sdk_env(
             env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
     if llm_model:
         model_name = _claude_model_name(llm_model)
-        if _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL") or not env.get(
-            "ANTHROPIC_MODEL"
-        ):
+        if model is not None or _env_file_has_any(
+            env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL"
+        ) or not env.get("ANTHROPIC_MODEL"):
             env["ANTHROPIC_MODEL"] = model_name
-        env.setdefault("ANTHROPIC_SMALL_FAST_MODEL", env["ANTHROPIC_MODEL"])
-        env.setdefault("ANTHROPIC_DEFAULT_SONNET_MODEL", env["ANTHROPIC_MODEL"])
-        env.setdefault("ANTHROPIC_DEFAULT_HAIKU_MODEL", env["ANTHROPIC_MODEL"])
-        env.setdefault("ANTHROPIC_DEFAULT_OPUS_MODEL", env["ANTHROPIC_MODEL"])
+        for key in (
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        ):
+            if model is not None:
+                env[key] = env["ANTHROPIC_MODEL"]
+            else:
+                env.setdefault(key, env["ANTHROPIC_MODEL"])
     if llm_reasoning_effort:
         env["ANTHROPIC_REASONING_EFFORT"] = llm_reasoning_effort
     if runtime_env_path is not None:

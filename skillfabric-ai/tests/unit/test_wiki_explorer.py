@@ -115,6 +115,28 @@ def test_backend_uses_the_canonical_schema_and_writes_route_artifacts(tmp_path) 
     assert usage["cache_read_input_tokens"] == 23
 
 
+def test_backend_uses_explicit_model_and_reasoning_over_env_file(tmp_path) -> None:
+    root = _query_root(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MODEL=gpt-5.4-mini\nSKILLFABRIC_LLM_REASONING_EFFORT=medium\n",
+        encoding="utf-8",
+    )
+    runtime = StubRuntime(_empty_package())
+
+    ClaudeCodeWikiExplorerBackend(
+        env_file=env_file,
+        model="gpt-5.6-terra",
+        reasoning_effort="xhigh",
+        sdk_runtime=runtime,
+    ).explore(query="unsupported task", query_wiki_root=root, trace_dir=tmp_path / "trace")
+
+    assert runtime.options.model == "gpt-5.6-terra"
+    assert runtime.options.effort == "xhigh"
+    assert runtime.options.env["ANTHROPIC_MODEL"] == "gpt-5.6-terra"
+    assert runtime.options.env["ANTHROPIC_REASONING_EFFORT"] == "xhigh"
+
+
 def test_backend_default_tool_budget_scales_with_the_selection_limit(tmp_path) -> None:
     root = _query_root(tmp_path)
     trace = tmp_path / "trace"

@@ -34,6 +34,7 @@ class WikiExplorerConfig:
     execution_timeout_seconds: float = 300.0
     max_attempts: int = 2
     retry_delay_seconds: float = 1.0
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -49,6 +50,10 @@ class WikiExplorerConfig:
             or self.retry_delay_seconds < 0
         ):
             raise ValueError("retry_delay_seconds must be finite and non-negative")
+        if self.reasoning_effort is not None and (
+            not isinstance(self.reasoning_effort, str) or not self.reasoning_effort.strip()
+        ):
+            raise ValueError("reasoning_effort must be a non-empty string when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +82,7 @@ def explore_query_wiki(
             env_file=config.env_file,
             max_selected_skills=config.max_selected_skills,
             model=config.model,
+            reasoning_effort=config.reasoning_effort,
             sdk_runtime=sdk_runtime,
             max_turns=config.max_turns,
             load_timeout_ms=config.load_timeout_ms,
