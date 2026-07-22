@@ -100,6 +100,9 @@ result = sf.plan(task, route=route, planner_context_max_tokens=100_000)
 print(result.prompt_path)
 ```
 
+Pass `llm_timeout_seconds=0` to disable the Planner request deadline. Omitting the option preserves
+the timeout configured by `SKILLFABRIC_LLM_TIMEOUT` or the runtime default.
+
 Routing uses the Claude Code explorer by default. Install the optional Codex
 dependency and inject its backend when an isolated Codex app-server is required:
 

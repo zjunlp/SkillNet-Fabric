@@ -119,7 +119,7 @@ class LLMConfig:
         if not isinstance(self.reasoning_effort, str):
             raise ValueError("reasoning_effort must be a string")
         _require_positive_int(self.max_tokens, name="max_tokens")
-        _require_positive_float(self.timeout, name="timeout")
+        _require_nonnegative_float(self.timeout, name="timeout")
 
     @classmethod
     def from_env(
@@ -130,6 +130,7 @@ class LLMConfig:
         reasoning_effort: str | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
+        timeout: float | None = None,
     ) -> LLMConfig:
         """Read LiteLLM configuration from an env file and process environment."""
 
@@ -174,8 +175,17 @@ class LLMConfig:
                 values, "SKILLFABRIC_LLM_MAX_TOKENS", "MAX_TOKENS", default=str(DEFAULT_MAX_TOKENS)
             )
         )
-        timeout = float(
-            _first_value(values, "SKILLFABRIC_LLM_TIMEOUT", "TIMEOUT", default=str(DEFAULT_TIMEOUT))
+        resolved_timeout = (
+            float(
+                _first_value(
+                    values,
+                    "SKILLFABRIC_LLM_TIMEOUT",
+                    "TIMEOUT",
+                    default=str(DEFAULT_TIMEOUT),
+                )
+            )
+            if timeout is None
+            else timeout
         )
         if not resolved_api_key:
             raise ValueError(
@@ -189,7 +199,7 @@ class LLMConfig:
             credential_source=_credential_source(credential_key),
             reasoning_effort=resolved_reasoning_effort,
             max_tokens=max_tokens,
-            timeout=timeout,
+            timeout=resolved_timeout,
         )
 
 
@@ -287,13 +297,27 @@ def litellm_completion(
         "max_tokens": resolved_max_tokens,
         "api_base": resolved.api_base,
         "api_key": _provider_api_key(resolved, resolved_model),
-        "timeout": resolved.timeout,
-        "request_timeout": resolved.timeout,
-        "force_timeout": resolved.timeout,
         "max_retries": DEFAULT_NETWORK_RETRIES,
     }
+    if resolved.timeout == 0:
+        import httpx
+
+        call_kwargs["timeout"] = httpx.Timeout(None)
+    else:
+        call_kwargs.update(
+            timeout=resolved.timeout,
+            request_timeout=resolved.timeout,
+            force_timeout=resolved.timeout,
+        )
     if resolved.reasoning_effort:
-        call_kwargs["reasoning_effort"] = resolved.reasoning_effort
+        if resolved_model.startswith("openai/responses/"):
+            extra_body = dict(call_kwargs.get("extra_body") or {})
+            reasoning = dict(extra_body.get("reasoning") or {})
+            reasoning["effort"] = resolved.reasoning_effort
+            extra_body["reasoning"] = reasoning
+            call_kwargs["extra_body"] = extra_body
+        else:
+            call_kwargs["reasoning_effort"] = resolved.reasoning_effort
     usage_context = _current_usage_context()
     operation = usage_operation or "llm"
     metadata = {**usage_context.metadata, **(usage_metadata or {})}
@@ -347,7 +371,8 @@ def _direct_litellm_completion(call_kwargs: dict[str, Any], timeout: float) -> A
     import litellm
 
     litellm.suppress_debug_info = True
-    litellm.request_timeout = timeout
+    if timeout > 0:
+        litellm.request_timeout = timeout
     return litellm.completion(**call_kwargs)
 
 
@@ -708,4 +733,13 @@ def _require_positive_float(value: object, *, name: str) -> float:
     resolved = float(value)
     if not math.isfinite(resolved) or resolved <= 0:
         raise ValueError(f"{name} must be a finite positive number")
+    return resolved
+
+
+def _require_nonnegative_float(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    resolved = float(value)
+    if not math.isfinite(resolved) or resolved < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
     return resolved

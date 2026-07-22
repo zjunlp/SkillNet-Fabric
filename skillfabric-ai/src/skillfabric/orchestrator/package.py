@@ -64,6 +64,7 @@ def plan_execution_package(
     llm_reasoning_effort: str | None = None,
     llm_api_key: str | None = None,
     llm_api_base: str | None = None,
+    llm_timeout_seconds: float | None = None,
     planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
     planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
@@ -94,12 +95,17 @@ def plan_execution_package(
 
     contexts = _selected_skill_contexts(workspace, route)
     messages = _planner_messages(query=task, route=route, contexts=contexts)
+    llm_options: dict[str, Any] = {
+        "env_path": env_file,
+        "model": llm_model,
+        "reasoning_effort": llm_reasoning_effort,
+        "api_key": llm_api_key,
+        "api_base": llm_api_base,
+    }
+    if llm_timeout_seconds is not None:
+        llm_options["timeout"] = llm_timeout_seconds
     llm_config = LLMConfig.from_env(
-        env_path=env_file,
-        model=llm_model,
-        reasoning_effort=llm_reasoning_effort,
-        api_key=llm_api_key,
-        api_base=llm_api_base,
+        **llm_options,
     )
     estimated_prompt_tokens = count_message_tokens(messages, model=llm_config.model)
     if estimated_prompt_tokens > planner_context_max_tokens:

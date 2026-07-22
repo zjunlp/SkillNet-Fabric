@@ -54,6 +54,7 @@ class PublicPackageTests(unittest.TestCase):
                 route=_facade_route(),
                 llm_api_key="skillsbench-key",
                 llm_api_base="https://skillsbench.example/v1",
+                llm_timeout_seconds=0,
             )
 
         self.assertIs(result, expected)
@@ -62,6 +63,7 @@ class PublicPackageTests(unittest.TestCase):
             planner.call_args.kwargs["llm_api_base"],
             "https://skillsbench.example/v1",
         )
+        self.assertEqual(planner.call_args.kwargs["llm_timeout_seconds"], 0)
 
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -72,7 +74,7 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertEqual(
             dependencies,
-            {"faiss-cpu", "litellm", "numpy", "pyyaml"},
+            {"faiss-cpu", "httpx", "litellm", "numpy", "pyyaml"},
         )
 
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:

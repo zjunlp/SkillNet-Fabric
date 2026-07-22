@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
   "faiss-cpu>=1.8",
+  "httpx>=0.28,<1.0",
   "litellm>=1.63.8",
   "numpy>=1.26",
   "pyyaml>=6.0",

@@ -208,6 +208,34 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert request["estimated_prompt_tokens"] == 1200
 
 
+def test_plan_forwards_explicit_timeout_to_llm_config(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    config_calls: list[dict[str, object]] = []
+
+    def from_env(**options):
+        config_calls.append(options)
+        return package_module.LLMConfig(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            model="openai/test-model",
+            timeout=options["timeout"],
+        )
+
+    monkeypatch.setattr(package_module.LLMConfig, "from_env", from_env)
+    monkeypatch.setattr(package_module, "litellm_completion", lambda **_kwargs: _planner_response())
+
+    plan_execution_package(
+        workspace,
+        _route(),
+        query="extract financial KPIs",
+        package_root=workspace / "runs" / "timeout-test" / "execution_package",
+        llm_timeout_seconds=0,
+    )
+
+    assert config_calls[0]["timeout"] == 0
+
+
 def test_plan_uses_explicit_runtime_identity_instead_of_env_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

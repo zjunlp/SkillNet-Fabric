@@ -56,7 +56,7 @@ class LLMConfigTests(unittest.TestCase):
             {"model": ""},
             {"max_tokens": 0},
             {"max_tokens": True},
-            {"timeout": 0},
+            {"timeout": -1},
             {"timeout": float("nan")},
         ]
 
@@ -131,6 +131,7 @@ class LLMConfigTests(unittest.TestCase):
                 "BASE_URL=https://api.example.test/v1\n"
                 "MODEL=gpt-5.5\n"
                 "SKILLFABRIC_LLM_REASONING_EFFORT=xhigh\n"
+                "SKILLFABRIC_LLM_TIMEOUT=120\n"
             )
             env_path.write_text(original, encoding="utf-8")
 
@@ -139,10 +140,12 @@ class LLMConfigTests(unittest.TestCase):
                     env_path=env_path,
                     model="openai/responses/gpt-5.6-luna",
                     reasoning_effort="medium",
+                    timeout=300,
                 )
 
             self.assertEqual(config.model, "openai/responses/gpt-5.6-luna")
             self.assertEqual(config.reasoning_effort, "medium")
+            self.assertEqual(config.timeout, 300.0)
             self.assertEqual(env_path.read_text(encoding="utf-8"), original)
 
     def test_explicit_credentials_override_env_without_mutation(self) -> None:
@@ -362,6 +365,58 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(calls[0]["request_timeout"], 15.0)
         self.assertEqual(calls[0]["force_timeout"], 15.0)
         self.assertEqual(fake_litellm.request_timeout, 15.0)
+
+    def test_litellm_completion_uses_native_reasoning_for_responses_models(self) -> None:
+        calls: list[dict[str, object]] = []
+        fake_litellm = types.SimpleNamespace()
+
+        def fake_completion(**kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        fake_litellm.completion = fake_completion
+        with patch.dict(sys.modules, {"litellm": fake_litellm}):
+            litellm_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                config=LLMConfig(
+                    api_base="https://example.test/v1",
+                    api_key="sk-test",
+                    model="openai/responses/gpt-5.6-terra",
+                    reasoning_effort="xhigh",
+                ),
+            )
+
+        self.assertNotIn("reasoning_effort", calls[0])
+        self.assertEqual(calls[0]["extra_body"], {"reasoning": {"effort": "xhigh"}})
+
+    def test_litellm_completion_disables_timeout_layers_for_zero(self) -> None:
+        calls: list[dict[str, object]] = []
+        fake_litellm = types.SimpleNamespace(
+            completion=lambda **kwargs: (
+                calls.append(kwargs) or {"choices": [{"message": {"content": "ok"}}]}
+            ),
+            request_timeout=77.0,
+        )
+
+        with patch.dict(sys.modules, {"litellm": fake_litellm}):
+            litellm_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                config=LLMConfig(
+                    api_base="https://example.test/v1",
+                    api_key="sk-test",
+                    model="openai/test-model",
+                    timeout=0,
+                ),
+            )
+
+        timeout = calls[0]["timeout"]
+        self.assertIsNone(timeout.connect)
+        self.assertIsNone(timeout.read)
+        self.assertIsNone(timeout.write)
+        self.assertIsNone(timeout.pool)
+        self.assertNotIn("request_timeout", calls[0])
+        self.assertNotIn("force_timeout", calls[0])
+        self.assertEqual(fake_litellm.request_timeout, 77.0)
 
     def test_skillfabric_llm_env_names_are_primary_for_public_config(self) -> None:
         with TemporaryDirectory() as tmp:
