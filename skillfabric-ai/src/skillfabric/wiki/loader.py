@@ -95,14 +95,15 @@ def _read_json_object(path: Path) -> dict[str, Any]:
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON in {path} line {line_number}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"{path} line {line_number} must be a JSON object")
-        rows.append(payload)
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON in {path} line {line_number}: {exc}") from exc
+            if not isinstance(payload, dict):
+                raise ValueError(f"{path} line {line_number} must be a JSON object")
+            rows.append(payload)
     return rows

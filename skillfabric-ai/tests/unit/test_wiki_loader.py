@@ -23,6 +23,22 @@ class WikiLoaderTests(unittest.TestCase):
             self.assertTrue(source.skill_core_links("skill:financial-kpi-extractor"))
             self.assertTrue(source.operational_edges)
 
+    def test_loads_raw_text_with_unicode_line_separators(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / ".skillfabric"
+            build_fixture_workspace(workspace)
+            registry_path = workspace / "graph" / "registry.jsonl"
+            rows = registry_path.read_text(encoding="utf-8").split("\n")
+            payload = json.loads(rows[0])
+            raw_text = "before\u0085middle\u2028after"
+            payload["raw_text"] = raw_text
+            rows[0] = json.dumps(payload, ensure_ascii=False)
+            registry_path.write_text("\n".join(rows), encoding="utf-8")
+
+            source = load_wiki_source(Workspace(workspace))
+
+            self.assertEqual(source.skills[payload["id"]].raw_text, raw_text)
+
     def test_rejects_unknown_graph_fields(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp) / ".skillfabric"
