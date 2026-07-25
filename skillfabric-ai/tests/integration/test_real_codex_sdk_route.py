@@ -66,11 +66,39 @@ def test_real_codex_sdk_routes_from_semantic_query_wiki(tmp_path: Path) -> None:
         embedding_provider=FakeEmbeddingProvider(),
     )
 
-    assert len(result.selected_skill_ids) <= 4
+    assert 0 < len(result.selected_skill_ids) <= 4
+    assert "skill:pdf-table-parser" in result.selected_skill_ids
+    assert "skill:financial-kpi-extractor" in result.selected_skill_ids
+    assert any(
+        relation.relation_type == "depend_on"
+        and relation.source_skill == "skill:pdf-table-parser"
+        and relation.target_skill == "skill:financial-kpi-extractor"
+        and relation.evidence
+        for relation in result.relation_evidence
+    )
     trace = workspace / "runs" / "real-codex-sdk-route"
+    query_wiki_root = trace / "query_wiki"
+    for selected in result.selected_skills:
+        assert selected.evidence
+        assert all((query_wiki_root / path).is_file() for path in selected.evidence)
+        assert set(selected.evidence) <= set(result.wiki_pages_read)
     backend_artifact = json.loads(
         (trace / "cc_explorer" / "backend.json").read_text(encoding="utf-8")
     )
     assert backend_artifact["backend"] == "codex"
     assert backend_artifact["model"] == model
+    access = json.loads(
+        (trace / "cc_explorer" / "operational_access.json").read_text(encoding="utf-8")
+    )
+    assert access["evidence_access"] is True
+    assert access["index_read"] is True
+    assert "card" in access["evidence_categories"]
+    assert "relation" in access["evidence_categories"]
+    assert access["policy_violation"] is None
+    closure = json.loads((trace / "cc_explorer" / "closure.json").read_text(encoding="utf-8"))
+    assert closure["status"] == "completed"
+    assert closure["outcome"] == "completed_nonempty"
+    assert closure["winning_attempt"] is not None
+    assert closure["attempts"]
+    assert all("usage" in attempt for attempt in closure["attempts"])
     assert (trace / "route.json").exists()

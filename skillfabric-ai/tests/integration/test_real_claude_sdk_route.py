@@ -54,8 +54,9 @@ def test_real_claude_sdk_routes_from_semantic_query_wiki(tmp_path) -> None:
     assert "skill:financial-kpi-extractor" in result.selected_skill_ids
     assert any(
         relation.relation_type == "depend_on"
-        and relation.source_skill == "skill:financial-kpi-extractor"
-        and relation.target_skill == "skill:pdf-table-parser"
+        and relation.source_skill == "skill:pdf-table-parser"
+        and relation.target_skill == "skill:financial-kpi-extractor"
+        and relation.evidence
         for relation in result.relation_evidence
     )
     trace = workspace / "runs" / "real-sdk-route"
