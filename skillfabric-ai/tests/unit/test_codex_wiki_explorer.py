@@ -230,6 +230,22 @@ class CodexWikiExplorerTests(unittest.TestCase):
         self.assertIn("index.md", spec["system_prompt"])
         self.assertIn("non-interactive", spec["system_prompt"])
         self.assertIn("extract financial KPIs", spec["user_prompt"])
+        self.assertNotIn("required_selected_skills", spec)
+
+    def test_codex_prompt_spec_carries_the_exact_selection_count(self) -> None:
+        spec = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+            required_selected_skills=5,
+        )
+
+        self.assertEqual(spec["required_selected_skills"], 5)
+        self.assertIn("Return exactly 5 selected skills", spec["system_prompt"])
+        self.assertIn(
+            "<required_selected_skills>5</required_selected_skills>",
+            spec["user_prompt"],
+        )
 
     def test_completed_empty_package_without_successful_wiki_access_fails_closed(self) -> None:
         success = _success_events()

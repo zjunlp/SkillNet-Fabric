@@ -60,6 +60,89 @@ def _query_context(tmp_path):
     return bundle, query_wiki
 
 
+def _minimal_query_wiki(tmp_path, *, skill_count: int = 3):
+    root = tmp_path / "query-wiki"
+    rows = []
+    for index in range(skill_count):
+        skill_id = f"skill:skill-{index}"
+        card_path = f"skills/cards/skill-{index}.md"
+        source_path = f"skills/sources/skill-{index}/SKILL.md"
+        for relative_path in (card_path, source_path):
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"# {skill_id}\n", encoding="utf-8")
+        rows.append(
+            {
+                "skill_id": skill_id,
+                "name": f"Skill {index}",
+                "description": "Fixture skill.",
+                "selectable": True,
+                "origin": "seed",
+                "card_path": card_path,
+                "source_path": source_path,
+                "route": {},
+                "alternative": False,
+            }
+        )
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "query": "fixture",
+                "skills": rows,
+                "semantic_edges_path": "edges/semantic_edges.jsonl",
+                "alternatives": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root, rows
+
+
+def _counted_package(rows: list[dict[str, Any]], count: int) -> SkillPackage:
+    selected = [
+        {
+            "skill_id": row["skill_id"],
+            "role": f"Use {row['skill_id']}.",
+            "evidence": [{"path": row["card_path"]}],
+        }
+        for row in rows[:count]
+    ]
+    return SkillPackage.from_dict(
+        {
+            "selected_skills": selected,
+            "near_misses": [],
+            "coverage_gaps": [],
+            "wiki_pages_read": [row["card_path"] for row in rows[:count]],
+            "rationale": "Fixture selection.",
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("selected_count", "expected_valid"),
+    [(1, False), (2, True), (3, False)],
+)
+def test_exact_selected_skill_count_is_enforced(
+    tmp_path,
+    selected_count: int,
+    expected_valid: bool,
+) -> None:
+    root, rows = _minimal_query_wiki(tmp_path)
+
+    validation = validate_skill_package(
+        _counted_package(rows, selected_count),
+        root,
+        max_selected_skills=3,
+        required_selected_skills=2,
+    )
+
+    assert validation.valid is expected_valid
+    if not expected_valid:
+        assert validation.errors == (
+            f"selected skill count {selected_count} differs from required_selected_skills=2",
+        )
+
+
 def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> None:
     bundle, query_wiki = _query_context(tmp_path)
     package = _package()

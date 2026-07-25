@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+
+import pytest
 
 from skillfabric.wiki.explorer.prompting import (
     EXPLORER_PROMPT_ID,
@@ -9,6 +12,63 @@ from skillfabric.wiki.explorer.prompting import (
     render_system_prompt,
     render_user_prompt,
 )
+
+_EXACT_COUNT_POLICY = (
+    "- Return exactly 5 selected skills for this request; this required count takes precedence "
+    "over the empty-selection option.\n"
+)
+_EXACT_COUNT_XML = "<required_selected_skills>5</required_selected_skills>\n"
+
+
+def test_default_prompt_bytes_remain_stable() -> None:
+    context = ExplorerPromptContext(
+        query="route task",
+        query_wiki_root="/tmp/query-wiki",
+        max_selected_skills=5,
+    )
+
+    system_digest = hashlib.sha256(render_system_prompt(context).encode()).hexdigest()
+    user_digest = hashlib.sha256(render_user_prompt(context).encode()).hexdigest()
+
+    assert system_digest == "47089c68fef14ba2d3d4d98f31121b61931206a4c1807aab304c1cd0d6e3d7d4"
+    assert user_digest == "7264b37c2668a1fbed1044c78ffca6b46be8b867802072fd1202ddf7e7e733be"
+    assert "required_selected_skills" not in context.to_trace_context()
+
+
+def test_exact_count_adds_only_one_policy_line_and_one_xml_field() -> None:
+    default_context = ExplorerPromptContext(
+        query="route task",
+        query_wiki_root="/tmp/query-wiki",
+        max_selected_skills=5,
+    )
+    exact_context = ExplorerPromptContext(
+        query="route task",
+        query_wiki_root="/tmp/query-wiki",
+        max_selected_skills=5,
+        required_selected_skills=5,
+    )
+
+    default_system = render_system_prompt(default_context)
+    exact_system = render_system_prompt(exact_context)
+    default_user = render_user_prompt(default_context)
+    exact_user = render_user_prompt(exact_context)
+
+    assert exact_system.count(_EXACT_COUNT_POLICY) == 1
+    assert exact_system.replace(_EXACT_COUNT_POLICY, "") == default_system
+    assert exact_user.count(_EXACT_COUNT_XML) == 1
+    assert exact_user.replace(_EXACT_COUNT_XML, "") == default_user
+    assert exact_context.to_trace_context()["required_selected_skills"] == 5
+
+
+@pytest.mark.parametrize("required", [True, -1, 1.5, "5", 6])
+def test_prompt_context_rejects_invalid_exact_count(required: object) -> None:
+    with pytest.raises(ValueError, match="required_selected_skills"):
+        ExplorerPromptContext(
+            query="route task",
+            query_wiki_root="/tmp/query-wiki",
+            max_selected_skills=5,
+            required_selected_skills=required,  # type: ignore[arg-type]
+        )
 
 
 def test_system_prompt_separates_fixed_policy_from_untrusted_query() -> None:

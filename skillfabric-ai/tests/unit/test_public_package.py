@@ -44,6 +44,20 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(result, _facade_route())
         self.assertIs(route.call_args.kwargs["explorer_backend"], backend)
 
+    def test_python_facade_forwards_optional_exact_selection_count(self) -> None:
+        from skillfabric import SkillFabric
+
+        with patch("skillfabric.api.route_task", return_value=_facade_route()) as route:
+            SkillFabric(workspace=".skillfabric").route(
+                "extract KPIs",
+                max_selected_skills=5,
+                required_selected_skills=5,
+            )
+
+        config = route.call_args.args[0]
+        self.assertEqual(config.max_selected_skills, 5)
+        self.assertEqual(config.required_selected_skills, 5)
+
     def test_python_facade_forwards_explicit_planner_credentials(self) -> None:
         from skillfabric import SkillFabric
 

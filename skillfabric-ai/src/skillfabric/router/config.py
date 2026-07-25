@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.router.traces import validate_trace_id
+from skillfabric.wiki.explorer.prompting import validate_required_selected_skills
 
 RouterSdkRuntime = Any
 
@@ -29,6 +30,7 @@ class RouterConfig:
     explorer_max_attempts: int = 2
     explorer_retry_delay_seconds: float = 1.0
     explorer_reasoning_effort: str | None = None
+    required_selected_skills: int | None = None
 
     def __post_init__(self) -> None:
         if self.trace_id is not None:
@@ -36,6 +38,10 @@ class RouterConfig:
 
         for name in ("max_selected_skills", "seed_limit", "max_depth"):
             _require_int_at_least(getattr(self, name), name=name, minimum=0)
+        validate_required_selected_skills(
+            self.required_selected_skills,
+            max_selected_skills=self.max_selected_skills,
+        )
         _require_int_at_least(
             self.expanded_limit,
             name="expanded_limit",

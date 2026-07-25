@@ -114,6 +114,7 @@ class SkillFabric:
                 "max_selected_skills",
                 defaults.max_selected_skills,
             ),
+            required_selected_skills=overrides.pop("required_selected_skills", None),
             seed_limit=overrides.pop("seed_limit", defaults.seed_limit),
             expanded_limit=overrides.pop("expanded_limit", defaults.expanded_limit),
             max_depth=overrides.pop("max_depth", defaults.max_depth),

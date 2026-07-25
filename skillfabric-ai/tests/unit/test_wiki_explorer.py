@@ -277,6 +277,9 @@ def test_backend_rejects_invalid_runtime_limits(overrides) -> None:
         {"max_attempts": 0},
         {"retry_delay_seconds": -1},
         {"retry_delay_seconds": float("nan")},
+        {"required_selected_skills": True},
+        {"required_selected_skills": -1},
+        {"max_selected_skills": 5, "required_selected_skills": 6},
     ],
 )
 def test_explorer_rejects_invalid_retry_limits(overrides) -> None:
@@ -335,6 +338,39 @@ def test_injected_backend_failure_uses_the_existing_outer_recovery(tmp_path) -> 
 
     assert backend.calls == 2
     assert run.package.to_dict() == _empty_package()
+
+
+def test_exact_count_validation_uses_the_existing_outer_recovery(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            self.calls += 1
+            return SkillPackage.from_dict(_empty_package())
+
+    backend = Backend()
+    with pytest.raises(ValueError, match="required_selected_skills=1"):
+        explore_query_wiki(
+            WikiExplorerConfig(
+                max_selected_skills=1,
+                required_selected_skills=1,
+                max_attempts=2,
+                retry_delay_seconds=0,
+            ),
+            query="find one skill",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            backend=backend,
+        )
+
+    assert backend.calls == 2
+    closure = json.loads((tmp_path / "trace" / "cc_explorer" / "closure.json").read_text())
+    assert closure["status"] == "route_failed"
+    assert len(closure["attempts"]) == 2
+    assert all(item["failure_kind"] == "validation" for item in closure["attempts"])
 
 
 def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:

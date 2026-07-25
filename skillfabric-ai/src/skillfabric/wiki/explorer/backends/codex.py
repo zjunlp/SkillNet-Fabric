@@ -26,6 +26,7 @@ from skillfabric.wiki.explorer.prompting import (
     default_tool_budget,
     render_system_prompt,
     render_user_prompt,
+    validate_required_selected_skills,
 )
 from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
@@ -51,6 +52,7 @@ def build_codex_prompt_spec(
     query: str,
     query_wiki_root: str | Path,
     max_selected_skills: int,
+    required_selected_skills: int | None = None,
     tool_budget: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build the exact Codex prompt and schema payload used by the backend."""
@@ -59,13 +61,14 @@ def build_codex_prompt_spec(
         query=query,
         query_wiki_root=query_wiki_root,
         max_selected_skills=max_selected_skills,
+        required_selected_skills=required_selected_skills,
         allowed_tools=CODEX_ALLOWED_TOOLS,
         tool_budget=_normalize_tool_budget(
             tool_budget,
             max_selected_skills=max_selected_skills,
         ),
     )
-    return {
+    payload = {
         "prompt_id": EXPLORER_PROMPT_ID,
         "query_wiki_root": context.query_wiki_root,
         "max_selected_skills": context.max_selected_skills,
@@ -77,6 +80,9 @@ def build_codex_prompt_spec(
         "user_prompt": render_user_prompt(context),
         "schema": skill_package_json_schema(),
     }
+    if context.required_selected_skills is not None:
+        payload["required_selected_skills"] = context.required_selected_skills
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +124,7 @@ class CodexWikiExplorerBackend:
     codex_bin: str | Path | None = None
     sdk_runtime: CodexSdkRuntime | None = None
     tool_budget: dict[str, int] | None = None
+    required_selected_skills: int | None = None
 
     CODEX_EXECUTION_CONTRACT = CODEX_EXECUTION_CONTRACT
 
@@ -126,6 +133,10 @@ class CodexWikiExplorerBackend:
             self.max_selected_skills,
             name="max_selected_skills",
             minimum=0,
+        )
+        validate_required_selected_skills(
+            self.required_selected_skills,
+            max_selected_skills=self.max_selected_skills,
         )
         if self.model is not None and (not isinstance(self.model, str) or not self.model.strip()):
             raise ValueError("model must be a non-empty string when provided")
@@ -178,6 +189,7 @@ class CodexWikiExplorerBackend:
             query=query,
             query_wiki_root=query_wiki_root,
             max_selected_skills=self.max_selected_skills,
+            required_selected_skills=self.required_selected_skills,
             tool_budget=tool_budget,
         )
         system_prompt = str(prompt_spec["system_prompt"])
@@ -196,25 +208,25 @@ class CodexWikiExplorerBackend:
             )
             + "\n",
         )
+        prompt_context = {
+            key: prompt_spec[key]
+            for key in (
+                "prompt_id",
+                "query_wiki_root",
+                "max_selected_skills",
+                "allowed_tools",
+                "tool_budget",
+                "permission_profile",
+                "execution_contract",
+            )
+        }
+        if "required_selected_skills" in prompt_spec:
+            prompt_context["required_selected_skills"] = prompt_spec[
+                "required_selected_skills"
+            ]
         atomic_write_text(
             cc_dir / "prompt_context.json",
-            json.dumps(
-                {
-                    key: prompt_spec[key]
-                    for key in (
-                        "prompt_id",
-                        "query_wiki_root",
-                        "max_selected_skills",
-                        "allowed_tools",
-                        "tool_budget",
-                        "permission_profile",
-                        "execution_contract",
-                    )
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
+            json.dumps(prompt_context, ensure_ascii=False, indent=2) + "\n",
         )
         atomic_write_text(
             cc_dir / "prompt_spec.json",

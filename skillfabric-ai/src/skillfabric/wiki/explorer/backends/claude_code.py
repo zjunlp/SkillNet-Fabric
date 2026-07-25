@@ -20,6 +20,7 @@ from skillfabric.wiki.explorer.prompting import (
     default_tool_budget,
     render_system_prompt,
     render_user_prompt,
+    validate_required_selected_skills,
 )
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
@@ -60,12 +61,17 @@ class ClaudeCodeWikiExplorerBackend:
     execution_timeout_seconds: float = 300.0
     tool_budget: dict[str, int] | None = None
     reasoning_effort: str | None = None
+    required_selected_skills: int | None = None
 
     def __post_init__(self) -> None:
         _require_int_at_least(
             self.max_selected_skills,
             name="max_selected_skills",
             minimum=0,
+        )
+        validate_required_selected_skills(
+            self.required_selected_skills,
+            max_selected_skills=self.max_selected_skills,
         )
         _require_int_at_least(self.max_turns, name="max_turns", minimum=1)
         _require_int_at_least(
@@ -111,6 +117,7 @@ class ClaudeCodeWikiExplorerBackend:
             query=query,
             query_wiki_root=query_wiki_root,
             max_selected_skills=self.max_selected_skills,
+            required_selected_skills=self.required_selected_skills,
             allowed_tools=ALLOWED_TOOLS,
             tool_budget=tool_budget,
         )
