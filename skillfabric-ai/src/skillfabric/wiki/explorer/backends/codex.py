@@ -7,6 +7,7 @@ import json
 import math
 import re
 import threading
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,11 @@ from typing import Any
 
 from skillfabric.runtime.sdk_env import CodexSdkEnvironment, build_codex_sdk_env
 from skillfabric.storage import atomic_write_text
+from skillfabric.wiki.explorer.backends.codex_session import (
+    CodexOperationalAccessError,
+    CodexStructuredOutputError,
+    run_codex_attempt,
+)
 from skillfabric.wiki.explorer.prompting import (
     EXPLORER_PROMPT_ID,
     ExplorerPromptContext,
@@ -25,17 +31,51 @@ from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_
 
 CodexSdkRuntime = Any
 CODEX_ALLOWED_TOOLS = ("exec_command",)
-CODEX_ALLOWED_ITEM_TYPES = frozenset(
-    {
-        "agentMessage",
-        "commandExecution",
-        "contextCompaction",
-        "reasoning",
-        "userMessage",
-    }
-)
-CODEX_TERMINAL_INTERACTION_EVENT = "item/commandExecution/terminalInteraction"
 PERMISSION_PROFILE = "skillfabric-query-wiki"
+CODEX_EXECUTION_GUIDANCE = """
+<codex_execution_guidance>
+- Begin with `index.md`, then use non-interactive `exec_command` reads and searches.
+- Keep paths relative to the supplied query-wiki root; inspect cards, sources, and
+  `semantic_edges.jsonl` only when they are needed as routing evidence.
+- Use read/list/search commands such as `sed`, `head`, `find`, and `rg`; do not use
+  `write_stdin`, interactive shells, redirects, file edits, network tools, or background jobs.
+- A successful route must be grounded in files actually read from this query wiki. If a command
+  fails, simplify the next read instead of returning a coverage gap without inspecting the wiki.
+</codex_execution_guidance>
+""".strip()
+
+
+def build_codex_prompt_spec(
+    *,
+    query: str,
+    query_wiki_root: str | Path,
+    max_selected_skills: int,
+    tool_budget: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Build the exact Codex prompt and schema payload used by the backend."""
+
+    context = ExplorerPromptContext(
+        query=query,
+        query_wiki_root=query_wiki_root,
+        max_selected_skills=max_selected_skills,
+        allowed_tools=CODEX_ALLOWED_TOOLS,
+        tool_budget=_normalize_tool_budget(
+            tool_budget,
+            max_selected_skills=max_selected_skills,
+        ),
+    )
+    return {
+        "prompt_id": EXPLORER_PROMPT_ID,
+        "query_wiki_root": context.query_wiki_root,
+        "max_selected_skills": context.max_selected_skills,
+        "allowed_tools": list(context.allowed_tools),
+        "tool_budget": dict(context.tool_budget or {}),
+        "permission_profile": PERMISSION_PROFILE,
+        "execution_contract": CODEX_EXECUTION_CONTRACT.to_dict(),
+        "system_prompt": render_system_prompt(context) + "\n\n" + CODEX_EXECUTION_GUIDANCE,
+        "user_prompt": render_user_prompt(context),
+        "schema": skill_package_json_schema(),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +114,7 @@ class CodexWikiExplorerBackend:
     reasoning_effort: str = "medium"
     execution_timeout_seconds: float = 300.0
     execution_contract: dict[str, Any] | None = None
+    codex_bin: str | Path | None = None
     sdk_runtime: CodexSdkRuntime | None = None
     tool_budget: dict[str, int] | None = None
 
@@ -123,30 +164,60 @@ class CodexWikiExplorerBackend:
     ) -> SkillPackage:
         """Return one schema-valid SkillPackage or propagate the failure."""
 
+        query_wiki_root = Path(query_wiki_root)
+        if query_wiki_root.is_symlink():
+            raise ValueError("query_wiki root must not be a symlink")
         query_wiki_root = query_wiki_root.resolve()
         if not query_wiki_root.is_dir():
             raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
         cc_dir = trace_dir / "cc_explorer"
         cc_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
-        context = ExplorerPromptContext(
+        prompt_spec = build_codex_prompt_spec(
             query=query,
             query_wiki_root=query_wiki_root,
             max_selected_skills=self.max_selected_skills,
-            allowed_tools=CODEX_ALLOWED_TOOLS,
             tool_budget=tool_budget,
         )
-        system_prompt = render_system_prompt(context)
-        user_prompt = render_user_prompt(context)
+        system_prompt = str(prompt_spec["system_prompt"])
+        user_prompt = str(prompt_spec["user_prompt"])
         atomic_write_text(cc_dir / "prompt.system.md", system_prompt)
         atomic_write_text(cc_dir / "prompt.user.md", user_prompt)
         atomic_write_text(
             cc_dir / "prompt_contract.json",
-            json.dumps({"prompt_id": EXPLORER_PROMPT_ID}, indent=2) + "\n",
+            json.dumps(
+                {
+                    "prompt_id": prompt_spec["prompt_id"],
+                    "schema": prompt_spec["schema"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
         )
         atomic_write_text(
             cc_dir / "prompt_context.json",
-            json.dumps(context.to_trace_context(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(
+                {
+                    key: prompt_spec[key]
+                    for key in (
+                        "prompt_id",
+                        "query_wiki_root",
+                        "max_selected_skills",
+                        "allowed_tools",
+                        "tool_budget",
+                        "permission_profile",
+                        "execution_contract",
+                    )
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
+        atomic_write_text(
+            cc_dir / "prompt_spec.json",
+            json.dumps(prompt_spec, ensure_ascii=False, indent=2) + "\n",
         )
         _write_json(cc_dir / "backend.json", self._backend_payload(runtime=None, metadata=None))
         _write_event(
@@ -184,7 +255,13 @@ class CodexWikiExplorerBackend:
                 )
             _write_json(cc_dir / "backend.json", self._backend_payload(runtime, metadata))
             _write_json(cc_dir / "usage.json", usage)
-            package = SkillPackage.from_dict(payload)
+            try:
+                package = SkillPackage.from_dict(payload)
+            except (TypeError, ValueError) as exc:
+                raise CodexStructuredOutputError(
+                    "Codex agent returned an invalid structured skill package"
+                ) from exc
+            _validate_operational_result(package, cc_dir=cc_dir)
             _write_json(cc_dir / "skill_package.json", package.to_dict())
             _write_event(
                 cc_dir,
@@ -196,11 +273,17 @@ class CodexWikiExplorerBackend:
                 "error_type": type(exc).__name__,
                 "error": _safe_error_text(
                     str(exc),
-                    paths=(() if codex_home is None else (codex_home,)),
+                    paths=(
+                        query_wiki_root,
+                        Path(self.env_file).expanduser().resolve(),
+                        *(() if codex_home is None else (codex_home,)),
+                    ),
                 ),
             }
             _write_json(cc_dir / "error.json", error)
             _write_event(cc_dir, {"event": "backend:error", **error})
+            with suppress(AttributeError, TypeError):
+                exc.__skillfabric_sanitized_error__ = error["error"]  # type: ignore[attr-defined]
             raise
 
     async def _explore_async(
@@ -215,76 +298,30 @@ class CodexWikiExplorerBackend:
         cc_dir: Path,
         command_budget: int,
     ) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
-        config = runtime.CodexConfig(
-            cwd=str(codex_home),
-            env=dict(settings.env),
-            config_overrides=(
-                "project_root_markers=[]",
-                "check_for_update_on_startup=false",
+        return await run_codex_attempt(
+            runtime,
+            settings,
+            codex_bin=None if self.codex_bin is None else str(self.codex_bin),
+            model=self.model,
+            reasoning_effort=self.reasoning_effort,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            query_wiki_root=query_wiki_root,
+            codex_home=codex_home,
+            cc_dir=cc_dir,
+            command_budget=command_budget,
+            execution_timeout_seconds=self.execution_timeout_seconds,
+            thread_config=_thread_config(
+                query_wiki_root=query_wiki_root,
+                codex_home=codex_home,
+                api_base=settings.api_base,
+            ),
+            output_schema=skill_package_json_schema(),
+            metadata_callback=lambda metadata: _write_json(
+                cc_dir / "backend.json",
+                self._backend_payload(runtime=runtime, metadata=metadata),
             ),
         )
-        codex = runtime.AsyncCodex(config=config)
-        turn = None
-        operation_succeeded = False
-        try:
-            async with asyncio.timeout(self.execution_timeout_seconds):
-                await codex.__aenter__()
-                metadata = _sdk_metadata(codex.metadata)
-                _write_json(
-                    cc_dir / "backend.json",
-                    self._backend_payload(runtime=runtime, metadata=metadata),
-                )
-                thread = await codex.thread_start(
-                    approval_mode=runtime.ApprovalMode.deny_all,
-                    base_instructions=system_prompt,
-                    config=_thread_config(
-                        query_wiki_root=query_wiki_root,
-                        codex_home=codex_home,
-                        api_base=settings.api_base,
-                    ),
-                    cwd=str(query_wiki_root),
-                    ephemeral=True,
-                    model=self.model,
-                )
-                turn = await thread.turn(
-                    user_prompt,
-                    cwd=str(query_wiki_root),
-                    effort=runtime.ReasoningEffort(self.reasoning_effort),
-                    model=self.model,
-                    output_schema=skill_package_json_schema(),
-                )
-                final_response, usage = await _collect_turn(
-                    turn,
-                    cc_dir=cc_dir,
-                    command_budget=command_budget,
-                )
-                result = _strict_json_object(final_response), usage, metadata
-                operation_succeeded = True
-                return result
-        except TimeoutError as exc:
-            if turn is not None:
-                await _best_effort_interrupt(turn)
-            _write_event(
-                cc_dir,
-                {"event": "sdk:timeout", "timeout_seconds": self.execution_timeout_seconds},
-            )
-            raise TimeoutError(
-                f"Codex query-wiki explorer exceeded {self.execution_timeout_seconds:g} seconds"
-            ) from exc
-        finally:
-            try:
-                await codex.close()
-            except Exception as exc:
-                _write_event(
-                    cc_dir,
-                    {
-                        "event": "sdk:cleanup_error",
-                        "error_type": type(exc).__name__,
-                        "error": _safe_error_text(str(exc), paths=(codex_home,)),
-                    },
-                )
-                if operation_succeeded:
-                    raise
 
     def _backend_payload(
         self,
@@ -298,6 +335,7 @@ class CodexWikiExplorerBackend:
             "sdk_version": str(getattr(runtime, "__version__", "unavailable")),
             "execution_contract": CODEX_EXECUTION_CONTRACT.to_dict(),
             "permission_profile": PERMISSION_PROFILE,
+            "prompt_id": EXPLORER_PROMPT_ID,
             "allowed_tools": list(CODEX_ALLOWED_TOOLS),
             "tool_enforcement": "event-audited-fail-closed",
             "command_budget": _command_budget(dict(self.tool_budget or {})),
@@ -305,87 +343,6 @@ class CodexWikiExplorerBackend:
         if metadata:
             payload["app_server"] = metadata
         return payload
-
-
-async def _collect_turn(
-    turn: Any,
-    *,
-    cc_dir: Path,
-    command_budget: int,
-) -> tuple[str, dict[str, int]]:
-    command_count = 0
-    budget_exceeded = False
-    policy_violation = ""
-    final_response = ""
-    fallback_response = ""
-    usage = None
-    completed_turn = None
-    async for event in turn.stream():
-        method = str(getattr(event, "method", ""))
-        payload = getattr(event, "payload", None)
-        item = _root_item(getattr(payload, "item", None))
-        item_type = str(getattr(item, "type", "") or "")
-        observed_violation = ""
-        if method == CODEX_TERMINAL_INTERACTION_EVENT:
-            observed_violation = "write_stdin"
-        elif (
-            method in {"item/started", "item/completed"}
-            and item_type
-            and item_type not in CODEX_ALLOWED_ITEM_TYPES
-        ):
-            observed_violation = item_type
-        elif (
-            method == "item/completed"
-            and item_type == "commandExecution"
-            and getattr(item, "process_id", None) is not None
-        ):
-            observed_violation = "background exec_command session"
-        if observed_violation and not policy_violation:
-            policy_violation = observed_violation
-            _write_event(
-                cc_dir,
-                {"event": "sdk:policy_violation", "activity": policy_violation},
-            )
-            await _best_effort_interrupt(turn)
-        if method == "item/started" and item_type == "commandExecution":
-            command_count += 1
-            if command_count > command_budget and not budget_exceeded:
-                budget_exceeded = True
-                await _best_effort_interrupt(turn)
-        elif method == "item/completed" and getattr(item, "type", "") == "agentMessage":
-            text = str(getattr(item, "text", "") or "")
-            phase = _enum_value(getattr(item, "phase", None))
-            if phase == "final_answer":
-                final_response = text
-            elif not phase and text:
-                fallback_response = text
-        elif method == "thread/tokenUsage/updated":
-            usage = getattr(payload, "token_usage", None)
-        elif method == "turn/completed":
-            completed_turn = getattr(payload, "turn", None)
-        _write_event(cc_dir, _event_summary(method, payload, item, command_count))
-
-    if budget_exceeded:
-        raise RuntimeError(f"Codex query-wiki tool budget exceeded: exec_command<={command_budget}")
-    if policy_violation:
-        raise RuntimeError(
-            f"Codex query-wiki observed disallowed Codex tool activity: {policy_violation}"
-        )
-    if completed_turn is None:
-        raise RuntimeError("Codex agent finished without a turn/completed event")
-    status = _enum_value(getattr(completed_turn, "status", None))
-    if status != "completed":
-        error = getattr(completed_turn, "error", None)
-        detail = str(getattr(error, "message", "") or status or "unknown status")
-        raise RuntimeError(f"Codex agent turn failed: {_safe_error_text(detail)}")
-    response = final_response or fallback_response
-    if not response.strip():
-        raise RuntimeError("Codex agent did not return a structured SkillPackage")
-    return response, _sdk_usage(
-        usage,
-        completed_turn=completed_turn,
-        command_count=command_count,
-    )
 
 
 def _thread_config(
@@ -497,98 +454,35 @@ def _command_budget(tool_budget: dict[str, int]) -> int:
     return min(tool_budget.get("exec_command", 0), tool_budget.get("total", 0))
 
 
-def _sdk_usage(
-    usage: Any,
-    *,
-    completed_turn: Any,
-    command_count: int,
-) -> dict[str, int]:
-    total = getattr(usage, "total", None)
-    return {
-        "duration_ms": _nonnegative_int(getattr(completed_turn, "duration_ms", 0)),
-        "input_tokens": _nonnegative_int(getattr(total, "input_tokens", 0)),
-        "cache_read_input_tokens": _nonnegative_int(
-            getattr(total, "cached_input_tokens", 0)
-        ),
-        "output_tokens": _nonnegative_int(getattr(total, "output_tokens", 0)),
-        "reasoning_output_tokens": _nonnegative_int(
-            getattr(total, "reasoning_output_tokens", 0)
-        ),
-        "total_tokens": _nonnegative_int(getattr(total, "total_tokens", 0)),
-        "total_calls": command_count,
-        "num_turns": 1,
-    }
-
-
-def _strict_json_object(value: str) -> dict[str, Any]:
-    def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, item in pairs:
-            if key in result:
-                raise ValueError(f"Codex response contains duplicate JSON key: {key}")
-            result[key] = item
-        return result
-
+def _validate_operational_result(package: SkillPackage, *, cc_dir: Path) -> None:
+    access_path = cc_dir / "operational_access.json"
     try:
-        payload = json.loads(value, object_pairs_hook=object_pairs)
-    except json.JSONDecodeError as exc:
-        raise ValueError("Codex agent did not return valid SkillPackage JSON") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("Codex agent SkillPackage response must be a JSON object")
-    return payload
-
-
-def _sdk_metadata(metadata: Any) -> dict[str, str]:
-    server = getattr(metadata, "serverInfo", None)
-    result = {
-        "name": str(getattr(server, "name", "") or "unknown"),
-        "version": str(getattr(server, "version", "") or "unknown"),
-    }
-    user_agent = str(getattr(metadata, "userAgent", "") or "")
-    if user_agent:
-        result["user_agent"] = user_agent
-    return result
-
-
-def _event_summary(
-    method: str,
-    payload: Any,
-    item: Any,
-    command_count: int,
-) -> dict[str, Any]:
-    event: dict[str, Any] = {"event": "sdk:event", "method": method}
-    item_type = str(getattr(item, "type", "") or "")
-    if item_type:
-        event["item_type"] = item_type
-    if item_type == "commandExecution":
-        event["command_count"] = command_count
-        status = _enum_value(getattr(item, "status", None))
-        if status:
-            event["status"] = status
-    if method == "turn/completed":
-        turn = getattr(payload, "turn", None)
-        status = _enum_value(getattr(turn, "status", None))
-        if status:
-            event["status"] = status
-        duration_ms = getattr(turn, "duration_ms", None)
-        if isinstance(duration_ms, int) and not isinstance(duration_ms, bool) and duration_ms >= 0:
-            event["duration_ms"] = duration_ms
-    return event
-
-
-def _root_item(item: Any) -> Any:
-    return getattr(item, "root", item)
-
-
-def _enum_value(value: Any) -> str:
-    return str(getattr(value, "value", value) or "")
-
-
-async def _best_effort_interrupt(turn: Any) -> None:
-    try:
-        await turn.interrupt()
-    except Exception:  # noqa: BLE001 - cleanup must preserve the original SDK failure.
+        access = json.loads(access_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CodexOperationalAccessError(
+            "Codex query-wiki explorer did not publish valid operational access evidence"
+        ) from exc
+    if not isinstance(access, dict) or access.get("evidence_access") is not True:
+        raise CodexOperationalAccessError(
+            "Codex query-wiki explorer did not prove successful Wiki evidence access"
+        )
+    semantic_empty = not package.selected_skills
+    access["semantic_empty"] = semantic_empty
+    if semantic_empty:
+        access["semantic_empty_valid"] = bool(
+            package.coverage_gaps
+            and access.get("index_read") is True
+            and access.get("candidate_lookup") is True
+        )
+        _write_json(access_path, access)
+        if access["semantic_empty_valid"] is not True:
+            raise CodexOperationalAccessError(
+                "Codex empty selection requires index.md access, candidate lookup, "
+                "and an explicit coverage gap"
+            )
         return
+    access["semantic_empty_valid"] = False
+    _write_json(access_path, access)
 
 
 def _run_codex_sync(
@@ -633,12 +527,6 @@ def _same_json_shape(value: Any, expected: Any) -> bool:
     return value == expected
 
 
-def _nonnegative_int(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return 0
-    return value
-
-
 def _require_int_at_least(value: Any, *, name: str, minimum: int) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError(f"{name} must be an integer at least {minimum}")
@@ -651,6 +539,7 @@ def _safe_error_text(value: str, *, paths: tuple[Path, ...] = ()) -> str:
         r"\1=[redacted]",
         text,
     )
+    text = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [redacted]", text)
     for path in sorted((str(path) for path in paths), key=len, reverse=True):
         if path:
             text = text.replace(path, "[isolated-codex-home]")
@@ -692,6 +581,8 @@ def _load_sdk_runtime() -> Any:
 __all__ = [
     "CODEX_EXECUTION_CONTRACT",
     "CodexExecutionContract",
+    "CodexOperationalAccessError",
     "CodexSdkRuntime",
     "CodexWikiExplorerBackend",
+    "build_codex_prompt_spec",
 ]

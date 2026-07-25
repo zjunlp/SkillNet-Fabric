@@ -337,6 +337,149 @@ def test_injected_backend_failure_uses_the_existing_outer_recovery(tmp_path) -> 
     assert run.package.to_dict() == _empty_package()
 
 
+def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
+            self.calls += 1
+            explorer = trace_dir / "cc_explorer"
+            explorer.mkdir(parents=True)
+            (explorer / "usage.json").write_text(
+                json.dumps({"input_tokens": self.calls, "output_tokens": 1}),
+                encoding="utf-8",
+            )
+            if self.calls == 1:
+                raise RuntimeError("503 service temporarily unavailable")
+            return SkillPackage.from_dict(_empty_package())
+
+    trace = tmp_path / "trace"
+    run = explore_query_wiki(
+        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
+        query="find a skill",
+        query_wiki_root=root,
+        trace_dir=trace,
+        backend=Backend(),
+    )
+
+    assert run.validation.valid
+    closure = json.loads((trace / "cc_explorer" / "closure.json").read_text())
+    assert closure["status"] == "completed"
+    assert closure["outcome"] == "completed_empty"
+    assert closure["winning_attempt"] == 2
+    assert [item["status"] for item in closure["attempts"]] == ["failed", "completed"]
+    assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
+    assert (trace / "cc_explorer" / "attempts" / "attempt-01" / "error.json").exists()
+    assert (trace / "cc_explorer" / "attempts" / "attempt-02" / "skill_package.json").exists()
+    usage = json.loads((trace / "cc_explorer" / "usage.json").read_text())
+    assert usage["attempts"] == [
+        {"input_tokens": 1, "output_tokens": 1},
+        {"input_tokens": 2, "output_tokens": 1},
+    ]
+
+
+def test_explorer_stops_after_an_unmetered_started_attempt(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        calls = 0
+
+        def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
+            self.calls += 1
+            explorer = trace_dir / "cc_explorer"
+            explorer.mkdir(parents=True)
+            (explorer / "turn_state.json").write_text(
+                '{"schema_version":1,"turn_started":true}',
+                encoding="utf-8",
+            )
+            raise RuntimeError("503 service temporarily unavailable")
+
+    backend = Backend()
+    with pytest.raises(RuntimeError, match="503 service"):
+        explore_query_wiki(
+            WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
+            query="x",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            backend=backend,
+        )
+    assert backend.calls == 1
+    closure = json.loads(
+        (tmp_path / "trace" / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+    )
+    assert closure["status"] == "route_failed"
+    assert closure["attempts"][0]["unmetered_attempt"] is True
+    assert closure["attempts"][0]["failure_kind"] == "unmetered_attempt"
+    assert closure["attempts"][0]["retryable"] is False
+
+
+def test_explorer_does_not_retry_runtime_or_authentication_mismatch(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        calls = 0
+
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            self.calls += 1
+            raise RuntimeError("runtime mismatch: invalid API key")
+
+    backend = Backend()
+    with pytest.raises(RuntimeError, match="runtime mismatch"):
+        explore_query_wiki(
+            WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
+            query="x",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            backend=backend,
+        )
+
+    assert backend.calls == 1
+    closure = json.loads(
+        (tmp_path / "trace" / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+    )
+    assert closure["attempts"][0]["retryable"] is False
+    assert closure["attempts"][0]["failure_kind"] == "non_retryable_runtime"
+
+
+def test_outer_attempt_closure_redacts_runtime_paths_and_secrets(tmp_path) -> None:
+    root = _query_root(tmp_path)
+    env_file = tmp_path / "private-runtime.env"
+
+    class Backend:
+        def explore(self, *, query_wiki_root: Path, trace_dir: Path, **_kwargs: object):
+            explorer = trace_dir / "cc_explorer"
+            explorer.mkdir(parents=True)
+            raise RuntimeError(
+                f"config mismatch at {query_wiki_root} via {trace_dir}; "
+                f"env={env_file}; OPENAI_API_KEY=sk-private-token"
+            )
+
+    trace = tmp_path / "public-trace"
+    with pytest.raises(RuntimeError, match="config mismatch"):
+        explore_query_wiki(
+            WikiExplorerConfig(
+                env_file=env_file,
+                max_attempts=1,
+                retry_delay_seconds=0,
+            ),
+            query="x",
+            query_wiki_root=root,
+            trace_dir=trace,
+            backend=Backend(),
+        )
+
+    attempt_text = (trace / "cc_explorer" / "attempts" / "attempt-01" / "attempt.json").read_text(
+        encoding="utf-8"
+    )
+    closure_text = (trace / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+    for sensitive in (str(root), str(trace), str(env_file), "sk-private-token"):
+        assert sensitive not in attempt_text
+        assert sensitive not in closure_text
+
+
 def test_explorer_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None:
     root = _query_root(tmp_path)
 
