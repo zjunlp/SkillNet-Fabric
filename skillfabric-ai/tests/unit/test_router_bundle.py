@@ -305,19 +305,24 @@ def test_fixture_bundle_uses_rrf_and_validated_graph_only(tmp_path) -> None:
     seeds = [candidate for candidate in bundle.selected_skills if candidate.is_seed]
     assert len(seeds) == 2
     assert all(set(candidate.retrieval_ranks) <= {"bm25", "embedding"} for candidate in seeds)
-    assert {edge.type for edge in bundle.graph_edges} <= {"depend_on", "compose_with"}
+    assert {edge.type for edge in bundle.graph_edges} <= {
+        "depend_on",
+        "compose_with",
+        "similar_to",
+    }
     assert "workflow_hints" not in payload
     assert "ppr_score" not in str(payload)
     assert "score_breakdown" not in str(payload)
     assert "execution" not in str(payload).lower()
 
 
-def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch) -> None:
+def test_bundle_excludes_operational_edges_of_alternative_only_skills(monkeypatch) -> None:
     seed_skill = make_skill("skill:seed", "seed", "Seed skill.")
     prerequisite = make_skill("skill:prerequisite", "prerequisite", "Prerequisite skill.")
     alternative = make_skill("skill:alternative", "alternative", "Alternative skill.")
     skills = {skill.id: skill for skill in (seed_skill, prerequisite, alternative)}
     dependency = _edge(alternative.id, prerequisite.id, "depend_on")
+    similarity = _edge(alternative.id, seed_skill.id, "similar_to")
     seed = _seed(seed_skill.id)
     prerequisite_candidate = RouterSkillCandidate(
         skill_id=prerequisite.id,
@@ -339,7 +344,7 @@ def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch)
             build_id="test-build",
             skills=skills,
             contracts={},
-            core_edges=[dependency],
+            core_edges=[dependency, similarity],
         ),
     )
     monkeypatch.setattr(
@@ -360,7 +365,50 @@ def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch)
         RouterBundleConfig(query="use the best implementation"),
     )
 
-    assert bundle.graph_edges == (dependency,)
+    assert bundle.graph_edges == ()
+
+
+def test_bundle_keeps_similar_edges_between_selectable_candidates(monkeypatch) -> None:
+    seed_skill = make_skill("skill:seed", "seed", "Seed skill.")
+    companion = make_skill("skill:companion", "companion", "Companion skill.")
+    skills = {skill.id: skill for skill in (seed_skill, companion)}
+    seed = _seed(seed_skill.id)
+    companion_candidate = RouterSkillCandidate(
+        skill_id=companion.id,
+        name=companion.name,
+        score=0.5,
+        graph_depth=1,
+    )
+    similarity = _edge(seed_skill.id, companion.id, "similar_to")
+    monkeypatch.setattr(
+        bundle_module,
+        "load_wiki_source",
+        lambda _workspace: WikiSource(
+            build_id="test-build",
+            skills=skills,
+            contracts={},
+            core_edges=[similarity],
+        ),
+    )
+    monkeypatch.setattr(
+        bundle_module,
+        "retrieve_seed_candidates",
+        lambda *_args, **_kwargs: [seed],
+    )
+    monkeypatch.setattr(
+        bundle_module,
+        "expand_semantic_candidates",
+        lambda *_args, **_kwargs: ExpansionResult(
+            candidates=(seed, companion_candidate),
+            alternatives=(),
+        ),
+    )
+
+    bundle = build_router_bundle(
+        RouterBundleConfig(query="choose related skills"),
+    )
+
+    assert bundle.graph_edges == (similarity,)
 
 
 def test_missing_canonical_artifacts_fail_instead_of_returning_empty_bundle(tmp_path) -> None:

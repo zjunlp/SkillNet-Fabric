@@ -177,7 +177,8 @@ def build_graph(
                 skills,
                 provider=embedding_provider,
                 bm25_path=workspace.graph_dir / "bm25.sqlite",
-                store_path=workspace.graph_dir / "embeddings.json",
+                store_path=workspace.cache_dir / "embeddings.json",
+                binary_store_path=workspace.graph_dir / "embeddings.json",
                 candidate_top_k=DEFAULT_CANDIDATE_TOP_K,
             )
             timer.mark(stage)

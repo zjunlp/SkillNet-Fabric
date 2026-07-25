@@ -51,10 +51,12 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
         "graph.json",
         "bm25.sqlite",
         "embeddings.json",
+        "embeddings.npy",
     }
     assert {path.name for path in (workspace / "cache").iterdir()} == {
         "contracts.json",
         "relation_decisions.json",
+        "embeddings.json",
     }
     assert {path.name for path in (workspace / "reports").iterdir()} == {
         "build_summary.json",
@@ -251,7 +253,7 @@ def test_second_build_reuses_contract_and_relation_decision_caches(tmp_path) -> 
 def test_rebuild_rejects_corrupted_embedding_store_instead_of_deleting_it(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     _build(workspace)
-    store = workspace / "graph" / "embeddings.json"
+    store = workspace / "cache" / "embeddings.json"
     store.write_text("not-json\n", encoding="utf-8")
 
     with pytest.raises(CandidateRetrievalError, match="embedding store"):

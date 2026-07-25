@@ -4,6 +4,7 @@ import json
 import threading
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from skillfabric.indexing.embeddings import (
@@ -237,39 +238,34 @@ def test_provider_for_store_model_preserves_dimension() -> None:
 
 def test_embedding_store_loader_returns_only_skill_document_vectors(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model_id": "embedding-test-model",
-                "dimension": 2,
-                "records": [
-                    _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
-                    _record("requires:skill:alpha:0", "skill:alpha", "requires", [0.0, 1.0]),
-                ],
-            }
-        ),
-        encoding="utf-8",
+    _write_binary_store(
+        path,
+        [
+            _record("skill:skill:alpha", "skill:alpha", "skill"),
+            _record("requires:skill:alpha:0", "skill:alpha", "requires"),
+        ],
+        [[1.0, 0.0], [0.0, 1.0]],
     )
 
     store = load_skill_embedding_store(path)
 
     assert store.model_id == "embedding-test-model"
     assert store.dimension == 2
-    assert store.vectors == {"skill:alpha": [1.0, 0.0]}
+    assert store.skill_ids == ("skill:alpha",)
+    assert store.skill_rows == (0,)
+    assert store.matrix[store.skill_rows[0]].tolist() == [1.0, 0.0]
+    assert load_skill_embedding_store(path) is store
 
 
 def test_embedding_store_loader_rejects_duplicate_skill_records(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
-    row = _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0])
-    path.write_text(
-        json.dumps(
-            {
-                "model_id": "embedding-test-model",
-                "dimension": 2,
-                "records": [row, {**row, "key": "skill:duplicate"}],
-            }
-        ),
-        encoding="utf-8",
+    _write_binary_store(
+        path,
+        [
+            _record("skill:skill:alpha", "skill:alpha", "skill"),
+            _record("skill:skill:duplicate", "skill:alpha", "skill"),
+        ],
+        [[1.0, 0.0], [0.0, 1.0]],
     )
 
     with pytest.raises(ValueError, match="duplicate skill embedding"):
@@ -278,20 +274,13 @@ def test_embedding_store_loader_rejects_duplicate_skill_records(tmp_path) -> Non
 
 def test_embedding_store_loader_rejects_zero_norm_skill_vectors(tmp_path) -> None:
     path = tmp_path / "embeddings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model_id": "embedding-test-model",
-                "dimension": 2,
-                "records": [
-                    _record("skill:skill:alpha", "skill:alpha", "skill", [0.0, 0.0]),
-                ],
-            }
-        ),
-        encoding="utf-8",
+    _write_binary_store(
+        path,
+        [_record("skill:skill:alpha", "skill:alpha", "skill")],
+        [[0.0, 0.0]],
     )
 
-    with pytest.raises(ValueError, match="non-zero norm"):
+    with pytest.raises(ValueError, match="zero vector"):
         load_skill_embedding_store(path)
 
 
@@ -301,21 +290,24 @@ def test_embedding_store_loader_rejects_zero_norm_skill_vectors(tmp_path) -> Non
         lambda payload: payload.update({"model_id": 123}),
         lambda payload: payload.update({"dimension": "2"}),
         lambda payload: payload["records"][0].update({"skill_id": 123}),
-        lambda payload: payload["records"][0].update({"vector": ["1.0", 0.0]}),
-        lambda payload: payload["records"][0].update({"vector": [True, 0.0]}),
+        lambda payload: payload["records"][0].update({"row": 1}),
+        lambda payload: payload.update({"dtype": "float64"}),
     ],
 )
-def test_embedding_store_loader_rejects_coerced_metadata_and_vectors(tmp_path, mutate) -> None:
+def test_embedding_store_loader_rejects_invalid_metadata(tmp_path, mutate) -> None:
     path = tmp_path / "embeddings.json"
     payload = {
         "model_id": "embedding-test-model",
         "dimension": 2,
+        "dtype": "float32",
+        "matrix_file": "embeddings.npy",
         "records": [
-            _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
+            _record("skill:skill:alpha", "skill:alpha", "skill"),
         ],
     }
     mutate(payload)
     path.write_text(json.dumps(payload), encoding="utf-8")
+    np.save(path.with_suffix(".npy"), np.asarray([[1.0, 0.0]], dtype=np.float32))
 
     with pytest.raises(ValueError):
         load_skill_embedding_store(path)
@@ -324,15 +316,11 @@ def test_embedding_store_loader_rejects_coerced_metadata_and_vectors(tmp_path, m
 def test_router_query_uses_store_model_and_query_embedding(tmp_path) -> None:
     workspace = Workspace(tmp_path / ".skillfabric")
     workspace.ensure()
-    workspace.write_json(
+    _write_binary_store(
         workspace.graph_dir / "embeddings.json",
-        {
-            "model_id": DEFAULT_EMBEDDING_MODEL_ID,
-            "dimension": 2,
-            "records": [
-                _record("skill:skill:alpha", "skill:alpha", "skill", [1.0, 0.0]),
-            ],
-        },
+        [_record("skill:skill:alpha", "skill:alpha", "skill")],
+        [[1.0, 0.0]],
+        model_id=DEFAULT_EMBEDDING_MODEL_ID,
     )
     skills = {"skill:alpha": _skill("skill:alpha", "alpha")}
     query_provider = QueryProvider()
@@ -363,15 +351,38 @@ def test_router_query_uses_store_model_and_query_embedding(tmp_path) -> None:
     assert seeds[0].retrieval_ranks == {"embedding": 1}
 
 
-def _record(key: str, skill_id: str, kind: str, vector: list[float]) -> dict[str, object]:
+def _record(key: str, skill_id: str, kind: str) -> dict[str, object]:
     return {
+        "row": 0,
         "key": key,
         "skill_id": skill_id,
         "kind": kind,
         "field_name": "",
         "text_hash": "text-hash",
-        "vector": vector,
     }
+
+
+def _write_binary_store(
+    path,
+    records: list[dict[str, object]],
+    matrix: list[list[float]],
+    *,
+    model_id: str = "embedding-test-model",
+) -> None:
+    normalized = [{**record, "row": index} for index, record in enumerate(records)]
+    path.write_text(
+        json.dumps(
+            {
+                "model_id": model_id,
+                "dimension": len(matrix[0]),
+                "dtype": "float32",
+                "matrix_file": path.with_suffix(".npy").name,
+                "records": normalized,
+            }
+        ),
+        encoding="utf-8",
+    )
+    np.save(path.with_suffix(".npy"), np.asarray(matrix, dtype=np.float32))
 
 
 def _skill(skill_id: str, name: str) -> SkillNode:

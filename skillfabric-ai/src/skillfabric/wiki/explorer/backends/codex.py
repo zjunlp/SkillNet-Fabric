@@ -7,6 +7,7 @@ import json
 import math
 import shutil
 import threading
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -32,6 +33,7 @@ from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
 CodexSdkRuntime = Any
+PromptSpecBuilder = Callable[[Mapping[str, Any]], Mapping[str, str]]
 CODEX_ALLOWED_TOOLS = ("exec_command",)
 PERMISSION_PROFILE = "skillfabric-query-wiki"
 CODEX_EXECUTION_GUIDANCE = """
@@ -54,6 +56,7 @@ def build_codex_prompt_spec(
     max_selected_skills: int,
     required_selected_skills: int | None = None,
     tool_budget: dict[str, int] | None = None,
+    prompt_spec_builder: PromptSpecBuilder | None = None,
 ) -> dict[str, Any]:
     """Build the exact Codex prompt and schema payload used by the backend."""
 
@@ -82,6 +85,13 @@ def build_codex_prompt_spec(
     }
     if context.required_selected_skills is not None:
         payload["required_selected_skills"] = context.required_selected_skills
+    if prompt_spec_builder is not None:
+        builder_context = {**payload, "query": query}
+        payload = _apply_prompt_spec_builder(
+            payload,
+            prompt_spec_builder,
+            builder_context=builder_context,
+        )
     return payload
 
 
@@ -125,6 +135,7 @@ class CodexWikiExplorerBackend:
     sdk_runtime: CodexSdkRuntime | None = None
     tool_budget: dict[str, int] | None = None
     required_selected_skills: int | None = None
+    prompt_spec_builder: PromptSpecBuilder | None = None
 
     CODEX_EXECUTION_CONTRACT = CODEX_EXECUTION_CONTRACT
 
@@ -162,6 +173,8 @@ class CodexWikiExplorerBackend:
         if not _same_json_shape(supplied_contract, CODEX_EXECUTION_CONTRACT.to_dict()):
             raise ValueError("execution_contract does not match the Codex backend contract")
         self.execution_contract = CODEX_EXECUTION_CONTRACT.to_dict()
+        if self.prompt_spec_builder is not None and not callable(self.prompt_spec_builder):
+            raise TypeError("prompt_spec_builder must be callable")
         self.tool_budget = _normalize_tool_budget(
             self.tool_budget,
             max_selected_skills=self.max_selected_skills,
@@ -191,6 +204,7 @@ class CodexWikiExplorerBackend:
             max_selected_skills=self.max_selected_skills,
             required_selected_skills=self.required_selected_skills,
             tool_budget=tool_budget,
+            prompt_spec_builder=self.prompt_spec_builder,
         )
         system_prompt = str(prompt_spec["system_prompt"])
         user_prompt = str(prompt_spec["user_prompt"])
@@ -232,7 +246,14 @@ class CodexWikiExplorerBackend:
             cc_dir / "prompt_spec.json",
             json.dumps(prompt_spec, ensure_ascii=False, indent=2) + "\n",
         )
-        _write_json(cc_dir / "backend.json", self._backend_payload(runtime=None, metadata=None))
+        _write_json(
+            cc_dir / "backend.json",
+            self._backend_payload(
+                runtime=None,
+                metadata=None,
+                prompt_id=str(prompt_spec["prompt_id"]),
+            ),
+        )
         _write_event(
             cc_dir,
             {
@@ -240,7 +261,7 @@ class CodexWikiExplorerBackend:
                 "backend": "codex",
                 "allowed_tools": list(CODEX_ALLOWED_TOOLS),
                 "command_budget": _command_budget(tool_budget),
-                "prompt_id": EXPLORER_PROMPT_ID,
+                "prompt_id": prompt_spec["prompt_id"],
             },
         )
         codex_home: Path | None = None
@@ -248,7 +269,11 @@ class CodexWikiExplorerBackend:
             runtime = self.sdk_runtime or _load_sdk_runtime()
             _write_json(
                 cc_dir / "backend.json",
-                self._backend_payload(runtime=runtime, metadata=None),
+                self._backend_payload(
+                    runtime=runtime,
+                    metadata=None,
+                    prompt_id=str(prompt_spec["prompt_id"]),
+                ),
             )
             with TemporaryDirectory(prefix="skillfabric-codex-") as home:
                 codex_home = Path(home)
@@ -263,10 +288,18 @@ class CodexWikiExplorerBackend:
                         codex_home=Path(home),
                         cc_dir=cc_dir,
                         command_budget=_command_budget(tool_budget),
+                        prompt_id=str(prompt_spec["prompt_id"]),
                     ),
                     timeout_seconds=self.execution_timeout_seconds,
                 )
-            _write_json(cc_dir / "backend.json", self._backend_payload(runtime, metadata))
+            _write_json(
+                cc_dir / "backend.json",
+                self._backend_payload(
+                    runtime,
+                    metadata,
+                    prompt_id=str(prompt_spec["prompt_id"]),
+                ),
+            )
             _write_json(cc_dir / "usage.json", usage)
             try:
                 package = SkillPackage.from_dict(payload)
@@ -310,6 +343,7 @@ class CodexWikiExplorerBackend:
         codex_home: Path,
         cc_dir: Path,
         command_budget: int,
+        prompt_id: str,
     ) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
         return await run_codex_attempt(
             runtime,
@@ -333,7 +367,11 @@ class CodexWikiExplorerBackend:
             output_schema=skill_package_json_schema(),
             metadata_callback=lambda metadata: _write_json(
                 cc_dir / "backend.json",
-                self._backend_payload(runtime=runtime, metadata=metadata),
+                self._backend_payload(
+                    runtime=runtime,
+                    metadata=metadata,
+                    prompt_id=prompt_id,
+                ),
             ),
         )
 
@@ -341,6 +379,8 @@ class CodexWikiExplorerBackend:
         self,
         runtime: CodexSdkRuntime | None,
         metadata: dict[str, str] | None,
+        *,
+        prompt_id: str = EXPLORER_PROMPT_ID,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "backend": "codex",
@@ -349,7 +389,7 @@ class CodexWikiExplorerBackend:
             "sdk_version": str(getattr(runtime, "__version__", "unavailable")),
             "execution_contract": CODEX_EXECUTION_CONTRACT.to_dict(),
             "permission_profile": PERMISSION_PROFILE,
-            "prompt_id": EXPLORER_PROMPT_ID,
+            "prompt_id": prompt_id,
             "allowed_tools": list(CODEX_ALLOWED_TOOLS),
             "tool_enforcement": "event-audited-fail-closed",
             "command_budget": _command_budget(dict(self.tool_budget or {})),
@@ -477,6 +517,29 @@ def _normalize_tool_budget(
             raise ValueError(f"tool_budget.{key} must be a non-negative integer")
         merged[key] = value
     return merged
+
+
+def _apply_prompt_spec_builder(
+    default_spec: dict[str, Any],
+    builder: PromptSpecBuilder,
+    *,
+    builder_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    override = builder(dict(builder_context))
+    if not isinstance(override, Mapping):
+        raise TypeError("prompt_spec_builder must return a mapping")
+    allowed = {"prompt_id", "system_prompt", "user_prompt"}
+    unexpected = set(override) - allowed
+    if unexpected:
+        raise ValueError(
+            "unsupported prompt spec fields: " + ", ".join(sorted(str(item) for item in unexpected))
+        )
+    result = dict(default_spec)
+    for key, value in override.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"prompt spec field {key} must be a non-empty string")
+        result[key] = value
+    return result
 
 
 def _command_budget(tool_budget: dict[str, int]) -> int:
@@ -607,5 +670,6 @@ __all__ = [
     "CodexOperationalAccessError",
     "CodexSdkRuntime",
     "CodexWikiExplorerBackend",
+    "PromptSpecBuilder",
     "build_codex_prompt_spec",
 ]

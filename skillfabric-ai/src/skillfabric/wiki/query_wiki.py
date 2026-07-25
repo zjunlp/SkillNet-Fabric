@@ -17,6 +17,8 @@ from skillfabric.wiki.explorer.prompting import render_query_wiki_explorer_md
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.pages import slug
 
+_INDEX_ALTERNATIVE_LIMIT = 96
+
 
 @dataclass(frozen=True, slots=True)
 class QueryWikiBuildResult:
@@ -51,7 +53,6 @@ def materialize_query_wiki(
     candidates = {candidate.skill_id: candidate for candidate in bundle.selected_skills}
     alternatives = {alternative.skill_id: alternative for alternative in bundle.alternatives}
     included_ids = list(candidates)
-    included_ids.extend(skill_id for skill_id in alternatives if skill_id not in candidates)
     missing = sorted(set(included_ids) - set(source.skills))
     if missing:
         raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
@@ -124,17 +125,12 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
 def _manifest_skill(
     skill: SkillNode,
     *,
-    candidate: RouterSkillCandidate | None,
+    candidate: RouterSkillCandidate,
     alternative: RouterAlternative | None,
     card_path: str,
     source_path: str,
 ) -> dict[str, Any]:
-    if candidate is not None:
-        origin = "seed" if candidate.is_seed else "semantic_expansion"
-        route = candidate.to_dict()
-    else:
-        origin = "similar_alternative"
-        route = None
+    origin = "seed" if candidate.is_seed else "semantic_expansion"
     return {
         "skill_id": skill.id,
         "name": skill.name,
@@ -143,7 +139,7 @@ def _manifest_skill(
         "origin": origin,
         "card_path": card_path,
         "source_path": source_path,
-        "route": route,
+        "route": candidate.to_dict(),
         "alternative": alternative.to_dict() if alternative is not None else None,
     }
 
@@ -183,8 +179,8 @@ def _render_skill_card(
 
 
 def _query_edge(edge: Edge) -> dict[str, Any]:
-    if edge.type not in {"depend_on", "compose_with"}:
-        raise ValueError(f"query_wiki received non-operational edge: {edge.type}")
+    if edge.type not in {"depend_on", "compose_with", "similar_to"}:
+        raise ValueError(f"query_wiki received unsupported semantic edge: {edge.type}")
     return edge.to_dict()
 
 
@@ -192,10 +188,10 @@ def _render_index(manifest: dict[str, Any]) -> str:
     lines = [
         "# Query Wiki",
         "",
-        "Read this file first. Compare contract cards, then inspect source or semantic edges only "
-        "when a routing decision needs more evidence.",
+        "Read this file first. It is a compact directory; inspect cards, sources, or semantic "
+        "edges only when a routing decision needs more evidence.",
         "",
-        "## Skill Cards",
+        "## Selectable Candidates",
     ]
     for row in manifest["skills"]:
         route = row.get("route") or {}
@@ -203,8 +199,7 @@ def _render_index(manifest: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"- `{row['skill_id']}` ({row['origin']}, score={score:.8f})",
-                f"  - card: {row['card_path']}",
-                f"  - source: {row['source_path']}",
+                f"  card=`{row['card_path']}` source=`{row['source_path']}`",
             ]
         )
     lines.extend(
@@ -212,15 +207,25 @@ def _render_index(manifest: dict[str, Any]) -> str:
             "",
             "## Edge Evidence",
             "",
-            f"- canonical operational edges: {manifest['semantic_edges_path']}",
+            f"- canonical semantic edges: {manifest['semantic_edges_path']}",
         ]
     )
     if manifest["alternatives"]:
+        alternatives = manifest["alternatives"]
         lines.extend(["", "## Similar Alternatives", ""])
         lines.extend(
-            f"- `{item['skill_id']}` alternative to `{item['alternative_to']}`: {item['reason']}"
-            for item in manifest["alternatives"]
+            f"- `{item['skill_id']}` -> `{item['alternative_to']}` "
+            f"(confidence={float(item['confidence']):.3f})"
+            for item in alternatives[:_INDEX_ALTERNATIVE_LIMIT]
         )
+        if len(alternatives) > _INDEX_ALTERNATIVE_LIMIT:
+            lines.extend(
+                [
+                    "",
+                    f"- {len(alternatives) - _INDEX_ALTERNATIVE_LIMIT} additional alternatives "
+                    "remain in `manifest.json`; use them only for comparison.",
+                ]
+            )
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -4,7 +4,9 @@ import json
 
 import pytest
 
+from skillfabric.compiled_graph.models import Edge
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.router.models import RouterAlternative, RouterBundle
 from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.prompting import EXPLORER_PROMPT_ID
 from skillfabric.wiki.loader import load_wiki_source
@@ -143,6 +145,50 @@ def test_semantic_edges_preserve_compiled_dependency_direction(tmp_path) -> None
     assert "execution_direction" not in edge
 
 
+def test_semantic_edges_preserve_similar_relation_between_candidates(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    bundle = build_router_bundle(
+        RouterBundleConfig(
+            workspace=workspace,
+            query="extract financial KPIs",
+            seed_limit=2,
+            expanded_limit=4,
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    first, second = bundle.selected_skills[:2]
+    source, target = sorted((first.skill_id, second.skill_id))
+    similar = Edge(
+        source=source,
+        target=target,
+        type="similar_to",
+        confidence=0.81,
+        reason="Both skills cover the same task-level subproblem.",
+    )
+    bundle = RouterBundle(
+        query=bundle.query,
+        selected_skills=bundle.selected_skills,
+        graph_edges=(*bundle.graph_edges, similar),
+        alternatives=bundle.alternatives,
+    )
+
+    result = materialize_query_wiki(
+        workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "similar-edge",
+    )
+    rows = [
+        json.loads(line)
+        for line in (result.root / "edges" / "semantic_edges.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+
+    assert similar.to_dict() in rows
+
+
 def test_index_and_explorer_instructions_are_concise_and_canonical(tmp_path) -> None:
     _, result = _materialize(tmp_path)
     index = (result.root / "index.md").read_text(encoding="utf-8")
@@ -163,3 +209,52 @@ def test_render_query_wiki_skill_card_reads_manifest_card(tmp_path) -> None:
 
     assert "skill:pdf-table-parser" in rendered
     assert "normalized_csv_table" in rendered
+
+
+def test_alternative_only_skills_remain_metadata_without_wiki_pages(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    bundle = build_router_bundle(
+        RouterBundleConfig(
+            workspace=workspace,
+            query="extract financial KPIs",
+            seed_limit=2,
+            expanded_limit=4,
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    source = load_wiki_source(Workspace(workspace))
+    alternative_id = next(
+        skill_id
+        for skill_id in source.skills
+        if skill_id not in {candidate.skill_id for candidate in bundle.selected_skills}
+    )
+    alternative = RouterAlternative(
+        skill_id=alternative_id,
+        name=source.skills[alternative_id].name,
+        alternative_to=bundle.selected_skills[0].skill_id,
+        confidence=0.9,
+        reason="Validated near substitute.",
+    )
+    bundle = RouterBundle(
+        query=bundle.query,
+        selected_skills=bundle.selected_skills,
+        graph_edges=bundle.graph_edges,
+        alternatives=(alternative,),
+    )
+
+    result = materialize_query_wiki(
+        workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "alternative-only",
+        wiki_source=source,
+    )
+    manifest = json.loads((result.root / "manifest.json").read_text(encoding="utf-8"))
+
+    assert alternative_id not in {row["skill_id"] for row in manifest["skills"]}
+    assert manifest["alternatives"] == [alternative.to_dict()]
+    assert not (result.root / "skills" / "cards" / f"{alternative_id.removeprefix('skill:')}.md").exists()
+    assert not (result.root / "skills" / "sources" / f"{alternative_id.removeprefix('skill:')}.md").exists()
+    index = (result.root / "index.md").read_text(encoding="utf-8")
+    assert alternative_id in index
+    assert alternative.reason not in index

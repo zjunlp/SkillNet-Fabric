@@ -22,7 +22,7 @@ from skillfabric.compiled_graph.semantic.models import (
 )
 from skillfabric.indexing.bm25 import search_bm25
 from skillfabric.indexing.canonical import compact_contract_text, contract_skill_text
-from skillfabric.indexing.embeddings import EmbeddingProvider
+from skillfabric.indexing.embeddings import EmbeddingProvider, write_binary_embedding_store
 from skillfabric.indexing.ranking import reciprocal_rank_fusion
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import atomic_write_text
@@ -69,6 +69,7 @@ def retrieve_candidate_pairs(
     provider: EmbeddingProvider,
     bm25_path: str | Path,
     store_path: str | Path | None = None,
+    binary_store_path: str | Path | None = None,
     candidate_top_k: int = DEFAULT_CANDIDATE_TOP_K,
 ) -> CandidateRetrievalResult:
     """Retrieve bounded review candidates without assigning graph semantics."""
@@ -94,6 +95,7 @@ def retrieve_candidate_pairs(
         specs,
         provider=provider,
         store_path=store_path,
+        binary_store_path=binary_store_path,
     )
     records_by_key = {record.key: record for record in records}
     hits: dict[tuple[str, str], list[CandidateHit]] = defaultdict(list)
@@ -186,6 +188,7 @@ def _build_embeddings(
     *,
     provider: EmbeddingProvider,
     store_path: str | Path | None,
+    binary_store_path: str | Path | None,
 ) -> tuple[list[EmbeddingRecord], int, int]:
     expected_dimension = _provider_dimension(provider)
     cached = _load_embedding_cache(
@@ -220,6 +223,12 @@ def _build_embeddings(
         )
     complete = [record for record in records if record is not None]
     _validate_vectors(complete, expected_dimension=expected_dimension)
+    if binary_store_path is not None:
+        write_binary_embedding_store(
+            binary_store_path,
+            model_id=str(provider.model_id),
+            records=complete,
+        )
     expected_keys = {spec.key for spec in specs}
     if pending or set(cached) != expected_keys:
         _write_embedding_cache(store_path, model_id=str(provider.model_id), records=complete)

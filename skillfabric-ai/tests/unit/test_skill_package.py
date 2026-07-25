@@ -196,6 +196,27 @@ def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
     assert any("escapes query_wiki" in error for error in validation.errors)
 
 
+def test_alternative_only_skill_cannot_be_routed(tmp_path) -> None:
+    bundle, query_wiki = _query_context(tmp_path)
+    package = _package(
+        selected_skills=[
+            {
+                "skill_id": "skill:similar-only",
+                "role": "Use the alternative.",
+                "evidence": [{"path": "index.md"}],
+            }
+        ],
+        wiki_pages_read=["index.md"],
+    )
+
+    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+
+    assert not validation.valid
+    assert any("not in query_wiki manifest" in error for error in validation.errors)
+    with pytest.raises(ValueError, match="not a selectable bundle candidate"):
+        route_from_skill_package(package, bundle)
+
+
 def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
     _, query_wiki = _query_context(tmp_path)
     selected = _package().to_dict()["selected_skills"]
@@ -252,6 +273,17 @@ def test_manifest_rejects_duplicate_skill_rows(tmp_path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ValueError, match="duplicate skill id"):
+        validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
+
+
+def test_manifest_rejects_alternative_only_candidate_rows(tmp_path) -> None:
+    _, query_wiki = _query_context(tmp_path)
+    manifest_path = query_wiki.root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["skills"][0]["origin"] = "similar_alternative"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="origin must be seed or semantic_expansion"):
         validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
 
 

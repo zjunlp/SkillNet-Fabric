@@ -8,7 +8,10 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
+
+import numpy as np
 
 from skillfabric.runtime.llm import DEFAULT_API_BASE, read_env_file
 
@@ -18,14 +21,12 @@ DEFAULT_EMBEDDING_BATCH_SIZE = 64
 DEFAULT_EMBEDDING_CONCURRENCY = 1
 DEFAULT_EMBEDDING_TEXT_CHARS = 4_000
 DEFAULT_EMBEDDING_MAX_RETRIES = 2
-_RECORD_KEYS = {
-    "key",
-    "skill_id",
-    "kind",
-    "field_name",
-    "text_hash",
-    "vector",
-}
+_STORE_KEYS = {"model_id", "dimension", "dtype", "matrix_file", "records"}
+_RECORD_KEYS = {"row", "key", "skill_id", "kind", "field_name", "text_hash"}
+_EMBEDDING_KINDS = {"skill", "requires", "produces"}
+_MATRIX_VALIDATION_CHUNK = 4096
+_STORE_CACHE_LOCK = Lock()
+_STORE_CACHE: dict[str, tuple[tuple[int, int, int, int], LoadedEmbeddingStore]] = {}
 
 
 class EmbeddingProvider(Protocol):
@@ -38,9 +39,11 @@ class EmbeddingProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class LoadedEmbeddingStore:
-    vectors: dict[str, list[float]]
     model_id: str
     dimension: int
+    skill_ids: tuple[str, ...]
+    skill_rows: tuple[int, ...]
+    matrix: np.ndarray
 
 
 @dataclass(slots=True)
@@ -227,21 +230,38 @@ def embedding_provider_for_model(
 
 
 def load_skill_embedding_store(path: str | Path) -> LoadedEmbeddingStore:
-    """Load contract-document vectors used by query routing."""
+    """Load the canonical memory-mapped embedding store used by query routing."""
 
     target = Path(path)
     if not target.exists():
         raise FileNotFoundError(f"embedding store not found: {target}; rebuild the workspace")
+    if target.is_symlink():
+        raise ValueError(f"embedding store may not be a symlink: {target}")
+    target = target.resolve()
+    identity = target.stat()
+    cache_key = str(target)
+    cache_signature = (
+        identity.st_dev,
+        identity.st_ino,
+        identity.st_size,
+        identity.st_mtime_ns,
+    )
+    with _STORE_CACHE_LOCK:
+        cached = _STORE_CACHE.get(cache_key)
+        if cached is not None and cached[0] == cache_signature:
+            return cached[1]
+        store = _load_skill_embedding_store_uncached(target)
+        _STORE_CACHE[cache_key] = (cache_signature, store)
+        return store
+
+
+def _load_skill_embedding_store_uncached(target: Path) -> LoadedEmbeddingStore:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid embedding store JSON: {exc}") from exc
-    if not isinstance(payload, dict) or set(payload) != {
-        "model_id",
-        "dimension",
-        "records",
-    }:
-        raise ValueError("embedding store must use the canonical fields")
+    if not isinstance(payload, dict) or set(payload) != _STORE_KEYS:
+        raise ValueError("embedding store must use the canonical binary fields")
     model_id = payload["model_id"]
     dimension = payload["dimension"]
     rows = payload["records"]
@@ -249,47 +269,152 @@ def load_skill_embedding_store(path: str | Path) -> LoadedEmbeddingStore:
         raise ValueError("embedding store model_id must be a non-empty string")
     if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension <= 0:
         raise ValueError("embedding store dimension must be a positive integer")
+    if payload["dtype"] != "float32":
+        raise ValueError("embedding store dtype must be float32")
+    matrix_name = payload["matrix_file"]
+    expected_matrix_name = target.with_suffix(".npy").name
+    if (
+        not isinstance(matrix_name, str)
+        or Path(matrix_name).name != matrix_name
+        or matrix_name in {"", ".", ".."}
+        or matrix_name != expected_matrix_name
+    ):
+        raise ValueError("embedding store matrix_file is unsafe or unexpected")
+    matrix_path = target.parent / matrix_name
+    if matrix_path.is_symlink():
+        raise ValueError("embedding matrix may not be a symlink")
+    if not matrix_path.is_file():
+        raise FileNotFoundError(f"embedding matrix not found: {matrix_path}")
     if not isinstance(rows, list):
         raise ValueError("embedding store metadata is invalid")
-    vectors: dict[str, list[float]] = {}
+    skill_ids: list[str] = []
+    skill_rows: list[int] = []
     record_keys: set[str] = set()
+    skill_key_ids: set[str] = set()
     for index, row in enumerate(rows):
         if not isinstance(row, dict) or set(row) != _RECORD_KEYS:
             raise ValueError(f"embedding store record {index} has invalid fields")
+        record_row = row["row"]
+        if isinstance(record_row, bool) or not isinstance(record_row, int) or record_row != index:
+            raise ValueError("embedding store rows must be unique and contiguous")
         key = _required_store_string(row["key"], label=f"record {index} key")
         if key in record_keys:
             raise ValueError(f"embedding store contains duplicate record key: {key}")
         record_keys.add(key)
-        skill_id = _required_store_string(
-            row["skill_id"],
-            label=f"record {index} skill_id",
-        )
+        skill_id = _required_store_string(row["skill_id"], label=f"record {index} skill_id")
         if not isinstance(row["field_name"], str):
             raise ValueError(f"embedding store record {index} field_name must be a string")
         _required_store_string(row["text_hash"], label=f"record {index} text_hash")
         kind = row["kind"]
-        if kind not in {"skill", "requires", "produces"}:
+        if kind not in _EMBEDDING_KINDS:
             raise ValueError(f"embedding store record {index} has invalid kind")
-        raw_vector = row["vector"]
-        if not isinstance(raw_vector, list):
-            raise ValueError(f"embedding store record {index} vector must be a list")
-        if any(
-            isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw_vector
-        ):
-            raise ValueError(f"embedding store record {index} vector must contain numbers")
-        vector = [float(value) for value in raw_vector]
-        if len(vector) != dimension or any(not math.isfinite(value) for value in vector):
-            raise ValueError(f"embedding store record {index} has an invalid vector")
-        if not _is_finite_nonzero_vector(vector):
-            raise ValueError(f"embedding store record {index} vector must have non-zero norm")
-        if kind != "skill":
-            continue
-        if skill_id in vectors:
-            raise ValueError(f"duplicate skill embedding: {skill_id}")
-        vectors[skill_id] = vector
-    if not vectors:
+        if kind == "skill":
+            if skill_id in skill_key_ids:
+                raise ValueError(f"duplicate skill embedding: {skill_id}")
+            skill_key_ids.add(skill_id)
+            skill_ids.append(skill_id)
+            skill_rows.append(index)
+    try:
+        matrix = np.load(matrix_path, mmap_mode="r", allow_pickle=False)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"failed to load embedding matrix: {exc}") from exc
+    if (
+        not isinstance(matrix, np.memmap)
+        or matrix.dtype != np.dtype("float32")
+        or matrix.ndim != 2
+        or matrix.shape != (len(rows), dimension)
+        or not matrix.flags.c_contiguous
+    ):
+        raise ValueError("embedding matrix shape, dtype, or layout is invalid")
+    _validate_embedding_matrix(matrix)
+    if not skill_ids:
         raise ValueError("embedding store contains no routable skill vectors")
-    return LoadedEmbeddingStore(vectors=vectors, model_id=model_id, dimension=dimension)
+    return LoadedEmbeddingStore(
+        model_id=model_id,
+        dimension=dimension,
+        skill_ids=tuple(skill_ids),
+        skill_rows=tuple(skill_rows),
+        matrix=matrix,
+    )
+
+
+def write_binary_embedding_store(
+    path: str | Path,
+    *,
+    model_id: str,
+    records: list[Any],
+) -> None:
+    """Publish one canonical metadata plus float32 matrix store."""
+
+    if not records:
+        raise ValueError("embedding store requires at least one record")
+    dimension = len(records[0].vector)
+    if dimension <= 0:
+        raise ValueError("embedding store dimension must be positive")
+    target = Path(path)
+    matrix_target = target.with_suffix(".npy")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    matrix_temp = matrix_target.with_name(matrix_target.name + ".tmp")
+    metadata_temp = target.with_name(target.name + ".tmp")
+    if matrix_temp.exists() or metadata_temp.exists():
+        raise ValueError("embedding store staging path already exists")
+    matrix = np.lib.format.open_memmap(
+        matrix_temp,
+        mode="w+",
+        dtype=np.float32,
+        shape=(len(records), dimension),
+    )
+    metadata_rows: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    try:
+        for row, record in enumerate(records):
+            key = _required_store_string(record.key, label=f"record {row} key")
+            if key in seen_keys:
+                raise ValueError(f"embedding store contains duplicate record key: {key}")
+            seen_keys.add(key)
+            vector = np.asarray(record.vector, dtype=np.float32)
+            if vector.ndim != 1 or vector.shape[0] != dimension:
+                raise ValueError(f"embedding record {row} has the wrong vector shape")
+            if not np.isfinite(vector).all() or not np.any(vector != 0.0):
+                raise ValueError(f"embedding record {row} vector must be finite and non-zero")
+            matrix[row] = vector
+            metadata_rows.append(
+                {
+                    "row": row,
+                    "key": key,
+                    "skill_id": _required_store_string(
+                        record.skill_id,
+                        label=f"record {row} skill_id",
+                    ),
+                    "kind": record.kind,
+                    "field_name": record.field_name,
+                    "text_hash": _required_store_string(
+                        record.text_hash,
+                        label=f"record {row} text_hash",
+                    ),
+                }
+            )
+        matrix.flush()
+        del matrix
+        os.replace(matrix_temp, matrix_target)
+        payload = {
+            "model_id": _required_store_string(model_id, label="model_id"),
+            "dimension": dimension,
+            "dtype": "float32",
+            "matrix_file": matrix_target.name,
+            "records": metadata_rows,
+        }
+        metadata_temp.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(metadata_temp, target)
+    except Exception:
+        if matrix_temp.exists():
+            matrix_temp.unlink()
+        if metadata_temp.exists():
+            metadata_temp.unlink()
+        raise
 
 
 def embed_query(provider: EmbeddingProvider, query: str) -> list[float]:
@@ -342,6 +467,15 @@ def _vectors_from_embedding_response(response: Any) -> list[list[float]]:
 
 def _is_finite_nonzero_vector(vector: list[float]) -> bool:
     return all(math.isfinite(value) for value in vector) and any(value != 0.0 for value in vector)
+
+
+def _validate_embedding_matrix(matrix: np.ndarray) -> None:
+    for start in range(0, matrix.shape[0], _MATRIX_VALIDATION_CHUNK):
+        chunk = matrix[start : start + _MATRIX_VALIDATION_CHUNK]
+        if not np.isfinite(chunk).all():
+            raise ValueError("embedding matrix contains non-finite values")
+        if np.any(~np.any(chunk != 0.0, axis=1)):
+            raise ValueError("embedding matrix contains a zero vector")
 
 
 def _first_value(values: dict[str, str], *keys: str, default: str = "") -> str:
@@ -399,4 +533,5 @@ __all__ = [
     "embed_query",
     "embedding_provider_for_model",
     "load_skill_embedding_store",
+    "write_binary_embedding_store",
 ]

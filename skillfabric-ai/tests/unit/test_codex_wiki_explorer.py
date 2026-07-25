@@ -230,6 +230,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
         self.assertIn("index.md", spec["system_prompt"])
         self.assertIn("non-interactive", spec["system_prompt"])
         self.assertIn("extract financial KPIs", spec["user_prompt"])
+        self.assertNotIn("query", spec)
         self.assertNotIn("required_selected_skills", spec)
 
     def test_codex_prompt_spec_carries_the_exact_selection_count(self) -> None:
@@ -246,6 +247,37 @@ class CodexWikiExplorerTests(unittest.TestCase):
             "<required_selected_skills>5</required_selected_skills>",
             spec["user_prompt"],
         )
+
+    def test_prompt_spec_builder_can_override_only_prompt_fields(self) -> None:
+        spec = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+            prompt_spec_builder=lambda _default: {
+                "prompt_id": "skillrouter-v1",
+                "system_prompt": "<trusted_policy>Choose five.</trusted_policy>",
+                "user_prompt": "<task_query>extract financial KPIs</task_query>",
+            },
+        )
+
+        self.assertEqual(spec["prompt_id"], "skillrouter-v1")
+        self.assertEqual(spec["system_prompt"], "<trusted_policy>Choose five.</trusted_policy>")
+        self.assertEqual(spec["user_prompt"], "<task_query>extract financial KPIs</task_query>")
+        self.assertEqual(spec["schema"], skill_package_json_schema())
+        self.assertEqual(spec["query_wiki_root"], "query_wiki")
+        self.assertEqual(spec["allowed_tools"], ["exec_command"])
+        self.assertNotIn("query", spec)
+
+    def test_prompt_spec_builder_cannot_modify_execution_contract(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported prompt spec fields"):
+            build_codex_prompt_spec(
+                query="extract financial KPIs",
+                query_wiki_root=Path("query_wiki"),
+                max_selected_skills=5,
+                prompt_spec_builder=lambda _default: {
+                    "schema": {"type": "object"},
+                },
+            )
 
     def test_completed_empty_package_without_successful_wiki_access_fails_closed(self) -> None:
         success = _success_events()

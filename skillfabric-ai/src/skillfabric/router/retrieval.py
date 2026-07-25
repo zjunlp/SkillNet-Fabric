@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
+
 from skillfabric.indexing.bm25 import search_bm25
 from skillfabric.indexing.embeddings import (
     EmbeddingProvider,
-    cosine_similarity,
     embed_query,
     embedding_provider_for_model,
     load_skill_embedding_store,
@@ -44,7 +45,7 @@ def retrieve_seed_candidates(
         limit=len(skills),
     )
     store = load_skill_embedding_store(workspace.graph_dir / "embeddings.json")
-    if set(store.vectors) != set(skills):
+    if set(store.skill_ids) != set(skills):
         raise RouterRetrievalError(
             "skill embedding ids differ from the registry; rebuild the workspace"
         )
@@ -64,14 +65,16 @@ def retrieve_seed_candidates(
         raise RouterRetrievalError("query embedding must be a non-empty finite vector")
     if math.sqrt(sum(value * value for value in query_vector)) <= 0:
         raise RouterRetrievalError("query embedding must have non-zero norm")
+    query_array = np.asarray(query_vector, dtype=np.float32)
+    query_norm = float(np.linalg.norm(query_array))
+    skill_matrix = np.asarray(store.matrix[list(store.skill_rows)], dtype=np.float32)
+    skill_norms = np.linalg.norm(skill_matrix, axis=1)
+    scores = (skill_matrix @ query_array) / (skill_norms * query_norm)
     embedding_order = [
-        skill_id
-        for skill_id, _score in sorted(
-            (
-                (skill_id, cosine_similarity(query_vector, vector))
-                for skill_id, vector in store.vectors.items()
-            ),
-            key=lambda item: (-item[1], item[0]),
+        store.skill_ids[index]
+        for index in sorted(
+            range(len(store.skill_ids)),
+            key=lambda index: (-float(scores[index]), store.skill_ids[index]),
         )
     ]
     fused = reciprocal_rank_fusion(
