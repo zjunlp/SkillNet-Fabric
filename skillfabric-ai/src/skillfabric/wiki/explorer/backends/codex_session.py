@@ -447,6 +447,11 @@ def _command_policy_violation(
     tokens = _shell_tokens(command)
     if any(">" in token and set(token) <= set(";&|<>") for token in tokens):
         return "write_attempt"
+    tokens = _unwrap_app_server_shell_wrapper(tokens)
+    if tokens is None:
+        return "unrestricted_runtime"
+    if any(">" in token and set(token) <= set(";&|<>") for token in tokens):
+        return "write_attempt"
     commands = _shell_command_names(tokens)
     if commands & {
         "rm",
@@ -471,6 +476,17 @@ def _command_policy_violation(
     if "&" in tokens:
         return "background_job"
     return ""
+
+
+def _unwrap_app_server_shell_wrapper(tokens: list[str]) -> list[str] | None:
+    """Return the audited command inside the app-server's fixed shell transport."""
+
+    if not tokens or Path(tokens[0]).name.casefold() not in {"bash", "sh", "zsh"}:
+        return tokens
+    if len(tokens) != 3 or tokens[1] not in {"-c", "-cl", "-lc"}:
+        return None
+    inner_tokens = _shell_tokens(tokens[2])
+    return inner_tokens or None
 
 
 def _shell_tokens(command: str) -> list[str]:

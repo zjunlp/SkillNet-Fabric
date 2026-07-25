@@ -476,6 +476,9 @@ class CodexWikiExplorerTests(unittest.TestCase):
             cases = {
                 "write": ("touch cards/new.md", None),
                 "network": ("curl https://example.invalid", None),
+                "wrapped-write": ("/bin/bash -lc 'touch cards/new.md'", None),
+                "wrapped-network": ("/bin/bash -lc 'curl https://example.invalid'", None),
+                "wrapped-runtime": ("/bin/bash -lc 'python3 -c \"print(1)\"'", None),
                 "outside": (
                     "sed -n '1,20p' ../outside.md",
                     [
@@ -567,6 +570,38 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     (root / name / "cc_explorer" / "operational_access.json").read_text()
                 )
                 self.assertIsNone(access["policy_violation"])
+
+    def test_command_audit_allows_read_only_app_server_shell_wrapper(self) -> None:
+        events = _success_events()
+        for event in events[:2]:
+            event.payload.item.root.command = "/bin/bash -lc 'sed -n 1,80p index.md'"
+            event.payload.item.root.command_actions = [
+                SimpleNamespace(root=SimpleNamespace(type="listFiles", path="index.md"))
+            ]
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wiki = root / "query_wiki"
+            wiki.mkdir()
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+
+            package = CodexWikiExplorerBackend(
+                env_file=env_file,
+                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
+                sdk_runtime=_Runtime(events),
+            ).explore(
+                query="find a skill",
+                query_wiki_root=wiki,
+                trace_dir=root / "trace",
+            )
+
+            self.assertEqual(package.to_dict(), _package())
+            access = json.loads(
+                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
+            )
+            self.assertIsNone(access["policy_violation"])
+            self.assertTrue(access["index_read"])
 
     def test_runtime_loader_uses_the_sdk_types_reasoning_effort_export(self) -> None:
         package = ModuleType("openai_codex")
