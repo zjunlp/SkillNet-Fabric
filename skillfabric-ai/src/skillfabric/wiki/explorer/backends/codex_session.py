@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.storage import atomic_write_text
+from skillfabric.wiki.explorer.redaction import sanitize_error_text
 
 CODEX_ALLOWED_ITEM_TYPES = frozenset(
     {
@@ -564,17 +565,11 @@ def _sdk_metadata(metadata: Any) -> dict[str, str]:
 
 
 def _safe_error_text(value: str, *, paths: tuple[Path, ...] = ()) -> str:
-    text = re.sub(r"(?i)\bsk-[a-z0-9._-]+", "[redacted]", value)
-    text = re.sub(
-        r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)=\S+",
-        r"\1=[redacted]",
-        text,
+    return sanitize_error_text(
+        value,
+        paths=paths,
+        path_replacement="[isolated-codex-home]",
     )
-    text = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [redacted]", text)
-    for path in sorted((str(path) for path in paths), key=len, reverse=True):
-        if path:
-            text = text.replace(path, "[isolated-codex-home]")
-    return text[:2_000]
 
 
 def _write_json(path: Path, payload: Any) -> None:

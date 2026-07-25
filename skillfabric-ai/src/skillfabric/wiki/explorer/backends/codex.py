@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import re
 import shutil
 import threading
 from contextlib import suppress
@@ -28,6 +27,7 @@ from skillfabric.wiki.explorer.prompting import (
     render_system_prompt,
     render_user_prompt,
 )
+from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
 CodexSdkRuntime = Any
@@ -550,17 +550,11 @@ def _require_int_at_least(value: Any, *, name: str, minimum: int) -> None:
 
 
 def _safe_error_text(value: str, *, paths: tuple[Path, ...] = ()) -> str:
-    text = re.sub(r"(?i)\bsk-[a-z0-9._-]+", "[redacted]", value)
-    text = re.sub(
-        r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)=\S+",
-        r"\1=[redacted]",
-        text,
+    return sanitize_error_text(
+        value,
+        paths=paths,
+        path_replacement="[isolated-codex-home]",
     )
-    text = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [redacted]", text)
-    for path in sorted((str(path) for path in paths), key=len, reverse=True):
-        if path:
-            text = text.replace(path, "[isolated-codex-home]")
-    return text[:2_000]
 
 
 def _write_json(path: Path, payload: Any) -> None:

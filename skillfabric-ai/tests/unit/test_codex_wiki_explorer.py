@@ -176,7 +176,10 @@ class _Codex:
         self.runtime.thread_calls.append(kwargs)
         if self.runtime.fail_thread_start:
             home = self.config.kwargs["env"]["CODEX_HOME"]
-            raise RuntimeError(f"app-server failed under {home}: OPENAI_API_KEY=sk-runtime-secret")
+            raise RuntimeError(
+                f"app-server failed under {home}: OPENAI_API_KEY=sk-runtime-secret "
+                "DB_CREDENTIAL:credential-secret SESSION_TOKEN token-secret"
+            )
         return _Thread(self.runtime)
 
 
@@ -922,6 +925,8 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(backend_payload["app_server"]["version"], "0.144.4")
             error_text = (artifacts / "error.json").read_text()
             self.assertNotIn("sk-runtime-secret", error_text)
+            self.assertNotIn("credential-secret", error_text)
+            self.assertNotIn("token-secret", error_text)
             self.assertNotIn(runtime.configs[0].kwargs["env"]["CODEX_HOME"], error_text)
 
     def test_outer_attempt_closure_reuses_the_backend_sanitized_error(self) -> None:
@@ -956,6 +961,8 @@ class CodexWikiExplorerTests(unittest.TestCase):
             closure_text = (trace / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
             self.assertNotIn(codex_home, closure_text)
             self.assertNotIn("sk-runtime-secret", closure_text)
+            self.assertNotIn("credential-secret", closure_text)
+            self.assertNotIn("token-secret", closure_text)
 
     def test_command_budget_interrupts_the_turn_and_propagates_failure(self) -> None:
         commands = [

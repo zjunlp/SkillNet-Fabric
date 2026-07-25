@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from skillfabric.wiki.explorer.backends.claude_code import (
     ClaudeCodeSdkRuntime,
     ClaudeCodeWikiExplorerBackend,
 )
+from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import (
     SkillPackageValidationResult,
@@ -498,17 +498,15 @@ def _failure_kind(error: Exception, unmetered_attempt: bool) -> str:
 
 
 def _safe_error(value: str, *, paths: tuple[Path, ...] = ()) -> str:
-    text = re.sub(r"(?i)\bsk-[a-z0-9._-]+", "[redacted]", value)
-    text = re.sub(
-        r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)=\S+",
-        r"\1=[redacted]",
-        text,
+    return (
+        sanitize_error_text(
+            value,
+            paths=paths,
+            path_replacement="[redacted-path]",
+            collapse_whitespace=True,
+        )
+        or "explorer failed"
     )
-    text = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [redacted]", text)
-    for path in sorted((str(path) for path in paths), key=len, reverse=True):
-        if path:
-            text = text.replace(path, "[redacted-path]")
-    return " ".join(text.split())[:2_000] or "explorer failed"
 
 
 def _sanitized_exception(error: Exception, *, paths: tuple[Path, ...]) -> str:
