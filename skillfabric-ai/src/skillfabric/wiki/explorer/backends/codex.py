@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import re
+import shutil
 import threading
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -315,6 +316,7 @@ class CodexWikiExplorerBackend:
                 query_wiki_root=query_wiki_root,
                 codex_home=codex_home,
                 api_base=settings.api_base,
+                codex_bin=_codex_runtime_path(self.codex_bin),
             ),
             output_schema=skill_package_json_schema(),
             metadata_callback=lambda metadata: _write_json(
@@ -350,16 +352,20 @@ def _thread_config(
     query_wiki_root: Path,
     codex_home: Path,
     api_base: str,
+    codex_bin: Path | None,
 ) -> dict[str, Any]:
+    filesystem = {
+        ":minimal": "read",
+        str(query_wiki_root): "read",
+    }
+    if codex_bin is not None:
+        filesystem[str(codex_bin)] = "read"
     return {
         "openai_base_url": api_base,
         "default_permissions": PERMISSION_PROFILE,
         "permissions": {
             PERMISSION_PROFILE: {
-                "filesystem": {
-                    ":minimal": "read",
-                    str(query_wiki_root): "read",
-                },
+                "filesystem": filesystem,
                 "network": {"enabled": False},
             }
         },
@@ -429,6 +435,17 @@ def _thread_config(
             "include_only": ["PATH", "SHELL", "HOME", "LANG", "LC_*"],
         },
     }
+
+
+def _codex_runtime_path(codex_bin: str | Path | None) -> Path | None:
+    if codex_bin is None:
+        return None
+    candidate = Path(codex_bin).expanduser()
+    if candidate.parent == Path("."):
+        resolved = shutil.which(str(candidate))
+        if resolved is not None:
+            return Path(resolved).resolve()
+    return candidate.resolve()
 
 
 def _normalize_tool_budget(

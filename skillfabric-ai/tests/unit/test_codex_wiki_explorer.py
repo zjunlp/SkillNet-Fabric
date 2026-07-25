@@ -720,7 +720,11 @@ class CodexWikiExplorerTests(unittest.TestCase):
             profile = thread_config["permissions"]["skillfabric-query-wiki"]
             self.assertEqual(
                 profile["filesystem"],
-                {":minimal": "read", str(wiki.resolve()): "read"},
+                {
+                    ":minimal": "read",
+                    str(wiki.resolve()): "read",
+                    str((root / "codex").resolve()): "read",
+                },
             )
             self.assertFalse(profile["network"]["enabled"])
             disabled_features = {
