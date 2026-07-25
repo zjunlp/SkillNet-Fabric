@@ -14,7 +14,7 @@ from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSki
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.contract_pages import render_contract_card, render_untrusted_skill_source
 from skillfabric.wiki.explorer.prompting import render_query_wiki_explorer_md
-from skillfabric.wiki.loader import load_wiki_source
+from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.pages import slug
 
 
@@ -28,11 +28,17 @@ def materialize_query_wiki(
     bundle: RouterBundle,
     *,
     trace_dir: Path,
+    wiki_source: WikiSource | None = None,
 ) -> QueryWikiBuildResult:
     """Create one self-contained query wiki from canonical semantic artifacts."""
 
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
-    source = load_wiki_source(workspace)
+    if wiki_source is None:
+        source = load_wiki_source(workspace)
+    elif isinstance(wiki_source, WikiSource):
+        source = wiki_source
+    else:
+        raise TypeError("wiki_source must be a WikiSource")
     query_root = trace_dir / "query_wiki"
     if query_root.exists():
         raise FileExistsError(f"query_wiki already exists: {query_root}")

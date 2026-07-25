@@ -5,7 +5,9 @@ import json
 import pytest
 
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.prompting import EXPLORER_PROMPT_ID
+from skillfabric.wiki.loader import load_wiki_source
 from skillfabric.wiki.query_wiki import materialize_query_wiki, render_query_wiki_skill_card
 from tests.unit.fake_embeddings import FakeEmbeddingProvider
 from tests.unit.wiki_helpers import build_fixture_workspace
@@ -71,6 +73,39 @@ def test_query_wiki_refuses_to_delete_an_existing_trace_artifact(tmp_path) -> No
         materialize_query_wiki(workspace, bundle, trace_dir=trace_dir)
 
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_query_wiki_accepts_a_preloaded_source_without_reloading(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    bundle = build_router_bundle(
+        RouterBundleConfig(
+            workspace=workspace,
+            query="extract financial KPIs",
+            seed_limit=2,
+            expanded_limit=4,
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    source = load_wiki_source(Workspace(workspace))
+
+    from skillfabric.wiki import query_wiki
+
+    def fail_loader(_workspace):
+        raise AssertionError("materializer reloaded the WikiSource")
+
+    monkeypatch.setattr(query_wiki, "load_wiki_source", fail_loader)
+    result = materialize_query_wiki(
+        workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "preloaded-source",
+        wiki_source=source,
+    )
+
+    assert result.root.is_dir()
 
 
 def test_skill_cards_are_contract_grounded_and_sources_are_bounded(tmp_path) -> None:
