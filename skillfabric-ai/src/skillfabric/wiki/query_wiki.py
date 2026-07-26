@@ -53,6 +53,7 @@ def materialize_query_wiki(
     candidates = {candidate.skill_id: candidate for candidate in bundle.selected_skills}
     alternatives = {alternative.skill_id: alternative for alternative in bundle.alternatives}
     included_ids = list(candidates)
+    included_ids.extend(skill_id for skill_id in alternatives if skill_id not in candidates)
     missing = sorted(set(included_ids) - set(source.skills))
     if missing:
         raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
@@ -125,12 +126,17 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
 def _manifest_skill(
     skill: SkillNode,
     *,
-    candidate: RouterSkillCandidate,
+    candidate: RouterSkillCandidate | None,
     alternative: RouterAlternative | None,
     card_path: str,
     source_path: str,
 ) -> dict[str, Any]:
-    origin = "seed" if candidate.is_seed else "semantic_expansion"
+    if candidate is not None:
+        origin = "seed" if candidate.is_seed else "semantic_expansion"
+        route = candidate.to_dict()
+    else:
+        origin = "similar_alternative"
+        route = None
     return {
         "skill_id": skill.id,
         "name": skill.name,
@@ -139,7 +145,7 @@ def _manifest_skill(
         "origin": origin,
         "card_path": card_path,
         "source_path": source_path,
-        "route": candidate.to_dict(),
+        "route": route,
         "alternative": alternative.to_dict() if alternative is not None else None,
     }
 

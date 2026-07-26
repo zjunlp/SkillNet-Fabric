@@ -5,12 +5,22 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
+
+_SOURCE_ARTIFACTS = (
+    "status.json",
+    "graph/graph.json",
+    "graph/registry.jsonl",
+    "graph/contracts.jsonl",
+)
+_SourceArtifactIdentity = tuple[str, int, int, int, int]
+_SourceCacheKey = tuple[str, tuple[_SourceArtifactIdentity, ...]]
 
 
 @dataclass(slots=True)
@@ -32,8 +42,35 @@ class WikiSource:
         ]
 
 
+_SOURCE_CACHE: dict[_SourceCacheKey, WikiSource] = {}
+_SOURCE_CACHE_LOCK = Lock()
+
+
 def load_wiki_source(workspace: Workspace) -> WikiSource:
-    """Read the canonical graph, registry, and contract artifacts directly."""
+    """Load one validated ready-workspace snapshot per process."""
+
+    with _SOURCE_CACHE_LOCK:
+        key = _workspace_source_cache_key(workspace)
+        cached = _SOURCE_CACHE.get(key)
+        if cached is not None:
+            return cached
+        source = _load_wiki_source_uncached(workspace)
+        if _workspace_source_cache_key(workspace) != key:
+            raise RuntimeError("workspace artifacts changed during WikiSource loading")
+        _SOURCE_CACHE.clear()
+        _SOURCE_CACHE[key] = source
+        return source
+
+
+def clear_wiki_source_cache() -> None:
+    """Release the process-local ready-workspace snapshot."""
+
+    with _SOURCE_CACHE_LOCK:
+        _SOURCE_CACHE.clear()
+
+
+def _load_wiki_source_uncached(workspace: Workspace) -> WikiSource:
+    """Read and validate canonical graph, registry, and contract artifacts."""
 
     status_path = _required_path(workspace.status_path)
     graph_path = _required_path(workspace.graph_dir / "graph.json")
@@ -73,6 +110,29 @@ def load_wiki_source(workspace: Workspace) -> WikiSource:
         contracts=contracts,
         core_edges=graph.edges,
     )
+
+
+def _workspace_source_cache_key(
+    workspace: Workspace,
+) -> _SourceCacheKey:
+    root = workspace.root.resolve()
+    identities: list[_SourceArtifactIdentity] = []
+    for relative in _SOURCE_ARTIFACTS:
+        path = root / relative
+        try:
+            identity = path.stat()
+        except FileNotFoundError:
+            return str(root), ()
+        identities.append(
+            (
+                relative,
+                identity.st_dev,
+                identity.st_ino,
+                identity.st_size,
+                identity.st_mtime_ns,
+            )
+        )
+    return str(root), tuple(identities)
 
 
 def _required_path(path: Path) -> Path:

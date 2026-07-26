@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
+from skillfabric.router.models import RouterAlternative, RouterBundle
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
 from skillfabric.wiki.query_wiki import materialize_query_wiki
@@ -177,7 +178,7 @@ def test_skill_package_normalizes_query_wiki_relative_paths(prefix: str) -> None
 
 
 def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
+    bundle, query_wiki = _query_context(tmp_path)
     package = _package(
         selected_skills=[
             {
@@ -194,10 +195,25 @@ def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
     assert not validation.valid
     assert any("not in query_wiki manifest" in error for error in validation.errors)
     assert any("escapes query_wiki" in error for error in validation.errors)
+    with pytest.raises(ValueError, match="not a selectable bundle candidate"):
+        route_from_skill_package(package, bundle)
 
 
-def test_alternative_only_skill_cannot_be_routed(tmp_path) -> None:
-    bundle, query_wiki = _query_context(tmp_path)
+def test_alternative_only_skill_can_be_routed_from_bundle() -> None:
+    bundle = RouterBundle(
+        query="Use a near substitute.",
+        selected_skills=(),
+        graph_edges=(),
+        alternatives=(
+            RouterAlternative(
+                skill_id="skill:similar-only",
+                name="Similar Only",
+                alternative_to="skill:preferred",
+                confidence=0.9,
+                reason="Validated near substitute.",
+            ),
+        ),
+    )
     package = _package(
         selected_skills=[
             {
@@ -209,12 +225,10 @@ def test_alternative_only_skill_cannot_be_routed(tmp_path) -> None:
         wiki_pages_read=["index.md"],
     )
 
-    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+    route = route_from_skill_package(package, bundle)
 
-    assert not validation.valid
-    assert any("not in query_wiki manifest" in error for error in validation.errors)
-    with pytest.raises(ValueError, match="not a selectable bundle candidate"):
-        route_from_skill_package(package, bundle)
+    assert route.selected_skill_ids == ["skill:similar-only"]
+    assert route.selected_skills[0].name == "Similar Only"
 
 
 def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
@@ -276,15 +290,17 @@ def test_manifest_rejects_duplicate_skill_rows(tmp_path) -> None:
         validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
 
 
-def test_manifest_rejects_alternative_only_candidate_rows(tmp_path) -> None:
+def test_manifest_accepts_alternative_only_candidate_rows(tmp_path) -> None:
     _, query_wiki = _query_context(tmp_path)
     manifest_path = query_wiki.root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["skills"][0]["origin"] = "similar_alternative"
+    manifest["skills"][0]["route"] = None
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="origin must be seed or semantic_expansion"):
-        validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
+    validation = validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
+
+    assert validation.valid, validation.errors
 
 
 def test_selected_dependent_does_not_force_compiled_prerequisite(tmp_path) -> None:
