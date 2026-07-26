@@ -1,4 +1,4 @@
-"""Bounded graph expansion over validated operational relations."""
+"""Bounded graph expansion over validated semantic relations."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def expand_semantic_candidates(
     max_depth: int,
     limit: int,
 ) -> ExpansionResult:
-    """Traverse depend_on and compose_with while keeping similarity separate."""
+    """Expand all semantic relations under one deterministic candidate budget."""
 
     if max_depth < 0:
         raise ValueError("max_depth must be non-negative")
@@ -42,14 +42,10 @@ def expand_semantic_candidates(
         raise ValueError("retrieved seed is not present in the registry")
 
     adjacency: dict[str, list[tuple[str, Edge]]] = defaultdict(list)
-    similarity_edges: list[Edge] = []
     for edge in edges:
         if edge.source not in skills or edge.target not in skills:
             raise ValueError("graph edge references an unknown skill")
-        if edge.type == "similar_to":
-            similarity_edges.append(edge)
-            continue
-        if edge.type not in {"depend_on", "compose_with"}:
+        if edge.type not in {"depend_on", "compose_with", "similar_to"}:
             raise ValueError(f"unsupported graph edge type: {edge.type}")
         adjacency[edge.source].append((edge.target, edge))
         adjacency[edge.target].append((edge.source, edge))
@@ -122,12 +118,14 @@ def expand_semantic_candidates(
     selected_ranks = {candidate.skill_id: rank for rank, candidate in enumerate(selected)}
     alternatives: dict[str, RouterAlternative] = {}
     alternative_priorities: dict[str, tuple[float, int, str]] = {}
-    for edge in similarity_edges:
+    for edge in edges:
+        if edge.type != "similar_to":
+            continue
         source_rank = selected_ranks.get(edge.source)
         target_rank = selected_ranks.get(edge.target)
-        if source_rank is None and target_rank is None:
+        if source_rank is None or target_rank is None:
             continue
-        if target_rank is None or (source_rank is not None and source_rank < target_rank):
+        if source_rank < target_rank:
             selected_id, alternative_id = edge.source, edge.target
         else:
             selected_id, alternative_id = edge.target, edge.source
@@ -162,7 +160,9 @@ def _transition_weights(edge_type: str) -> tuple[float, float]:
         return 1.0, 1.0
     if edge_type == "compose_with":
         return 0.7, 0.5
-    raise ValueError(f"unsupported operational edge type: {edge_type}")
+    if edge_type == "similar_to":
+        return 0.3, 0.3
+    raise ValueError(f"unsupported semantic edge type: {edge_type}")
 
 
 def _step_transition_weight(step: ExpansionStep) -> float:

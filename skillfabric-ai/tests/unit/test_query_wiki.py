@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from skillfabric.compiled_graph.models import Edge
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.models import RouterAlternative, RouterBundle
 from skillfabric.storage import Workspace
@@ -144,6 +145,60 @@ def test_semantic_edges_preserve_compiled_dependency_direction(tmp_path) -> None
     assert "execution_direction" not in edge
 
 
+def test_query_wiki_writes_internal_similarity_edges_and_metadata(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    original = build_router_bundle(
+        RouterBundleConfig(
+            workspace=workspace,
+            query="extract financial KPIs",
+            seed_limit=2,
+            expanded_limit=4,
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    first, second = original.selected_skills[:2]
+    source_id, target_id = sorted((first.skill_id, second.skill_id))
+    similarity = Edge(
+        source=source_id,
+        target=target_id,
+        type="similar_to",
+        confidence=0.85,
+        reason="Validated near-substitute relation.",
+    )
+    bundle = RouterBundle(
+        query=original.query,
+        selected_skills=original.selected_skills,
+        graph_edges=(*original.graph_edges, similarity),
+        alternatives=(
+            RouterAlternative(
+                skill_id=second.skill_id,
+                name=second.name,
+                alternative_to=first.skill_id,
+                confidence=similarity.confidence,
+                reason=similarity.reason,
+            ),
+        ),
+    )
+
+    result = materialize_query_wiki(
+        workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "internal-similarity",
+    )
+    manifest = json.loads((result.root / "manifest.json").read_text(encoding="utf-8"))
+    edge_rows = [
+        json.loads(line)
+        for line in (result.root / "edges" / "semantic_edges.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert len(manifest["skills"]) == len(bundle.selected_skills)
+    assert manifest["alternatives"] == [bundle.alternatives[0].to_dict()]
+    assert similarity.to_dict() in edge_rows
+
+
 def test_index_and_explorer_instructions_are_concise_and_canonical(tmp_path) -> None:
     _, result = _materialize(tmp_path)
     index = (result.root / "index.md").read_text(encoding="utf-8")
@@ -166,7 +221,7 @@ def test_render_query_wiki_skill_card_reads_manifest_card(tmp_path) -> None:
     assert "normalized_csv_table" in rendered
 
 
-def test_alternative_only_skills_are_selectable_wiki_candidates(tmp_path) -> None:
+def test_query_wiki_rejects_alternative_metadata_outside_bounded_candidates(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
     bundle = build_router_bundle(
@@ -198,22 +253,11 @@ def test_alternative_only_skills_are_selectable_wiki_candidates(tmp_path) -> Non
         alternatives=(alternative,),
     )
 
-    result = materialize_query_wiki(
-        workspace,
-        bundle,
-        trace_dir=workspace / "runs" / "alternative-only",
-        wiki_source=source,
-    )
-    manifest = json.loads((result.root / "manifest.json").read_text(encoding="utf-8"))
-
-    rows = {row["skill_id"]: row for row in manifest["skills"]}
-    assert alternative_id in rows
-    assert rows[alternative_id]["selectable"] is True
-    assert rows[alternative_id]["origin"] == "similar_alternative"
-    assert rows[alternative_id]["route"] is None
-    assert rows[alternative_id]["alternative"] == alternative.to_dict()
-    assert manifest["alternatives"] == [alternative.to_dict()]
-    assert (result.root / rows[alternative_id]["card_path"]).is_file()
-    assert (result.root / rows[alternative_id]["source_path"]).is_file()
-    index = (result.root / "index.md").read_text(encoding="utf-8")
-    assert alternative_id in index
+    with pytest.raises(ValueError, match="outside selected candidates"):
+        materialize_query_wiki(
+            workspace,
+            bundle,
+            trace_dir=workspace / "runs" / "alternative-only",
+            wiki_source=source,
+        )
+    assert not (workspace / "runs" / "alternative-only" / "query_wiki").exists()

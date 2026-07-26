@@ -7,7 +7,6 @@ import json
 import math
 import shutil
 import threading
-from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,7 +32,6 @@ from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
 CodexSdkRuntime = Any
-PromptSpecBuilder = Callable[[Mapping[str, Any]], Mapping[str, str]]
 CODEX_ALLOWED_TOOLS = ("exec_command",)
 PERMISSION_PROFILE = "skillfabric-query-wiki"
 CODEX_EXECUTION_GUIDANCE = """
@@ -56,7 +54,6 @@ def build_codex_prompt_spec(
     max_selected_skills: int,
     required_selected_skills: int | None = None,
     tool_budget: dict[str, int] | None = None,
-    prompt_spec_builder: PromptSpecBuilder | None = None,
 ) -> dict[str, Any]:
     """Build the exact Codex prompt and schema payload used by the backend."""
 
@@ -85,13 +82,6 @@ def build_codex_prompt_spec(
     }
     if context.required_selected_skills is not None:
         payload["required_selected_skills"] = context.required_selected_skills
-    if prompt_spec_builder is not None:
-        builder_context = {**payload, "query": query}
-        payload = _apply_prompt_spec_builder(
-            payload,
-            prompt_spec_builder,
-            builder_context=builder_context,
-        )
     return payload
 
 
@@ -135,7 +125,6 @@ class CodexWikiExplorerBackend:
     sdk_runtime: CodexSdkRuntime | None = None
     tool_budget: dict[str, int] | None = None
     required_selected_skills: int | None = None
-    prompt_spec_builder: PromptSpecBuilder | None = None
 
     CODEX_EXECUTION_CONTRACT = CODEX_EXECUTION_CONTRACT
 
@@ -173,8 +162,6 @@ class CodexWikiExplorerBackend:
         if not _same_json_shape(supplied_contract, CODEX_EXECUTION_CONTRACT.to_dict()):
             raise ValueError("execution_contract does not match the Codex backend contract")
         self.execution_contract = CODEX_EXECUTION_CONTRACT.to_dict()
-        if self.prompt_spec_builder is not None and not callable(self.prompt_spec_builder):
-            raise TypeError("prompt_spec_builder must be callable")
         self.tool_budget = _normalize_tool_budget(
             self.tool_budget,
             max_selected_skills=self.max_selected_skills,
@@ -204,7 +191,6 @@ class CodexWikiExplorerBackend:
             max_selected_skills=self.max_selected_skills,
             required_selected_skills=self.required_selected_skills,
             tool_budget=tool_budget,
-            prompt_spec_builder=self.prompt_spec_builder,
         )
         system_prompt = str(prompt_spec["system_prompt"])
         user_prompt = str(prompt_spec["user_prompt"])
@@ -235,9 +221,7 @@ class CodexWikiExplorerBackend:
             )
         }
         if "required_selected_skills" in prompt_spec:
-            prompt_context["required_selected_skills"] = prompt_spec[
-                "required_selected_skills"
-            ]
+            prompt_context["required_selected_skills"] = prompt_spec["required_selected_skills"]
         atomic_write_text(
             cc_dir / "prompt_context.json",
             json.dumps(prompt_context, ensure_ascii=False, indent=2) + "\n",
@@ -519,29 +503,6 @@ def _normalize_tool_budget(
     return merged
 
 
-def _apply_prompt_spec_builder(
-    default_spec: dict[str, Any],
-    builder: PromptSpecBuilder,
-    *,
-    builder_context: Mapping[str, Any],
-) -> dict[str, Any]:
-    override = builder(dict(builder_context))
-    if not isinstance(override, Mapping):
-        raise TypeError("prompt_spec_builder must return a mapping")
-    allowed = {"prompt_id", "system_prompt", "user_prompt"}
-    unexpected = set(override) - allowed
-    if unexpected:
-        raise ValueError(
-            "unsupported prompt spec fields: " + ", ".join(sorted(str(item) for item in unexpected))
-        )
-    result = dict(default_spec)
-    for key, value in override.items():
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"prompt spec field {key} must be a non-empty string")
-        result[key] = value
-    return result
-
-
 def _command_budget(tool_budget: dict[str, int]) -> int:
     return min(tool_budget.get("exec_command", 0), tool_budget.get("total", 0))
 
@@ -670,6 +631,5 @@ __all__ = [
     "CodexOperationalAccessError",
     "CodexSdkRuntime",
     "CodexWikiExplorerBackend",
-    "PromptSpecBuilder",
     "build_codex_prompt_spec",
 ]

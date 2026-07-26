@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import inspect
 import json
 import os
 import sys
@@ -248,36 +249,14 @@ class CodexWikiExplorerTests(unittest.TestCase):
             spec["user_prompt"],
         )
 
-    def test_prompt_spec_builder_can_override_only_prompt_fields(self) -> None:
-        spec = build_codex_prompt_spec(
-            query="extract financial KPIs",
-            query_wiki_root=Path("query_wiki"),
-            max_selected_skills=5,
-            prompt_spec_builder=lambda _default: {
-                "prompt_id": "skillrouter-v1",
-                "system_prompt": "<trusted_policy>Choose five.</trusted_policy>",
-                "user_prompt": "<task_query>extract financial KPIs</task_query>",
-            },
+    def test_codex_prompt_contract_has_no_custom_builder_surface(self) -> None:
+        self.assertNotIn(
+            "prompt_spec_builder", inspect.signature(build_codex_prompt_spec).parameters
         )
-
-        self.assertEqual(spec["prompt_id"], "skillrouter-v1")
-        self.assertEqual(spec["system_prompt"], "<trusted_policy>Choose five.</trusted_policy>")
-        self.assertEqual(spec["user_prompt"], "<task_query>extract financial KPIs</task_query>")
-        self.assertEqual(spec["schema"], skill_package_json_schema())
-        self.assertEqual(spec["query_wiki_root"], "query_wiki")
-        self.assertEqual(spec["allowed_tools"], ["exec_command"])
-        self.assertNotIn("query", spec)
-
-    def test_prompt_spec_builder_cannot_modify_execution_contract(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unsupported prompt spec fields"):
-            build_codex_prompt_spec(
-                query="extract financial KPIs",
-                query_wiki_root=Path("query_wiki"),
-                max_selected_skills=5,
-                prompt_spec_builder=lambda _default: {
-                    "schema": {"type": "object"},
-                },
-            )
+        self.assertNotIn(
+            "prompt_spec_builder",
+            CodexWikiExplorerBackend.__dataclass_fields__,
+        )
 
     def test_completed_empty_package_without_successful_wiki_access_fails_closed(self) -> None:
         success = _success_events()

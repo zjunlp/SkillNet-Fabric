@@ -119,7 +119,6 @@ def route_from_skill_package(
     """Convert selection to a route and attach graph relations as non-authoritative evidence."""
 
     candidates = {item.skill_id: item.name for item in bundle.selected_skills}
-    candidates.update({item.skill_id: item.name for item in bundle.alternatives})
     for item in package.selected_skills:
         if item.skill_id not in candidates:
             raise ValueError(f"skill is not a selectable bundle candidate: {item.skill_id}")
@@ -203,10 +202,8 @@ def _load_manifest(root: Path) -> dict[str, Any]:
         seen_skill_ids.add(skill_id)
         if not isinstance(item["selectable"], bool):
             raise ValueError(f"query_wiki manifest skills[{index}] selectable must be boolean")
-        if item["origin"] not in {"seed", "semantic_expansion", "similar_alternative"}:
-            raise ValueError(
-                f"query_wiki manifest skills[{index}] has invalid origin"
-            )
+        if item["origin"] not in {"seed", "semantic_expansion"}:
+            raise ValueError(f"query_wiki manifest skills[{index}] has invalid origin")
         for field_name in ("card_path", "source_path"):
             value = item[field_name]
             if not isinstance(value, str) or not value.strip():

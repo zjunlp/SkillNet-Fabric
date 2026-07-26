@@ -199,7 +199,7 @@ def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
         route_from_skill_package(package, bundle)
 
 
-def test_alternative_only_skill_can_be_routed_from_bundle() -> None:
+def test_alternative_only_skill_cannot_bypass_bounded_candidates() -> None:
     bundle = RouterBundle(
         query="Use a near substitute.",
         selected_skills=(),
@@ -225,10 +225,8 @@ def test_alternative_only_skill_can_be_routed_from_bundle() -> None:
         wiki_pages_read=["index.md"],
     )
 
-    route = route_from_skill_package(package, bundle)
-
-    assert route.selected_skill_ids == ["skill:similar-only"]
-    assert route.selected_skills[0].name == "Similar Only"
+    with pytest.raises(ValueError, match="not a selectable bundle candidate"):
+        route_from_skill_package(package, bundle)
 
 
 def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
@@ -290,7 +288,7 @@ def test_manifest_rejects_duplicate_skill_rows(tmp_path) -> None:
         validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
 
 
-def test_manifest_accepts_alternative_only_candidate_rows(tmp_path) -> None:
+def test_manifest_rejects_alternative_only_candidate_rows(tmp_path) -> None:
     _, query_wiki = _query_context(tmp_path)
     manifest_path = query_wiki.root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -298,9 +296,8 @@ def test_manifest_accepts_alternative_only_candidate_rows(tmp_path) -> None:
     manifest["skills"][0]["route"] = None
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    validation = validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
-
-    assert validation.valid, validation.errors
+    with pytest.raises(ValueError, match="invalid origin"):
+        validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
 
 
 def test_selected_dependent_does_not_force_compiled_prerequisite(tmp_path) -> None:

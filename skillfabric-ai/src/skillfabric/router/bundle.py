@@ -15,7 +15,7 @@ def build_router_bundle(
     *,
     embedding_provider: EmbeddingProvider | None = None,
 ) -> RouterBundle:
-    """Retrieve seeds and add bounded operational graph context."""
+    """Retrieve seeds and add bounded semantic graph context."""
 
     workspace = Workspace(config.workspace)
     source = load_wiki_source(workspace)
@@ -35,12 +35,11 @@ def build_router_bundle(
         limit=config.expanded_limit,
     )
     context_ids = {candidate.skill_id for candidate in expanded.candidates}
-    context_ids.update(alternative.skill_id for alternative in expanded.alternatives)
     graph_edges = tuple(
         sorted(
             (
                 edge
-                for edge in source.operational_edges
+                for edge in source.core_edges
                 if edge.source in context_ids and edge.target in context_ids
             ),
             key=lambda edge: (edge.type, edge.source, edge.target),

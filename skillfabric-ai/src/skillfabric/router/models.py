@@ -12,7 +12,7 @@ from skillfabric.compiled_graph.models import Edge
 
 @dataclass(frozen=True, slots=True)
 class RouterBundleConfig:
-    """Bounds for retrieval and operational graph expansion."""
+    """Bounds for retrieval and semantic graph expansion."""
 
     workspace: str | Path = ".skillfabric"
     query: str = ""
@@ -112,7 +112,7 @@ class ExpansionPath:
 
 @dataclass(frozen=True, slots=True)
 class RouterSkillCandidate:
-    """One seed or operationally expanded skill shown to the explorer."""
+    """One seed or semantically expanded skill shown to the explorer."""
 
     skill_id: str
     name: str

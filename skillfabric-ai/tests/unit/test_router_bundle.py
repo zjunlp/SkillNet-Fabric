@@ -212,7 +212,36 @@ def test_workflow_expansion_prefers_forward_execution_direction() -> None:
     assert [item.skill_id for item in result.candidates] == ["skill:seed", "skill:z-next"]
 
 
-def test_similarity_is_exposed_as_alternative_but_not_traversed() -> None:
+def test_similarity_competes_with_other_relations_for_the_shared_limit() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:seed", "seed", "Seed skill."),
+            make_skill("skill:dependency", "dependency", "Direct dependency."),
+            make_skill("skill:alternative", "alternative", "Near substitute."),
+        )
+    }
+    edges = [
+        _edge("skill:seed", "skill:dependency", "depend_on"),
+        _edge("skill:alternative", "skill:seed", "similar_to", confidence=1.0),
+    ]
+
+    result = expand_semantic_candidates(
+        [_seed("skill:seed")],
+        edges,
+        skills,
+        max_depth=2,
+        limit=2,
+    )
+
+    assert [candidate.skill_id for candidate in result.candidates] == [
+        "skill:seed",
+        "skill:dependency",
+    ]
+    assert result.alternatives == ()
+
+
+def test_similarity_can_introduce_a_bounded_candidate_and_internal_metadata() -> None:
     skills = {
         skill.id: skill
         for skill in (
@@ -226,13 +255,115 @@ def test_similarity_is_exposed_as_alternative_but_not_traversed() -> None:
         [_edge("skill:alternative", "skill:seed", "similar_to")],
         skills,
         max_depth=2,
-        limit=10,
+        limit=2,
     )
 
-    assert [candidate.skill_id for candidate in result.candidates] == ["skill:seed"]
+    assert [candidate.skill_id for candidate in result.candidates] == [
+        "skill:seed",
+        "skill:alternative",
+    ]
+    alternative = result.candidates[1]
+    assert alternative.graph_depth == 1
+    assert alternative.introduced_by[0].steps[0].edge_type == "similar_to"
     assert len(result.alternatives) == 1
     assert result.alternatives[0].skill_id == "skill:alternative"
     assert result.alternatives[0].alternative_to == "skill:seed"
+
+
+def test_similarity_transition_weight_is_symmetric_and_lower_than_operational_edges() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:a", "a", "First similar skill."),
+            make_skill("skill:z", "z", "Second similar skill."),
+        )
+    }
+    edge = _edge("skill:a", "skill:z", "similar_to", confidence=0.9)
+
+    forward = expand_semantic_candidates(
+        [_seed("skill:a")],
+        [edge],
+        skills,
+        max_depth=1,
+        limit=2,
+    )
+    reverse = expand_semantic_candidates(
+        [_seed("skill:z")],
+        [edge],
+        skills,
+        max_depth=1,
+        limit=2,
+    )
+
+    expected_score = _seed("skill:a").score * 0.9 * 0.3 / 2
+    assert forward.candidates[1].score == pytest.approx(expected_score)
+    assert reverse.candidates[1].score == pytest.approx(expected_score)
+
+
+def test_similarity_supports_mixed_paths_without_exceeding_max_depth() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:seed", "seed", "Seed skill."),
+            make_skill("skill:similar", "similar", "Near substitute."),
+            make_skill("skill:dependency", "dependency", "Dependency of the substitute."),
+            make_skill("skill:too-deep", "too-deep", "Outside the depth bound."),
+        )
+    }
+    edges = [
+        _edge("skill:seed", "skill:similar", "similar_to"),
+        _edge("skill:similar", "skill:dependency", "depend_on"),
+        _edge("skill:dependency", "skill:too-deep", "depend_on"),
+    ]
+
+    result = expand_semantic_candidates(
+        [_seed("skill:seed")],
+        edges,
+        skills,
+        max_depth=2,
+        limit=4,
+    )
+
+    by_id = {candidate.skill_id: candidate for candidate in result.candidates}
+    assert set(by_id) == {"skill:seed", "skill:similar", "skill:dependency"}
+    assert [step.edge_type for step in by_id["skill:dependency"].introduced_by[0].steps] == [
+        "similar_to",
+        "depend_on",
+    ]
+
+
+def test_semantic_expansion_is_independent_of_input_edge_order() -> None:
+    skills = {
+        skill.id: skill
+        for skill in (
+            make_skill("skill:seed", "seed", "Seed skill."),
+            make_skill("skill:dependency", "dependency", "Direct dependency."),
+            make_skill("skill:similar", "similar", "Near substitute."),
+            make_skill("skill:workflow", "workflow", "Workflow successor."),
+        )
+    }
+    edges = [
+        _edge("skill:seed", "skill:dependency", "depend_on"),
+        _edge("skill:seed", "skill:similar", "similar_to"),
+        _edge("skill:seed", "skill:workflow", "compose_with"),
+    ]
+
+    forward = expand_semantic_candidates(
+        [_seed("skill:seed")],
+        edges,
+        skills,
+        max_depth=2,
+        limit=4,
+    )
+    reversed_input = expand_semantic_candidates(
+        [_seed("skill:seed")],
+        list(reversed(edges)),
+        skills,
+        max_depth=2,
+        limit=4,
+    )
+
+    assert forward == reversed_input
 
 
 def test_similarity_between_selected_candidates_keeps_alternative_metadata() -> None:
@@ -275,7 +406,7 @@ def test_similarity_keeps_one_strongest_relation_per_alternative() -> None:
         ],
         skills,
         max_depth=1,
-        limit=2,
+        limit=3,
     )
 
     assert len(result.alternatives) == 1
@@ -305,19 +436,24 @@ def test_fixture_bundle_uses_rrf_and_validated_graph_only(tmp_path) -> None:
     seeds = [candidate for candidate in bundle.selected_skills if candidate.is_seed]
     assert len(seeds) == 2
     assert all(set(candidate.retrieval_ranks) <= {"bm25", "embedding"} for candidate in seeds)
-    assert {edge.type for edge in bundle.graph_edges} <= {"depend_on", "compose_with"}
+    assert {edge.type for edge in bundle.graph_edges} <= {
+        "depend_on",
+        "compose_with",
+        "similar_to",
+    }
     assert "workflow_hints" not in payload
     assert "ppr_score" not in str(payload)
     assert "score_breakdown" not in str(payload)
     assert "execution" not in str(payload).lower()
 
 
-def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch) -> None:
+def test_bundle_keeps_all_semantic_edges_between_selected_candidates(monkeypatch) -> None:
     seed_skill = make_skill("skill:seed", "seed", "Seed skill.")
     prerequisite = make_skill("skill:prerequisite", "prerequisite", "Prerequisite skill.")
     alternative = make_skill("skill:alternative", "alternative", "Alternative skill.")
     skills = {skill.id: skill for skill in (seed_skill, prerequisite, alternative)}
     dependency = _edge(alternative.id, prerequisite.id, "depend_on")
+    similarity = _edge(seed_skill.id, alternative.id, "similar_to")
     seed = _seed(seed_skill.id)
     prerequisite_candidate = RouterSkillCandidate(
         skill_id=prerequisite.id,
@@ -339,7 +475,7 @@ def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch)
             build_id="test-build",
             skills=skills,
             contracts={},
-            core_edges=[dependency],
+            core_edges=[dependency, similarity],
         ),
     )
     monkeypatch.setattr(
@@ -351,7 +487,16 @@ def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch)
         bundle_module,
         "expand_semantic_candidates",
         lambda *_args, **_kwargs: ExpansionResult(
-            candidates=(seed, prerequisite_candidate),
+            candidates=(
+                seed,
+                prerequisite_candidate,
+                RouterSkillCandidate(
+                    skill_id=alternative.id,
+                    name=alternative.name,
+                    score=0.25,
+                    graph_depth=1,
+                ),
+            ),
             alternatives=(alternative_candidate,),
         ),
     )
@@ -360,7 +505,7 @@ def test_bundle_keeps_operational_edges_for_selectable_alternatives(monkeypatch)
         RouterBundleConfig(query="use the best implementation"),
     )
 
-    assert bundle.graph_edges == (dependency,)
+    assert bundle.graph_edges == (dependency, similarity)
 
 
 def test_missing_canonical_artifacts_fail_instead_of_returning_empty_bundle(tmp_path) -> None:

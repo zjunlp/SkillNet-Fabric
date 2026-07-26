@@ -44,25 +44,36 @@ def materialize_query_wiki(
     query_root = trace_dir / "query_wiki"
     if query_root.exists():
         raise FileExistsError(f"query_wiki already exists: {query_root}")
+
+    candidates = {candidate.skill_id: candidate for candidate in bundle.selected_skills}
+    alternatives = {alternative.skill_id: alternative for alternative in bundle.alternatives}
+    alternative_endpoints = {
+        endpoint
+        for alternative in bundle.alternatives
+        for endpoint in (alternative.skill_id, alternative.alternative_to)
+    }
+    outside_candidates = sorted(alternative_endpoints - set(candidates))
+    if outside_candidates:
+        raise ValueError(
+            "router bundle alternatives reference skills outside selected candidates: "
+            + ", ".join(outside_candidates)
+        )
+    included_ids = list(candidates)
+    missing = sorted(set(included_ids) - set(source.skills))
+    if missing:
+        raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
+
     cards_dir = query_root / "skills" / "cards"
     sources_dir = query_root / "skills" / "sources"
     edges_dir = query_root / "edges"
     for directory in (cards_dir, sources_dir, edges_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    candidates = {candidate.skill_id: candidate for candidate in bundle.selected_skills}
-    alternatives = {alternative.skill_id: alternative for alternative in bundle.alternatives}
-    included_ids = list(candidates)
-    included_ids.extend(skill_id for skill_id in alternatives if skill_id not in candidates)
-    missing = sorted(set(included_ids) - set(source.skills))
-    if missing:
-        raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
-
     skills_manifest: list[dict[str, Any]] = []
     for skill_id in included_ids:
         skill = source.skills[skill_id]
         contract = source.contracts[skill_id]
-        candidate = candidates.get(skill_id)
+        candidate = candidates[skill_id]
         alternative = alternatives.get(skill_id)
         card_path = f"skills/cards/{slug(skill_id)}.md"
         source_path = f"skills/sources/{slug(skill_id)}.md"
@@ -126,26 +137,20 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
 def _manifest_skill(
     skill: SkillNode,
     *,
-    candidate: RouterSkillCandidate | None,
+    candidate: RouterSkillCandidate,
     alternative: RouterAlternative | None,
     card_path: str,
     source_path: str,
 ) -> dict[str, Any]:
-    if candidate is not None:
-        origin = "seed" if candidate.is_seed else "semantic_expansion"
-        route = candidate.to_dict()
-    else:
-        origin = "similar_alternative"
-        route = None
     return {
         "skill_id": skill.id,
         "name": skill.name,
         "description": skill.description,
         "selectable": True,
-        "origin": origin,
+        "origin": "seed" if candidate.is_seed else "semantic_expansion",
         "card_path": card_path,
         "source_path": source_path,
-        "route": route,
+        "route": candidate.to_dict(),
         "alternative": alternative.to_dict() if alternative is not None else None,
     }
 
@@ -154,24 +159,23 @@ def _render_skill_card(
     skill: SkillNode,
     contract: SkillContract,
     *,
-    candidate: RouterSkillCandidate | None,
+    candidate: RouterSkillCandidate,
     alternative: RouterAlternative | None,
 ) -> str:
     route_lines: list[str] = []
-    if candidate is not None:
+    route_lines.extend(
+        [
+            f"- Origin: {'seed' if candidate.is_seed else 'semantic expansion'}",
+            f"- RRF score: {candidate.score:.8f}",
+            f"- Graph depth: {candidate.graph_depth}",
+            f"- Retrieval ranks: {_mapping(candidate.retrieval_ranks)}",
+        ]
+    )
+    if candidate.introduced_by:
+        route_lines.append("- Expansion paths:")
         route_lines.extend(
-            [
-                f"- Origin: {'seed' if candidate.is_seed else 'semantic expansion'}",
-                f"- RRF score: {candidate.score:.8f}",
-                f"- Graph depth: {candidate.graph_depth}",
-                f"- Retrieval ranks: {_mapping(candidate.retrieval_ranks)}",
-            ]
+            f"  - {_render_path(path.to_dict())}" for path in candidate.introduced_by
         )
-        if candidate.introduced_by:
-            route_lines.append("- Expansion paths:")
-            route_lines.extend(
-                f"  - {_render_path(path.to_dict())}" for path in candidate.introduced_by
-            )
     if alternative is not None:
         route_lines.append(
             f"- Similar alternative to {alternative.alternative_to} "
@@ -180,7 +184,7 @@ def _render_skill_card(
     return render_contract_card(
         skill,
         contract,
-        context_lines=route_lines or ("- Similarity alternative for comparison.",),
+        context_lines=route_lines,
     )
 
 
