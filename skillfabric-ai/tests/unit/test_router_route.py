@@ -318,7 +318,7 @@ def test_router_config_rejects_unsafe_trace_ids(trace_id) -> None:
         ({"max_depth": -1}, "max_depth"),
         ({"explorer_max_turns": 0}, "explorer_max_turns"),
         ({"explorer_load_timeout_ms": 999}, "explorer_load_timeout_ms"),
-        ({"explorer_timeout_seconds": 0.5}, "explorer_timeout_seconds"),
+        ({"explorer_timeout_seconds": -0.5}, "explorer_timeout_seconds"),
         ({"explorer_timeout_seconds": float("nan")}, "explorer_timeout_seconds"),
         ({"explorer_timeout_seconds": float("inf")}, "explorer_timeout_seconds"),
         ({"explorer_max_attempts": 0}, "explorer_max_attempts"),
@@ -345,6 +345,12 @@ def test_router_config_allows_explicit_zero_budgets() -> None:
     assert config.seed_limit == 0
     assert config.expanded_limit == 0
     assert config.max_depth == 0
+
+
+def test_router_config_allows_zero_to_disable_explorer_timeout() -> None:
+    config = RouterConfig(explorer_timeout_seconds=0)
+
+    assert config.explorer_timeout_seconds == 0
 
 
 def test_route_rejects_blank_query_before_creating_workspace(tmp_path) -> None:

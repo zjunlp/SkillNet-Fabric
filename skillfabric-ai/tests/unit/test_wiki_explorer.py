@@ -115,6 +115,23 @@ def test_backend_uses_the_canonical_schema_and_writes_route_artifacts(tmp_path) 
     assert usage["cache_read_input_tokens"] == 23
 
 
+def test_backend_zero_timeout_waits_for_completion(tmp_path) -> None:
+    root = _query_root(tmp_path)
+    runtime = StubRuntime(_empty_package())
+
+    package = ClaudeCodeWikiExplorerBackend(
+        sdk_runtime=runtime,
+        execution_timeout_seconds=0,
+    ).explore(
+        query="unsupported task",
+        query_wiki_root=root,
+        trace_dir=tmp_path / "trace",
+    )
+
+    assert package.coverage_gaps
+    assert runtime.calls == 1
+
+
 def test_backend_uses_explicit_model_and_reasoning_over_env_file(tmp_path) -> None:
     root = _query_root(tmp_path)
     env_file = tmp_path / ".env"

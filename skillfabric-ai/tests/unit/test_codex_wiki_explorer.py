@@ -778,6 +778,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
                 },
             )
             self.assertFalse(profile["network"]["enabled"])
+
             disabled_features = {
                 "apps",
                 "browser_use",
@@ -915,6 +916,29 @@ class CodexWikiExplorerTests(unittest.TestCase):
             completed = next(event for event in events if event.get("method") == "turn/completed")
             self.assertEqual(completed["status"], "completed")
             self.assertEqual(completed["duration_ms"], 25)
+
+    def test_zero_timeout_waits_for_completion(self) -> None:
+        runtime = _Runtime()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wiki = root / "query_wiki"
+            wiki.mkdir()
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+
+            package = CodexWikiExplorerBackend(
+                env_file=env_file,
+                execution_timeout_seconds=0,
+                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
+                sdk_runtime=runtime,
+            ).explore(
+                query="find a skill",
+                query_wiki_root=wiki,
+                trace_dir=root / "trace",
+            )
+
+            self.assertEqual(package.to_dict(), _package())
+            self.assertEqual(runtime.lifecycle[-1], "close")
 
     def test_budget_ten_uses_31_commands_and_each_call_is_isolated(self) -> None:
         runtime = _Runtime()

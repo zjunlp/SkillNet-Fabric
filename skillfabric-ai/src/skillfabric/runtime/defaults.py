@@ -38,9 +38,9 @@ class RouterOptions:
             isinstance(self.explorer_timeout_seconds, bool)
             or not isinstance(self.explorer_timeout_seconds, (int, float))
             or not math.isfinite(self.explorer_timeout_seconds)
-            or self.explorer_timeout_seconds <= 0
+            or self.explorer_timeout_seconds < 0
         ):
-            raise ValueError("explorer_timeout_seconds must be finite and positive")
+            raise ValueError("explorer_timeout_seconds must be finite and non-negative")
         if (
             isinstance(self.explorer_retry_delay_seconds, bool)
             or not isinstance(self.explorer_retry_delay_seconds, (int, float))
@@ -61,7 +61,7 @@ def default_router_options() -> RouterOptions:
             "SKILLFABRIC_EXPLORER_LOAD_TIMEOUT_MS",
             30_000,
         ),
-        explorer_timeout_seconds=_positive_float(
+        explorer_timeout_seconds=_nonnegative_float(
             "SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS",
             300.0,
         ),
@@ -90,16 +90,6 @@ def _nonnegative_int(name: str, default: int) -> int:
     value = int(raw)
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
-    return value
-
-
-def _positive_float(name: str, default: float) -> float:
-    raw = os.environ.get(name, "")
-    if not raw:
-        return default
-    value = float(raw)
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError(f"{name} must be positive")
     return value
 
 

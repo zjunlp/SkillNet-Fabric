@@ -84,9 +84,9 @@ class ClaudeCodeWikiExplorerBackend:
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout)
-            or timeout < 1.0
+            or timeout < 0
         ):
-            raise ValueError("execution_timeout_seconds must be finite and at least 1")
+            raise ValueError("execution_timeout_seconds must be finite and non-negative")
         if self.model is not None and not self.model.strip():
             raise ValueError("model must be a non-empty string when provided")
         if self.reasoning_effort is not None and (
@@ -415,7 +415,7 @@ def _run_sdk_query_sync(
 
     thread = threading.Thread(target=worker, name="skillfabric-claude-agent-sdk", daemon=True)
     thread.start()
-    thread.join(timeout + 1.0)
+    thread.join(None if timeout == 0 else timeout + 1.0)
     if thread.is_alive():
         _write_event(event_dir, {"event": "sdk:timeout", "timeout_seconds": timeout})
         raise TimeoutError(f"Claude query-wiki explorer exceeded {timeout:g} seconds")
@@ -432,6 +432,13 @@ async def _run_sdk_query_with_timeout(
     event_dir: Path,
     timeout_seconds: float,
 ) -> Any:
+    if timeout_seconds == 0:
+        return await _run_sdk_query(
+            runtime,
+            prompt=prompt,
+            options=options,
+            event_dir=event_dir,
+        )
     try:
         return await asyncio.wait_for(
             _run_sdk_query(runtime, prompt=prompt, options=options, event_dir=event_dir),

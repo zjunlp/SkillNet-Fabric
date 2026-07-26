@@ -78,7 +78,7 @@ async def run_codex_attempt(
     operation_succeeded = False
     primary_error: BaseException | None = None
     try:
-        async with asyncio.timeout(execution_timeout_seconds):
+        async with asyncio.timeout(execution_timeout_seconds or None):
             await codex.__aenter__()
             await codex.login_api_key(settings.env["OPENAI_API_KEY"])
             metadata = _sdk_metadata(codex.metadata)

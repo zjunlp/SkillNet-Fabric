@@ -63,9 +63,9 @@ class RouterConfig:
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout)
-            or timeout < 1.0
+            or timeout < 0
         ):
-            raise ValueError("explorer_timeout_seconds must be finite and at least 1")
+            raise ValueError("explorer_timeout_seconds must be finite and non-negative")
         delay = self.explorer_retry_delay_seconds
         if (
             isinstance(delay, bool)

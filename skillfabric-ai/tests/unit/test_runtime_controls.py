@@ -26,6 +26,14 @@ def test_router_defaults_reject_nonfinite_timeout(monkeypatch) -> None:
         default_router_options()
 
 
+def test_router_defaults_allow_zero_to_disable_explorer_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS", "0")
+
+    router = default_router_options()
+
+    assert router.explorer_timeout_seconds == 0
+
+
 def test_router_defaults_preserve_explicit_zero_budgets(monkeypatch) -> None:
     monkeypatch.setenv("SKILLFABRIC_MAX_SELECTED_SKILLS", "0")
     monkeypatch.setenv("SKILLFABRIC_SEED_LIMIT", "0")

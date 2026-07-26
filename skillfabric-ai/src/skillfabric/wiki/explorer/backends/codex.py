@@ -162,9 +162,9 @@ class CodexWikiExplorerBackend:
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout)
-            or timeout < 1.0
+            or timeout < 0
         ):
-            raise ValueError("execution_timeout_seconds must be finite and at least 1")
+            raise ValueError("execution_timeout_seconds must be finite and non-negative")
         supplied_contract = (
             CODEX_EXECUTION_CONTRACT.to_dict()
             if self.execution_contract is None
@@ -598,7 +598,7 @@ def _run_codex_sync(
 
     thread = threading.Thread(target=worker, name="skillfabric-codex-sdk", daemon=True)
     thread.start()
-    thread.join(timeout_seconds + 2.0)
+    thread.join(None if timeout_seconds == 0 else timeout_seconds + 2.0)
     if thread.is_alive():
         raise TimeoutError(f"Codex query-wiki explorer exceeded {timeout_seconds:g} seconds")
     if errors:
