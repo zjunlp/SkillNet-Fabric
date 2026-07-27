@@ -43,6 +43,8 @@ class StubRuntime:
             self.is_error = metrics.get("is_error", False)
             self.subtype = metrics.get("subtype", "success")
             self.result = metrics.get("result", "")
+            self.errors = metrics.get("errors")
+            self.api_error_status = metrics.get("api_error_status")
 
     class ClaudeAgentOptions:
         def __init__(self, **kwargs: Any) -> None:
@@ -196,6 +198,84 @@ def test_backend_omits_thinking_token_system_events(tmp_path) -> None:
     ]
     assert not any(event.get("subtype") == "thinking_tokens" for event in events)
     assert any(event.get("type") == "ResultMessage" for event in events)
+
+
+def test_backend_preserves_safe_sdk_api_failure_diagnostics(tmp_path) -> None:
+    class ApiRetryRuntime(StubRuntime):
+        class SystemMessage:
+            subtype = "api_retry"
+
+            def __init__(self) -> None:
+                self.data = {
+                    "attempt": 2,
+                    "max_retries": 10,
+                    "retry_delay_ms": 1_000,
+                    "error": "request rejected: OPENAI_API_KEY=sk-private-token",
+                    "request_body": "must not be logged",
+                }
+
+        class AssistantMessage:
+            error = "request_too_large"
+
+            def __init__(self) -> None:
+                self.content: list[Any] = []
+
+        async def query(self, *, prompt: Any, options: Any):
+            self.calls += 1
+            self.options = options
+            async for _event in prompt:
+                pass
+            yield self.SystemMessage()
+            yield self.AssistantMessage()
+            yield self.ResultMessage(self.output, **self.metrics)
+            raise Exception("transport trailer obscured terminal result")
+
+    root = _query_root(tmp_path)
+    trace = tmp_path / "trace"
+    runtime = ApiRetryRuntime(
+        None,
+        metrics={
+            "is_error": True,
+            "subtype": "success",
+            "result": "success",
+            "errors": [
+                "input exceeds context window",
+                "OPENAI_API_KEY=sk-private-token",
+            ],
+            "api_error_status": 413,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match=r"HTTP 413.*input exceeds context window"):
+        ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
+            query="x",
+            query_wiki_root=root,
+            trace_dir=trace,
+        )
+
+    events = [
+        json.loads(line)
+        for line in (trace / "cc_explorer" / "agent_events.jsonl").read_text().splitlines()
+    ]
+    retry = next(event for event in events if event.get("subtype") == "api_retry")
+    assert retry["diagnostics"] == {
+        "attempt": 2,
+        "error": "request rejected: OPENAI_API_KEY=[redacted]",
+        "max_retries": 10,
+        "retry_delay_ms": 1_000,
+    }
+    assert "request_body" not in retry["diagnostics"]
+    assistant = next(event for event in events if event.get("type") == "AssistantMessage")
+    assert assistant["error"] == "request_too_large"
+    result = next(event for event in events if event.get("type") == "ResultMessage")
+    assert result["api_error_status"] == 413
+    assert result["errors"] == [
+        "input exceeds context window",
+        "OPENAI_API_KEY=[redacted]",
+    ]
+    post_result = next(event for event in events if event.get("event") == "sdk:post_result_error")
+    assert post_result["error"] == "transport trailer obscured terminal result"
+    assert "sk-private-token" not in (trace / "cc_explorer" / "error.json").read_text()
 
 
 def test_backend_rejects_missing_structured_output_without_text_recovery(tmp_path) -> None:

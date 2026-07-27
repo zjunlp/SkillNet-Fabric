@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import skillfabric.orchestrator.package as package_module
+import skillfabric.runtime.llm as llm_module
 from skillfabric.orchestrator.package import (
     PLANNER_PROMPT_ID,
     plan_execution_package,
@@ -19,6 +20,7 @@ from skillfabric.router.models import (
     RouteSelectedSkill,
 )
 from skillfabric.runtime.llm import LLMRequestError
+from skillfabric.runtime.usage import load_usage_records
 from tests.unit.wiki_helpers import build_fixture_workspace
 
 
@@ -415,6 +417,50 @@ def test_plan_retries_invalid_output_without_rebuilding_context(
     assert result.prompt_path.is_file()
     assert json.loads(result.planner_validation_path.read_text()) == {"valid": True, "errors": []}
     assert "planner_retry attempt=1/2" in caplog.text
+
+
+def test_plan_retry_records_rejected_and_completed_provider_usage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    responses = [
+        {
+            "choices": [{"message": {"content": json.dumps({"execution_prompt": ""})}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+        },
+        {
+            "choices": [{"message": {"content": _planner_response()}}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23},
+        },
+    ]
+
+    monkeypatch.setattr(package_module, "count_message_tokens", lambda *_args, **_kwargs: 100)
+    monkeypatch.setattr(
+        llm_module,
+        "_direct_litellm_completion",
+        lambda *_args, **_kwargs: responses.pop(0),
+    )
+    usage_path = workspace / "runs" / "retry-usage" / "planner_usage.jsonl"
+
+    plan_execution_package(
+        workspace,
+        _route(),
+        query="extract financial KPIs",
+        package_root=workspace / "runs" / "retry-usage" / "execution_package",
+        usage_log_path=usage_path,
+        planner_max_attempts=2,
+        planner_retry_delay_seconds=0,
+    )
+
+    records = load_usage_records(usage_path)
+    assert [record.status for record in records] == ["rejected", "completed"]
+    assert records[0].error is not None
+    assert records[0].estimated is False
+    assert records[1].error is None
+    assert records[1].estimated is False
+    assert not responses
 
 
 def test_plan_does_not_repeat_a_provider_request_failure(tmp_path, monkeypatch) -> None:

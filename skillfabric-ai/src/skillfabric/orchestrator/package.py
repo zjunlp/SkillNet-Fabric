@@ -129,22 +129,26 @@ def plan_execution_package(
         attempt_errors: list[str] = []
         try:
             with llm_usage_transaction() as usage:
-                with llm_usage_context(log_path=planner_usage_path):
-                    response = litellm_completion(
-                        messages=messages,
-                        config=llm_config,
-                        usage_operation="planner.execution_prompt",
-                        usage_metadata={"selected_skill_count": len(route.selected_skills)},
+                try:
+                    with llm_usage_context(log_path=planner_usage_path):
+                        response = litellm_completion(
+                            messages=messages,
+                            config=llm_config,
+                            usage_operation="planner.execution_prompt",
+                            usage_metadata={"selected_skill_count": len(route.selected_skills)},
+                        )
+                    candidate = parse_json_response(response)
+                    attempt_errors = validate_planner_output(
+                        candidate,
+                        required_skill_ids=tuple(
+                            selected.skill_id for selected in route.selected_skills
+                        ),
                     )
-                candidate = parse_json_response(response)
-                attempt_errors = validate_planner_output(
-                    candidate,
-                    required_skill_ids=tuple(
-                        selected.skill_id for selected in route.selected_skills
-                    ),
-                )
-                if attempt_errors:
-                    raise ValueError("invalid planner output: " + "; ".join(attempt_errors))
+                    if attempt_errors:
+                        raise ValueError("invalid planner output: " + "; ".join(attempt_errors))
+                except Exception as exc:
+                    usage.reject(exc)
+                    raise
                 planner_output = candidate
                 errors = attempt_errors
                 usage.commit()

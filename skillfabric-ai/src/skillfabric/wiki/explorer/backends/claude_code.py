@@ -459,12 +459,24 @@ async def _run_sdk_query(
     event_dir: Path,
 ) -> Any:
     result_message = None
-    async for message in runtime.query(prompt=_prompt_stream(prompt), options=options):
-        event = _message_event(message)
-        if event is not None:
-            _write_event(event_dir, event)
-        if isinstance(message, runtime.ResultMessage):
-            result_message = message
+    try:
+        async for message in runtime.query(prompt=_prompt_stream(prompt), options=options):
+            event = _message_event(message)
+            if event is not None:
+                _write_event(event_dir, event)
+            if isinstance(message, runtime.ResultMessage):
+                result_message = message
+    except Exception as exc:
+        if result_message is None:
+            raise
+        _write_event(
+            event_dir,
+            {
+                "event": "sdk:post_result_error",
+                "error_type": type(exc).__name__,
+                "error": _safe_error_text(str(exc)),
+            },
+        )
     if result_message is None:
         raise RuntimeError("Claude agent finished without a ResultMessage")
     return result_message
@@ -489,6 +501,17 @@ def _payload_from_result_message(result_message: Any) -> dict[str, Any]:
 
 
 def _result_message_error_detail(result_message: Any) -> str:
+    details: list[str] = []
+    api_error_status = getattr(result_message, "api_error_status", None)
+    if isinstance(api_error_status, int) and not isinstance(api_error_status, bool):
+        details.append(f"HTTP {api_error_status}")
+    errors = getattr(result_message, "errors", None)
+    if isinstance(errors, list):
+        details.extend(
+            _safe_error_text(value) for item in errors if (value := str(item or "").strip())
+        )
+    if details:
+        return "Claude agent API request failed: " + "; ".join(details)
     for value in (
         getattr(result_message, "result", ""),
         getattr(result_message, "subtype", ""),
@@ -529,12 +552,49 @@ def _message_event(message: Any) -> dict[str, Any] | None:
         tools = [str(getattr(block, "name", "")) for block in content if getattr(block, "name", "")]
         if tools:
             event["tools"] = tools
+    if message_type == "AssistantMessage":
+        error = str(getattr(message, "error", "") or "").strip()
+        if error:
+            event["error"] = _safe_error_text(error)
     if message_type == "ResultMessage":
         event["is_error"] = bool(getattr(message, "is_error", False))
         event["structured_output_present"] = isinstance(
             getattr(message, "structured_output", None), dict
         )
+        api_error_status = getattr(message, "api_error_status", None)
+        if isinstance(api_error_status, int) and not isinstance(api_error_status, bool):
+            event["api_error_status"] = api_error_status
+        errors = getattr(message, "errors", None)
+        if isinstance(errors, list):
+            event["errors"] = [
+                _safe_error_text(value) for item in errors if (value := str(item or "").strip())
+            ]
+    elif subtype == "api_retry":
+        diagnostics = _safe_system_diagnostics(getattr(message, "data", None))
+        if diagnostics:
+            event["diagnostics"] = diagnostics
     return event
+
+
+def _safe_system_diagnostics(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    allowed = {
+        "attempt",
+        "error",
+        "max_retries",
+        "retry_delay_ms",
+        "status",
+        "status_code",
+    }
+    diagnostics: dict[str, Any] = {}
+    for key in sorted(allowed & data.keys()):
+        value = data[key]
+        if isinstance(value, str):
+            diagnostics[key] = _safe_error_text(value)
+        elif isinstance(value, (int, float, bool)) or value is None:
+            diagnostics[key] = value
+    return diagnostics
 
 
 def _load_sdk_runtime() -> Any:
