@@ -105,42 +105,46 @@ def test_planner_makes_task_outcomes_authoritative_and_assigns_skill_roles() -> 
     assert "The original task defines success" in prompt
     assert "evidence-backed methods and constraints" in prompt
     assert "exact `skill_id`" in prompt
-    assert "primary method for its assigned role" in prompt
-    assert "must not reduce task quality" in prompt
+    assert "materially supports the workflow" in prompt
+    assert "Keep overlapping capabilities coherent" in prompt
+    assert "without reducing task quality" in prompt
     assert "Do not repeat Skill source text" in prompt
+    assert "Use every selected Skill" not in prompt
+    assert "Do not omit, reject, or replace" not in prompt
 
 
 def test_planner_preserves_open_requirements_and_handles_missing_information() -> None:
     prompt = _planner_contract_prompt()
 
-    assert "minimum required coverage" in prompt
-    assert "closed schema" in prompt
+    assert "deliverables, filenames, paths, formats, quantities, constraints" in prompt
     assert "reasonable, conservative, internally consistent assumptions" in prompt
     assert "Use placeholders only when" in prompt
     assert "does not mean the executor lacks the ability" in prompt
 
 
-def test_planner_requires_a_complete_candidate_and_inspection_repair_cycle() -> None:
+def test_planner_builds_a_short_end_to_end_handoff_with_targeted_checks() -> None:
     prompt = _planner_contract_prompt()
 
-    assert "complete end-to-end candidate early" in prompt
-    assert "inspection-and-repair cycle" in prompt
-    assert "highest-impact defect or weakest quality dimension" in prompt
-    assert "repair it" in prompt
-    assert "inspect the final version again" in prompt
-    assert "Validation without an allocated repair pass is incomplete" in prompt
-    assert "Prefer 800-1600 words" in prompt
+    assert "shortest complete end-to-end workflow" in prompt
+    assert "task-critical checks" in prompt
+    assert "Inspect or execute the actual final output" in prompt
+    assert "normally 300-700 words" in prompt
+    assert "Blueprint, Production, and Inspection and Repair" not in prompt
+    assert "inspection-and-repair cycle" not in prompt
+    assert "Prefer 800-1600 words" not in prompt
 
 
 def test_planner_does_not_promote_method_dependencies_to_task_dependencies() -> None:
     prompt = _planner_contract_prompt()
 
     assert "not automatically a task dependency" in prompt
-    assert "concrete execution-time blocker" in prompt
-    assert "only after observing that evidence" in prompt
-    assert "preserve the deliverables, acceptance criteria, and unaffected workflow" in prompt
+    assert "concrete blocker is observed" in prompt
+    assert "preserve the requested deliverables and constraints" in prompt
     assert "plan an explicit failure" not in prompt
     assert "OPENROUTER" not in prompt
+    assert "SkillsBench" not in prompt
+    assert "SkillRouter" not in prompt
+    assert "golden" not in prompt.lower()
     assert "visual_creation_task" not in prompt
 
 
@@ -177,9 +181,11 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_outcome_first_quality_loop"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_skill_grounded_handoff"
     messages = calls[0]["messages"]
-    prompt = "\n".join(str(item["content"]) for item in messages)  # type: ignore[index]
+    prompt = " ".join(
+        "\n".join(str(item["content"]) for item in messages).split()  # type: ignore[index]
+    )
     assert "skill:pdf-table-parser" in prompt
     assert "skill:financial-kpi-extractor" in prompt
     assert "&lt;untrusted_skill_source" in prompt
@@ -188,11 +194,9 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     assert "source before target" in prompt
     assert "producer-to-consumer handoff" in prompt
     assert "compact, task-specific execution prompt" in prompt
-    assert "requirement ledger" in prompt
-    assert "acceptance criteria" in prompt
-    assert "Blueprint, Production, and Inspection and Repair" in prompt
-    assert "actual inspection of the final artifacts" in prompt
-    assert "repaired final artifacts pass" in prompt
+    assert "materially supports the workflow" in prompt
+    assert "shortest complete end-to-end workflow" in prompt
+    assert "task-specific final checks" in prompt
     assert counted_models == ["openai/test-model"]
     assert result.estimated_prompt_tokens == 1200
     execution_prompt = result.prompt_path.read_text()
@@ -533,30 +537,34 @@ def test_planner_schema_contains_only_execution_prompt() -> None:
     assert schema["additionalProperties"] is False
 
 
-def test_planner_output_must_reference_every_selected_skill_id() -> None:
-    errors = validate_planner_output(
-        {"execution_prompt": "Use `skill:pdf-table-parser` for the extraction."},
-        required_skill_ids=(
-            "skill:pdf-table-parser",
-            "skill:financial-kpi-extractor",
+def test_plan_allows_planner_to_use_the_relevant_skill_subset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    monkeypatch.setattr(
+        package_module,
+        "litellm_completion",
+        lambda **_kwargs: json.dumps(
+            {
+                "execution_prompt": (
+                    "Use `skill:pdf-table-parser` to extract the requested table and "
+                    "check the resulting values against the source."
+                )
+            }
         ),
     )
 
-    assert errors == [
-        "execution_prompt must reference selected skill: skill:financial-kpi-extractor"
-    ]
-
-
-def test_planner_skill_id_validation_rejects_prefix_collisions() -> None:
-    errors = validate_planner_output(
-        {"execution_prompt": "Use `skill:accessibility-compliance` for the audit."},
-        required_skill_ids=(
-            "skill:accessibility",
-            "skill:accessibility-compliance",
-        ),
+    result = plan_execution_package(
+        workspace,
+        _route(),
+        query="Extract the requested table.",
+        package_root=workspace / "runs" / "relevant-subset" / "execution_package",
+        planner_max_attempts=1,
     )
 
-    assert errors == ["execution_prompt must reference selected skill: skill:accessibility"]
+    assert result.prompt_path.is_file()
 
 
 def test_route_loader_rejects_non_object_items() -> None:

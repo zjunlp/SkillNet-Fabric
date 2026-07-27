@@ -8,10 +8,12 @@ import os
 import sys
 import tomllib
 import unittest
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
@@ -249,14 +251,87 @@ class CodexWikiExplorerTests(unittest.TestCase):
             spec["user_prompt"],
         )
 
-    def test_codex_prompt_contract_has_no_custom_builder_surface(self) -> None:
-        self.assertNotIn(
-            "prompt_spec_builder", inspect.signature(build_codex_prompt_spec).parameters
+    def test_prompt_spec_builder_can_override_only_prompt_fields(self) -> None:
+        default = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+            required_selected_skills=5,
         )
-        self.assertNotIn(
+        spec = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+            required_selected_skills=5,
+            prompt_spec_builder=lambda _default: {
+                "prompt_id": "custom-selector",
+                "system_prompt": "<trusted_policy>Select five.</trusted_policy>",
+                "user_prompt": "<task_query>extract financial KPIs</task_query>",
+            },
+        )
+
+        self.assertEqual(spec["prompt_id"], "custom-selector")
+        self.assertEqual(
+            spec["system_prompt"],
+            "<trusted_policy>Select five.</trusted_policy>",
+        )
+        self.assertEqual(
+            spec["user_prompt"],
+            "<task_query>extract financial KPIs</task_query>",
+        )
+        for field in (
+            "query_wiki_root",
+            "max_selected_skills",
+            "required_selected_skills",
+            "allowed_tools",
+            "tool_budget",
+            "permission_profile",
+            "execution_contract",
+            "schema",
+        ):
+            self.assertEqual(spec[field], default[field])
+        self.assertNotIn("query", spec)
+        self.assertIn(
+            "prompt_spec_builder",
+            inspect.signature(build_codex_prompt_spec).parameters,
+        )
+        self.assertIn(
             "prompt_spec_builder",
             CodexWikiExplorerBackend.__dataclass_fields__,
         )
+
+    def test_prompt_spec_builder_cannot_override_protected_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported prompt spec fields"):
+            build_codex_prompt_spec(
+                query="extract financial KPIs",
+                query_wiki_root=Path("query_wiki"),
+                max_selected_skills=5,
+                prompt_spec_builder=lambda _default: {
+                    "schema": {"type": "object"},  # type: ignore[dict-item]
+                },
+            )
+
+    def test_prompt_spec_builder_cannot_mutate_protected_fields_in_place(self) -> None:
+        default = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+        )
+
+        def mutate_context(context: Mapping[str, Any]) -> Mapping[str, str]:
+            context["schema"].clear()
+            context["tool_budget"].clear()
+            return {"prompt_id": "custom-selector"}
+
+        spec = build_codex_prompt_spec(
+            query="extract financial KPIs",
+            query_wiki_root=Path("query_wiki"),
+            max_selected_skills=5,
+            prompt_spec_builder=mutate_context,
+        )
+
+        self.assertEqual(spec["schema"], default["schema"])
+        self.assertEqual(spec["tool_budget"], default["tool_budget"])
 
     def test_completed_empty_package_without_successful_wiki_access_fails_closed(self) -> None:
         success = _success_events()
