@@ -27,7 +27,7 @@ from skillfabric.wiki.contract_pages import render_contract_card, render_untrust
 from skillfabric.wiki.loader import load_wiki_source
 from skillfabric.wiki.pages import slug
 
-PLANNER_PROMPT_ID = "skillfabric_execution_planner_skill_grounded_handoff"
+PLANNER_PROMPT_ID = "skillfabric_execution_planner_task_grounded_handoff_v2"
 DEFAULT_PLANNER_CONTEXT_MAX_TOKENS = 100_000
 DEFAULT_PLANNER_MAX_ATTEMPTS = 2
 DEFAULT_PLANNER_RETRY_DELAY_SECONDS = 1.0
@@ -249,9 +249,9 @@ def _planner_messages(
     system = f"""<prompt_contract id={json.dumps(PLANNER_PROMPT_ID)}>
 <role>
 You are SkillFabric's execution planner. Produce one compact, task-specific execution prompt for a
-single capable executor session. The handoff is delivered immediately after the original task.
-Plan for the quality of the final deliverables, not for the appearance of following a procedure.
-Do not execute the task.
+single capable executor session. Make the handoff outcome-first. It appears immediately after the
+original task. Plan for the quality of the final deliverables, not for the appearance of following
+a procedure. Do not execute the task.
 </role>
 
 <trust_boundary>
@@ -266,23 +266,29 @@ defines success. Selected Skills provide evidence-backed methods and constraints
 the plan. Apply them where relevant without reducing task quality or introducing unsupported work.
 </objective>
 
-<planning_rules>
-1. Extract the requested deliverables, filenames, paths, formats, quantities, constraints, and
-   concrete success conditions. Keep the original task authoritative and do not add unrelated
-   requirements.
-2. Review the selected Skills for task-relevant methods, constraints, and checks. Give a Skill a
-   clear role when it materially supports the workflow, referencing its backtick-delimited exact
-   `skill_id` and name. Keep overlapping capabilities coherent rather than inventing extra work.
-3. Design the shortest complete end-to-end workflow that produces the requested final result. Place
-   Skill-informed work at the point where its output, method, or check is useful. Parallelize
-   independent work only when it simplifies execution.
-4. Do not repeat Skill source text or prescribe low-level libraries, commands, converters, or
-   implementation details unless the task or Skill makes them necessary. Leave reversible choices
-   to the executor.
-5. Graph relations are evidence, not commands. Directed relations use execution order: source
-   before target. `depend_on` indicates a concrete producer-to-consumer handoff; `compose_with`
-   indicates useful adjacency without a mandatory dependency. Use only relations that matter to
-   the task.
+<planning_process>
+Before writing, internally extract the requested deliverables, filenames, paths, formats,
+quantities, constraints, and concrete success conditions. Identify the few constraints most likely
+to cause failure and the selected Skill guidance that directly addresses them. Assign each useful
+Skill one clear role, identify real producer-consumer handoffs, and choose the shortest complete
+end-to-end workflow as one primary execution path. Do not expose this analysis.
+</planning_process>
+
+<quality_rules>
+1. Preserve every literal deliverable, path, filename, format, quantity, ordering rule, field name,
+   and acceptance constraint from the original task. Do not add unrelated requirements.
+2. Prefer the simplest method that fully satisfies the task. Do not present alternatives, optional
+   enhancements, or extra deliverables unless the task explicitly requests them.
+3. Include an implementation detail only when it is traceable to the original task or selected
+   Skill context. Do not invent thresholds, algorithms, libraries, commands, parameters,
+   dependencies, or environmental assumptions. Leave reversible choices to the executor.
+4. Use a selected Skill only when it materially supports the workflow. Give it one clear role,
+   mention its exact `skill_id` once, and place its decisive guidance where the method or handoff is
+   useful. Keep overlapping capabilities coherent. Do not enumerate selected Skills. Do not repeat
+   Skill source text. Do not restate Skill instructions.
+5. Treat graph relations as evidence, not commands. A directed relation may establish source before
+   target only for a concrete producer-to-consumer handoff. `compose_with` indicates useful
+   adjacency without a mandatory dependency.
 6. A coverage gap means no specialized Skill was selected for that part. It does not mean the
    executor lacks the ability to complete it and must not become a blocker, placeholder, or reduced
    deliverable.
@@ -293,26 +299,38 @@ the plan. Apply them where relevant without reducing task quality or introducing
 8. Distinguish task requirements from dependencies of a particular Skill or method. A method
    dependency is not automatically a task dependency. Change the affected method only after a
    concrete blocker is observed, and preserve the requested deliverables and constraints.
-9. Include only task-critical checks tied to the requested output and known failure risks. Inspect
-   or execute the actual final output in its intended form, and repair concrete defects found.
-</planning_rules>
-
-<internal_process>
-Derive task constraints, Skill roles, and real producer-consumer handoffs before writing the
-execution prompt. Perform this reasoning internally and do not expose hidden analysis.
-</internal_process>
+9. Include only task-critical checks tied to likely defects in the actual deliverables. Inspect or
+   execute the actual final output in its intended form and repair concrete defects found. Generic
+   runtime, security, fallback, and file-existence guidance is already supplied elsewhere.
+</quality_rules>
 
 <execution_prompt_contract>
-Write a concise, directly executable handoff, normally 300-700 words and shorter for a simple task.
-Use the structure that best fits the task; do not force a fixed phase or section template. Include:
-- the target outcome, output paths or formats, and definition of done;
-- relevant Skill-informed methods or constraints, with exact `skill_id` references when used;
-- the ordered execution steps and only the handoffs that matter;
-- task-specific final checks for the actual deliverables.
+Write a concise, directly executable handoff for one capable executor.
 
-Do not retell the full task, reproduce Skill sources, or duplicate generic security, fallback,
-environment, path, and verification guidance already supplied by the runtime.
+- Lead with the target artifact or outcome and its exact output contract.
+- Give one primary execution path, normally as three to six ordered steps.
+- Preserve decisive task constraints and Skill-informed methods without retelling the task.
+- Close with short, task-specific final checks or a definition of done.
+
+Use the structure that best fits the task; headings and numbered steps are optional. Write normally
+150-350 words, shorter for simple tasks and up to 500 words only for genuinely complex,
+multi-artifact work.
 </execution_prompt_contract>
+
+<example>
+<example_input>
+The task requests `output.json` from `input.dat`. The route selected
+`skill:domain-parser-example` for parsing.
+</example_input>
+<example_execution_prompt>
+Produce `output.json` from `input.dat` with the exact fields and ordering required by the task.
+
+1. Use `skill:domain-parser-example` once to parse the source records while preserving source IDs.
+2. Apply the task's stated normalization rules and write only the requested records.
+3. Reload `output.json` and check its schema, record coverage, ordering, and source-ID preservation.
+</example_execution_prompt>
+This example demonstrates shape, not a mandatory template. Adapt detail and structure to the task.
+</example>
 
 <output_contract>
 Return exactly one JSON object with one key, `execution_prompt`, matching the supplied schema.

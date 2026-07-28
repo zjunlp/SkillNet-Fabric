@@ -128,10 +128,43 @@ def test_planner_builds_a_short_end_to_end_handoff_with_targeted_checks() -> Non
     assert "shortest complete end-to-end workflow" in prompt
     assert "task-critical checks" in prompt
     assert "Inspect or execute the actual final output" in prompt
-    assert "normally 300-700 words" in prompt
+    assert "normally 150-350 words" in prompt
+    assert "up to 500 words" in prompt
+    assert "three to six ordered steps" in prompt
+    assert "normally 300-700 words" not in prompt
     assert "Blueprint, Production, and Inspection and Repair" not in prompt
     assert "inspection-and-repair cycle" not in prompt
     assert "Prefer 800-1600 words" not in prompt
+
+
+def test_planner_uses_one_source_grounded_primary_path() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "one primary execution path" in prompt
+    assert "traceable to the original task or selected Skill context" in prompt
+    assert "Do not invent thresholds, algorithms, libraries, commands, parameters" in prompt
+    assert "Prefer the simplest method that fully satisfies the task" in prompt
+    assert "Do not present alternatives" in prompt
+
+
+def test_planner_uses_skills_concisely_without_repeating_sources() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "one clear role" in prompt
+    assert "mention its exact `skill_id` once" in prompt
+    assert "Do not enumerate selected Skills" in prompt
+    assert "Do not restate Skill instructions" in prompt
+
+
+def test_planner_contract_contains_a_short_positive_example() -> None:
+    prompt = _planner_contract_prompt()
+
+    assert "<example>" in prompt
+    assert "<example_input>" in prompt
+    assert "<example_execution_prompt>" in prompt
+    assert "The route selected `skill:domain-parser-example` for parsing" in prompt
+    assert "Produce `output.json` from `input.dat`" in prompt
+    assert "This example demonstrates shape, not a mandatory template" in prompt
 
 
 def test_planner_does_not_promote_method_dependencies_to_task_dependencies() -> None:
@@ -181,7 +214,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_skill_grounded_handoff"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_task_grounded_handoff_v2"
     messages = calls[0]["messages"]
     prompt = " ".join(
         "\n".join(str(item["content"]) for item in messages).split()  # type: ignore[index]
