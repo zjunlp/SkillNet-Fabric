@@ -79,10 +79,14 @@ def _planner_response() -> str:
     return json.dumps(
         {
             "execution_prompt": (
-                "Load and follow `skill:pdf-table-parser` to parse the PDF tables, then load and "
-                "follow `skill:financial-kpi-extractor` to extract the requested KPIs. Run "
-                "independent checks in parallel when they do not share mutable state, synthesize "
-                "the results, and verify every value against the source."
+                "Produce `result.json` from the PDF report as a JSON array whose objects contain "
+                "exactly `name` and `value`.\n\n"
+                "1. Apply `skill:pdf-table-parser` to recover the report's table structure while "
+                "preserving the source values.\n"
+                "2. Pass the recovered rows to `skill:financial-kpi-extractor` and retain only the "
+                "requested KPI names and values.\n"
+                "3. Write `result.json`, reload it, and verify that every object has exactly the "
+                "required keys and every value agrees with the PDF."
             )
         }
     )
@@ -141,7 +145,7 @@ def test_planner_uses_one_source_grounded_primary_path() -> None:
     prompt = _planner_contract_prompt()
 
     assert "one primary execution path" in prompt
-    assert "traceable to the original task or selected Skill context" in prompt
+    assert "traceable to the original task or a selected Skill's canonical source" in prompt
     assert "Do not invent thresholds, algorithms, libraries, commands, parameters" in prompt
     assert "Prefer the simplest method that fully satisfies the task" in prompt
     assert "Do not present alternatives" in prompt
@@ -151,8 +155,9 @@ def test_planner_uses_skills_concisely_without_repeating_sources() -> None:
     prompt = _planner_contract_prompt()
 
     assert "one clear role" in prompt
-    assert "mention its exact `skill_id` once" in prompt
-    assert "Do not enumerate selected Skills" in prompt
+    assert "identify it by its exact `skill_id` when first introduced" in prompt
+    assert "refer back concisely if the same guidance is needed later" in prompt
+    assert "Do not add a separate inventory of selected Skills" in prompt
     assert "Do not restate Skill instructions" in prompt
 
 
@@ -235,14 +240,20 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     execution_prompt = result.prompt_path.read_text()
     assert execution_prompt.startswith(f"<original_task>\n{query}\n</original_task>")
     assert f"<original_task>\n{query}\n</original_task>" in execution_prompt
-    assert "<execution_plan>\nLoad and follow `skill:pdf-table-parser`" in execution_prompt
+    assert "<execution_plan>\nProduce `result.json`" in execution_prompt
     assert execution_prompt.index("<original_task>") < execution_prompt.index("<execution_plan>")
     assert "<execution_contract>" not in execution_prompt
     assert execution_prompt.count(query) == 1
+    assert execution_prompt.count("`skill:pdf-table-parser`") == 1
+    assert execution_prompt.count("`skill:financial-kpi-extractor`") == 1
+    assert all(f"\n{step}. " in execution_prompt for step in range(1, 4))
+    assert "\n4. " not in execution_prompt
+    assert "independent checks in parallel" not in execution_prompt
     assert not (package_root / "workflow_plan.json").exists()
     assert not (package_root / "PLANNER.md").exists()
     assert json.loads(result.planner_output_path.read_text()) == json.loads(_planner_response())
     request = json.loads((package_root / "planner_request.json").read_text())
+    assert request["prompt_id"] == PLANNER_PROMPT_ID
     assert request["expected_schema"] == planner_output_json_schema()
     assert request["estimated_prompt_tokens"] == 1200
 

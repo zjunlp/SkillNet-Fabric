@@ -37,7 +37,7 @@ def test_planner_uses_one_source_grounded_primary_path() -> None:
     prompt = _planner_contract_prompt()
 
     assert "one primary execution path" in prompt
-    assert "traceable to the original task or selected Skill context" in prompt
+    assert "traceable to the original task or a selected Skill's canonical source" in prompt
     assert "Do not invent thresholds, algorithms, libraries, commands, parameters" in prompt
     assert "Prefer the simplest method that fully satisfies the task" in prompt
     assert "Do not present alternatives" in prompt
@@ -47,8 +47,9 @@ def test_planner_uses_skills_concisely_without_repeating_sources() -> None:
     prompt = _planner_contract_prompt()
 
     assert "one clear role" in prompt
-    assert "mention its exact `skill_id` once" in prompt
-    assert "Do not enumerate selected Skills" in prompt
+    assert "identify it by its exact `skill_id` when first introduced" in prompt
+    assert "refer back concisely if the same guidance is needed later" in prompt
+    assert "Do not add a separate inventory of selected Skills" in prompt
     assert "Do not restate Skill instructions" in prompt
 ```
 
@@ -118,12 +119,13 @@ path. Do not expose this analysis.
    acceptance constraint from the original task.
 2. Prefer the simplest method that fully satisfies the task. Do not present alternatives,
    optional enhancements, or extra deliverables unless the task explicitly requests them.
-3. Include an implementation detail only when it is traceable to the original task or selected
-   Skill context. Do not invent thresholds, algorithms, libraries, commands, parameters,
+3. Include an implementation detail only when it is traceable to the original task or a selected
+   Skill's canonical source. Do not invent thresholds, algorithms, libraries, commands, parameters,
    dependencies, or environmental assumptions.
 4. Use a selected Skill only when it materially improves the workflow. Give it one clear role,
-   mention its exact `skill_id` once, and integrate its decisive guidance at the relevant step.
-   Do not enumerate selected Skills or restate Skill instructions.
+   identify it by its exact `skill_id` when first introduced, and refer back concisely if the same
+   guidance is reused later. Integrate its decisive guidance at the relevant step. Do not add a
+   separate inventory of selected Skills or restate Skill instructions.
 5. Treat graph relations as evidence. Use a directed relation only for a concrete source-before-
    target handoff; do not turn `compose_with` adjacency or a coverage gap into required work.
 6. Leave reversible choices to the executor. Resolve genuine underspecification with conservative,
@@ -155,7 +157,7 @@ multi-artifact work.
 <example_execution_prompt>
 Produce `output.json` from `input.dat` with the exact fields and ordering required by the task.
 
-1. Use `skill:domain-parser-example` once to parse the source records while preserving source IDs.
+1. Apply `skill:domain-parser-example` to parse the source records while preserving source IDs.
 2. Apply the task's stated normalization rules and write only the requested records.
 3. Reload `output.json` and check its schema, record coverage, ordering, and source-ID preservation.
 </example_execution_prompt>

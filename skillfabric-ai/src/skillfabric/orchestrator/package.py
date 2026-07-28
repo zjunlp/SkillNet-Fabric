@@ -279,13 +279,14 @@ end-to-end workflow as one primary execution path. Do not expose this analysis.
    and acceptance constraint from the original task. Do not add unrelated requirements.
 2. Prefer the simplest method that fully satisfies the task. Do not present alternatives, optional
    enhancements, or extra deliverables unless the task explicitly requests them.
-3. Include an implementation detail only when it is traceable to the original task or selected
-   Skill context. Do not invent thresholds, algorithms, libraries, commands, parameters,
+3. Include an implementation detail only when it is traceable to the original task or a selected
+   Skill's canonical source. Do not invent thresholds, algorithms, libraries, commands, parameters,
    dependencies, or environmental assumptions. Leave reversible choices to the executor.
 4. Use a selected Skill only when it materially supports the workflow. Give it one clear role,
-   mention its exact `skill_id` once, and place its decisive guidance where the method or handoff is
-   useful. Keep overlapping capabilities coherent. Do not enumerate selected Skills. Do not repeat
-   Skill source text. Do not restate Skill instructions.
+   identify it by its exact `skill_id` when first introduced, and refer back concisely if the same
+   guidance is needed later. Place its decisive guidance where the method or handoff is useful.
+   Keep overlapping capabilities coherent. Do not add a separate inventory of selected Skills.
+   Do not repeat Skill source text. Do not restate Skill instructions.
 5. Treat graph relations as evidence, not commands. A directed relation may establish source before
    target only for a concrete producer-to-consumer handoff. `compose_with` indicates useful
    adjacency without a mandatory dependency.
@@ -325,7 +326,7 @@ The task requests `output.json` from `input.dat`. The route selected
 <example_execution_prompt>
 Produce `output.json` from `input.dat` with the exact fields and ordering required by the task.
 
-1. Use `skill:domain-parser-example` once to parse the source records while preserving source IDs.
+1. Apply `skill:domain-parser-example` to parse the source records while preserving source IDs.
 2. Apply the task's stated normalization rules and write only the requested records.
 3. Reload `output.json` and check its schema, record coverage, ordering, and source-ID preservation.
 </example_execution_prompt>

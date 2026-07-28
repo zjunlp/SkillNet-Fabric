@@ -35,9 +35,11 @@ JSON response schema. Rewrite the system contract around five requirements:
 1. The original task is authoritative. Preserve literal output paths, filenames, formats,
    quantities, ordering, and acceptance constraints.
 2. Produce one primary execution path. Use a selected Skill only when it contributes a decisive
-   method or constraint, assign it one clear role, and mention its exact Skill ID once.
-3. Include only specifics grounded in the original task or selected Skill context. Do not invent
-   thresholds, algorithms, libraries, commands, parameters, dependencies, or extra deliverables.
+   method or constraint, assign it one clear role, identify its exact Skill ID when first
+   introduced, and refer back concisely if the same guidance is reused later.
+3. Include only specifics grounded in the original task or a selected Skill's canonical source. Do
+   not invent thresholds, algorithms, libraries, commands, parameters, dependencies, or extra
+   deliverables.
 4. Prefer the shortest complete plan: target outcome first, normally three to six ordered steps,
    then only task-specific checks for likely failure points.
 5. Keep the handoff normally within 150-350 words. Permit up to roughly 500 words only for genuinely
