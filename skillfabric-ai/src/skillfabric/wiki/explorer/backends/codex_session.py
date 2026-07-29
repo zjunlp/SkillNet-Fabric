@@ -71,6 +71,12 @@ async def run_codex_attempt(
         config_overrides=(
             "project_root_markers=[]",
             "check_for_update_on_startup=false",
+            "features.plugins=false",
+            "features.remote_plugin=false",
+            "features.plugin_sharing=false",
+            "features.plugin_hooks=false",
+            "skills.bundled.enabled=false",
+            "orchestrator.skills.enabled=false",
         ),
     )
     codex = runtime.AsyncCodex(config=config)

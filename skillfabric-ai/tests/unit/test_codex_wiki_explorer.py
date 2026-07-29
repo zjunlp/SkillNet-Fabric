@@ -734,6 +734,12 @@ class CodexWikiExplorerTests(unittest.TestCase):
                 (
                     "project_root_markers=[]",
                     "check_for_update_on_startup=false",
+                    "features.plugins=false",
+                    "features.remote_plugin=false",
+                    "features.plugin_sharing=false",
+                    "features.plugin_hooks=false",
+                    "skills.bundled.enabled=false",
+                    "orchestrator.skills.enabled=false",
                 ),
             )
 
