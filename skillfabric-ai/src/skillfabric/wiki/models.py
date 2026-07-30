@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 WikiPageType = Literal["skill", "workflow", "index"]
 NO_WORKFLOW_GUIDANCE = "No strong workflow guidance."
+
+
 @dataclass(slots=True)
 class WikiBuildConfig:
     """Configuration for building the graph-backed wiki."""
@@ -56,6 +58,7 @@ class WikiSummaryRecord:
             "summary",
         ):
             _required_string(getattr(self, field_name), label=field_name)
+
 
 @dataclass(slots=True)
 class WikiHealthReport:

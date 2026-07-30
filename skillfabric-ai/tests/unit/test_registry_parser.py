@@ -6,10 +6,7 @@ from skillfabric.registry.parser import parse_skill_file
 
 
 def test_parser_preserves_normalized_name_longer_than_64_characters(tmp_path: Path) -> None:
-    name = (
-        "professional-senior-chrome-extension-architect-and-developer-"
-        "with-browser-automation"
-    )
+    name = "professional-senior-chrome-extension-architect-and-developer-with-browser-automation"
     assert len(name) > 64
     skill_path = tmp_path / "long-name" / "SKILL.md"
     skill_path.parent.mkdir()

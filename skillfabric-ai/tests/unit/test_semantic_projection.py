@@ -266,9 +266,9 @@ def test_cycle_prompt_uses_action_only_output() -> None:
         tuple(decisions),
         {skill.id: skill for skill in skills},
     )[1]["content"]
-    serialized_schema = user_prompt.split("<output_schema>\n", 1)[1].split(
-        "\n</output_schema>", 1
-    )[0]
+    serialized_schema = user_prompt.split("<output_schema>\n", 1)[1].split("\n</output_schema>", 1)[
+        0
+    ]
     schema = json.loads(serialized_schema)
 
     assert schema == {

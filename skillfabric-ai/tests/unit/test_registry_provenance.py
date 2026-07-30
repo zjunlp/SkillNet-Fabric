@@ -37,10 +37,13 @@ def test_skill_pool_provenance_ignores_appledouble_files(tmp_path: Path) -> None
 
     (package / "._SKILL.md").write_text("metadata\n", encoding="utf-8")
 
-    assert skill_pool_provenance(
-        tmp_path,
-        skills=scan_and_parse(tmp_path),
-    ) == initial
+    assert (
+        skill_pool_provenance(
+            tmp_path,
+            skills=scan_and_parse(tmp_path),
+        )
+        == initial
+    )
 
 
 def test_skill_pool_provenance_rejects_symlinked_directories(tmp_path: Path) -> None:

@@ -122,9 +122,7 @@ def test_build_cli_reports_canonical_artifacts(tmp_path) -> None:
         "wiki",
     }
     assert payload["artifacts"]["graph"].endswith("graph/graph.json")
-    metrics = json.loads(
-        (workspace / "reports" / "build_summary.json").read_text(encoding="utf-8")
-    )
+    metrics = json.loads((workspace / "reports" / "build_summary.json").read_text(encoding="utf-8"))
     assert metrics["wiki"] == {"pages_written": 3}
     assert "wiki_summary" not in metrics
 

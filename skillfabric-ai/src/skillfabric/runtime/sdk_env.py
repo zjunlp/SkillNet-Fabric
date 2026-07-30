@@ -42,14 +42,17 @@ def build_codex_sdk_env(
         raise ValueError(
             "missing API key. Set SKILLFABRIC_LLM_API_KEY, API_KEY, or OPENAI_API_KEY."
         )
-    api_base = _first_env_value(
-        shell_env,
-        env_file_values,
-        "SKILLFABRIC_LLM_API_BASE",
-        "BASE_URL",
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-    ) or DEFAULT_CODEX_API_BASE
+    api_base = (
+        _first_env_value(
+            shell_env,
+            env_file_values,
+            "SKILLFABRIC_LLM_API_BASE",
+            "BASE_URL",
+            "OPENAI_BASE_URL",
+            "OPENAI_API_BASE",
+        )
+        or DEFAULT_CODEX_API_BASE
+    )
     return CodexSdkEnvironment(
         env={
             "OPENAI_API_KEY": api_key,
@@ -120,9 +123,11 @@ def build_claude_code_sdk_env(
             env["ANTHROPIC_BASE_URL"] = _anthropic_base_url(llm_api_base)
     if llm_model:
         model_name = _claude_model_name(llm_model)
-        if model is not None or _env_file_has_any(
-            env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL"
-        ) or not env.get("ANTHROPIC_MODEL"):
+        if (
+            model is not None
+            or _env_file_has_any(env_file_values, "SKILLFABRIC_LLM_MODEL", "MODEL")
+            or not env.get("ANTHROPIC_MODEL")
+        ):
             env["ANTHROPIC_MODEL"] = model_name
         for key in (
             "ANTHROPIC_SMALL_FAST_MODEL",
