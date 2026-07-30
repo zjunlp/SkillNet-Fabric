@@ -240,19 +240,12 @@ class PublicPackageTests(unittest.TestCase):
         self.assertIn("SkillFabric ready.", doctor_text)
         self.assertIn("Workspace: ready, <skill_count> skills, build <build_id>", doctor_text)
 
-    def test_claude_code_plugin_readme_is_product_grade(self) -> None:
-        readme = (PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md").read_text(
-            encoding="utf-8"
-        )
+    def test_root_readme_documents_claude_code_plugin(self) -> None:
+        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
         for section in (
-            "## Requirements",
-            "## Installation",
-            "## Quickstart",
-            "## Commands",
-            "## Local Smoke Test",
-            "## Security Model",
-            "## Troubleshooting",
-            "## Uninstall",
+            "## Quick Start",
+            "## Claude Code Plugin",
+            "## Development",
         ):
             self.assertIn(section, readme)
         for snippet in (
@@ -263,22 +256,17 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:doctor",
             "/skillfabric:prepare",
             "/skillfabric:run",
-            "reuses the latest prepared prompt when available",
-            "summaries are derived deterministically from validated contracts",
-            "Do not paste API keys",
+            "Do not paste API keys into Claude Code",
+            "The CLI is the only writer",
+            "The plugin installs no hooks",
+            "To uninstall",
         ):
             self.assertIn(snippet, readme)
 
     def test_public_docs_do_not_leak_local_paths(self) -> None:
-        doc_paths = [
-            PUBLIC_ROOT / "README.md",
-            PACKAGE_ROOT / "README.md",
-            PACKAGE_ROOT / "tests" / "README.md",
-            PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md",
-        ]
-        for path in doc_paths:
-            text = path.read_text(encoding="utf-8")
-            self.assertNotIn("/Users/", text, path)
+        readme = PUBLIC_ROOT / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        self.assertNotIn("/Users/", text, readme)
 
     def test_python_facade_rejects_coerced_route_limits(self) -> None:
         from skillfabric import SkillFabric

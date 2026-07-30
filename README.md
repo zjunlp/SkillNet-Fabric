@@ -141,11 +141,18 @@ Workspaces built with the previous relation direction are rejected and must be r
 
 ### 3. Route Through a Query Wiki
 
-For each task, the router fuses BM25 and dense ranks, expands only bounded `depend_on` and `compose_with` neighborhoods, and writes a task-specific query wiki. Dependency propagation is bidirectional; workflow propagation favors predecessor-to-successor traversal. The explorer can inspect only this bounded workspace and returns a strict selection-only `SkillPackage` with cited pages.
+For each task, the router fuses BM25 and dense ranks, expands a bounded neighborhood over
+`depend_on`, `compose_with`, and `similar_to`, and writes a task-specific query wiki. Dependency
+propagation is bidirectional, workflow propagation favors predecessor-to-successor traversal, and
+similarity edges use a lower symmetric traversal weight so alternatives can enter the candidate
+set without dominating operational handoffs. The explorer can inspect only this bounded workspace
+and returns a strict selection-only `SkillPackage` with cited pages.
 
 The query wiki is materialized once. The explorer then receives at most two attempts by default; SDK failures, malformed responses, and packages that fail exact validation are retried without repeating retrieval or graph expansion.
 
-`similar_to` relationships expose near alternatives but do not drive operational graph expansion.
+When both endpoints of a `similar_to` edge are present, the Wiki also marks the lower-ranked
+endpoint as an explicit alternative. The relation informs exploration but never forces either
+endpoint into the final selected set.
 
 ### 4. Generate the Execution Prompt
 
@@ -199,6 +206,31 @@ print(package.prompt_path)
 
 Planning checks its estimated prompt size before calling the model. Increase `planner_context_max_tokens` only when the configured model can accept the larger context.
 
+Routing uses the Claude explorer by default. An isolated Codex app-server backend can be injected
+through the same public API:
+
+```python
+from skillfabric import SkillFabric
+from skillfabric.wiki.explorer.backends import CodexWikiExplorerBackend
+
+task = "extract KPIs from the supplied report"
+backend = CodexWikiExplorerBackend(
+    env_file=".env",
+    max_selected_skills=5,
+    model="your-codex-model",
+    reasoning_effort="medium",
+)
+route = SkillFabric(workspace=".skillfabric").route(
+    task,
+    max_selected_skills=5,
+    explorer_backend=backend,
+)
+```
+
+The backend creates a fresh ephemeral thread per attempt, exposes the query wiki read-only, and
+accepts results only when the event stream stays within its declared command policy. Shared
+explorer validation owns bounded recovery, so the backend does not add a nested retry loop.
+
 ---
 
 ## Claude Code Plugin
@@ -224,7 +256,44 @@ Then run:
 /skillfabric:prepare "Summarize this repository and identify release risks" --workspace .skillfabric
 ```
 
-See the [plugin guide](./plugins/claude-code/skillfabric/README.md) for installation, security boundaries, and troubleshooting.
+For a user-level installation:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -R /path/to/SkillNet-Fabric/plugins/claude-code/skillfabric \
+  ~/.claude/skills/skillfabric
+claude plugin validate --strict ~/.claude/skills/skillfabric
+claude plugin list --json
+```
+
+Do not paste API keys into Claude Code. The CLI is the only writer of registry, graph, route,
+planner-validation, and prompt artifacts. Generated skill sources are treated as untrusted data;
+routing reads only the bounded query wiki, and planning reads only selected contracts and sources
+from the graph workspace. The plugin installs no hooks, MCP servers, settings, or background
+tasks. Only `/skillfabric:run` proceeds to task execution.
+
+To diagnose installation or configuration:
+
+```bash
+which skillfabric
+skillfabric --help
+skillfabric init --check --json --env-file .env
+claude plugin validate --strict ~/.claude/skills/skillfabric
+claude plugin list --json
+```
+
+Common failures are explicit:
+
+- `skillfabric: command not found`: install `skillfabric-ai[claude]` in the environment used by
+  Claude Code.
+- Missing API fields: run `skillfabric init --env-file .env`.
+- Build provider or model failure: verify the endpoint against a small disposable skill root; do
+  not bypass a failed semantic stage.
+- Route or plan validation failure: inspect the non-secret validation artifact in the returned run
+  directory.
+
+To uninstall the user-level plugin, remove `~/.claude/skills/skillfabric` and confirm the result
+with `claude plugin list --json`.
 
 ---
 
@@ -316,6 +385,11 @@ python -m build
 ```
 
 Deterministic unit tests do not require real model calls. Real API and Claude SDK checks are opt-in and should use a small disposable skill corpus.
+
+The suite covers native skill parsing, contract extraction, semantic projection, graph validation,
+hybrid retrieval, all three relation types, query-wiki generation, explorer package validation,
+planner finalization, public CLI and Python APIs, artifact caching, usage accounting, plugin
+behavior, and secret handling. Real SDK checks are gated and skipped during normal test runs.
 
 Contributions should keep public interfaces stable, include focused tests, and avoid committing credentials, generated workspaces, or run artifacts.
 

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "skillfabric-ai"
 version = "0.1.0"
 description = "Skill graph, query-wiki routing, and execution prompt orchestration for agent skills."
-readme = "README.md"
+readme = { text = "SkillFabric compiles native agent skills into an evidence-grounded graph, routes each task through a bounded query wiki, and produces a validated execution prompt. See the project homepage for complete documentation.", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
@@ -62,7 +62,6 @@ packages = ["src/skillfabric"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "/README.md",
   "/pyproject.toml",
   "/src",
   "/tests",
