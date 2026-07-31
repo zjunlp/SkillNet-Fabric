@@ -658,10 +658,11 @@ class CodexWikiExplorerTests(unittest.TestCase):
         package_root = Path(__file__).resolve().parents[2]
         pyproject = tomllib.loads((package_root / "pyproject.toml").read_text(encoding="utf-8"))
         extras = pyproject["project"]["optional-dependencies"]
+        codex_requirement = "openai-codex>=0.144.4,<0.145"
 
         self.assertIs(PublicBackend, CodexWikiExplorerBackend)
-        self.assertEqual(extras["codex"], ["openai-codex"])
-        self.assertIn("openai-codex", extras["all"])
+        self.assertEqual(extras["codex"], [codex_requirement])
+        self.assertIn(codex_requirement, extras["all"])
 
     def test_backend_rejects_a_symlinked_query_wiki_root_before_startup(self) -> None:
         runtime = _Runtime()

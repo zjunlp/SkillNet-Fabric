@@ -27,7 +27,7 @@ from skillfabric.wiki.contract_pages import render_contract_card, render_untrust
 from skillfabric.wiki.loader import load_wiki_source
 from skillfabric.wiki.pages import slug
 
-PLANNER_PROMPT_ID = "skillfabric_execution_planner_task_grounded_handoff_v2"
+PLANNER_PROMPT_ID = "skillfabric_execution_planner_task_grounded_handoff"
 DEFAULT_PLANNER_CONTEXT_MAX_TOKENS = 100_000
 DEFAULT_PLANNER_MAX_ATTEMPTS = 2
 DEFAULT_PLANNER_RETRY_DELAY_SECONDS = 1.0

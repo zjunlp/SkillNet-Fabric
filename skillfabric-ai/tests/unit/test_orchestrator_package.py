@@ -219,7 +219,7 @@ def test_plan_calls_llm_once_with_complete_selected_context(tmp_path, monkeypatc
     )
 
     assert len(calls) == 1
-    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_task_grounded_handoff_v2"
+    assert PLANNER_PROMPT_ID == "skillfabric_execution_planner_task_grounded_handoff"
     messages = calls[0]["messages"]
     prompt = " ".join(
         "\n".join(str(item["content"]) for item in messages).split()  # type: ignore[index]
