@@ -33,7 +33,7 @@ claude = [
   "claude-agent-sdk>=0.2.110",
 ]
 codex = [
-  "openai-codex>=0.144.4,<0.145",
+  "openai-codex>=0.144.4",
 ]
 dev = [
   "build>=1.2",
@@ -42,7 +42,7 @@ dev = [
 ]
 all = [
   "claude-agent-sdk>=0.2.110",
-  "openai-codex>=0.144.4,<0.145",
+  "openai-codex>=0.144.4",
   "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.8",

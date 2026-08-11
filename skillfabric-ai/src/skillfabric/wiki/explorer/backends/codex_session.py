@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import shlex
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,18 @@ CODEX_ALLOWED_ITEM_TYPES = frozenset(
     }
 )
 CODEX_TERMINAL_INTERACTION_EVENT = "item/commandExecution/terminalInteraction"
+CODEX_READ_COMMANDS = frozenset(
+    {
+        "cat",
+        "head",
+        "ls",
+        "pwd",
+        "rg",
+        "stat",
+        "tail",
+        "wc",
+    }
+)
 
 
 class CodexOperationalAccessError(RuntimeError):
@@ -37,7 +49,7 @@ class CodexStructuredOutputError(ValueError):
     __skillfabric_recoverable_route_failure__ = True
 
 
-async def run_codex_attempt(
+def run_codex_attempt(
     runtime: Any,
     settings: Any,
     *,
@@ -62,78 +74,98 @@ async def run_codex_attempt(
     cleanup have one implementation shared by every Codex caller.
     """
 
-    sdk_env = dict(settings.env)
-    sdk_env["CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG"] = "1"
     config = runtime.CodexConfig(
         codex_bin=codex_bin,
         cwd=str(codex_home),
-        env=sdk_env,
-        config_overrides=(
-            "project_root_markers=[]",
-            "check_for_update_on_startup=false",
-            "features.plugins=false",
-            "features.remote_plugin=false",
-            "features.plugin_sharing=false",
-            "features.plugin_hooks=false",
-            "skills.bundled.enabled=false",
-            "orchestrator.skills.enabled=false",
-        ),
+        env=dict(settings.env),
+        config_overrides=("check_for_update_on_startup=false",),
     )
-    codex = runtime.AsyncCodex(config=config)
+    codex = runtime.Codex(config=config)
     turn = None
     operation_succeeded = False
     primary_error: BaseException | None = None
-    try:
-        async with asyncio.timeout(execution_timeout_seconds or None):
-            await codex.__aenter__()
-            await codex.login_api_key(settings.env["OPENAI_API_KEY"])
-            metadata = _sdk_metadata(codex.metadata)
-            if metadata_callback is not None:
-                metadata_callback(metadata)
-            thread = await codex.thread_start(
-                approval_mode=runtime.ApprovalMode.deny_all,
-                base_instructions=system_prompt,
-                config=thread_config,
-                cwd=str(query_wiki_root),
-                ephemeral=True,
-                model=model,
-            )
-            turn = await thread.turn(
-                user_prompt,
-                cwd=str(query_wiki_root),
-                effort=runtime.ReasoningEffort(reasoning_effort),
-                model=model,
-                output_schema=output_schema,
-            )
-            _write_json(
-                cc_dir / "turn_state.json",
-                {"schema_version": 1, "turn_started": True},
-            )
-            final_response, usage = await collect_codex_turn(
-                turn,
-                cc_dir=cc_dir,
-                command_budget=command_budget,
-                query_wiki_root=query_wiki_root,
-            )
-            operation_succeeded = True
-            return _strict_json_object(final_response), usage, metadata
-    except TimeoutError as exc:
-        primary_error = exc
+    timed_out = threading.Event()
+    finished = threading.Event()
+    state_lock = threading.Lock()
+
+    def stop_timed_out_attempt() -> None:
+        with state_lock:
+            if finished.is_set():
+                return
+            timed_out.set()
         if turn is not None:
-            await _best_effort_interrupt(turn)
-        _write_event(
-            cc_dir,
-            {"event": "sdk:timeout", "timeout_seconds": execution_timeout_seconds},
+            interrupter = threading.Thread(
+                target=_best_effort_interrupt,
+                args=(turn,),
+                name="skillfabric-codex-interrupt",
+                daemon=True,
+            )
+            interrupter.start()
+        _best_effort_close(codex)
+
+    watchdog = None
+    if execution_timeout_seconds > 0:
+        watchdog = threading.Timer(execution_timeout_seconds, stop_timed_out_attempt)
+        watchdog.daemon = True
+        watchdog.start()
+    try:
+        codex.__enter__()
+        codex.login_api_key(settings.env["OPENAI_API_KEY"])
+        metadata = _sdk_metadata(codex.metadata)
+        if metadata_callback is not None:
+            metadata_callback(metadata)
+        thread = codex.thread_start(
+            approval_mode=runtime.ApprovalMode.deny_all,
+            config=thread_config,
+            cwd=str(query_wiki_root),
+            developer_instructions=system_prompt,
+            ephemeral=True,
+            model=model,
+            sandbox=runtime.Sandbox.read_only,
         )
-        raise TimeoutError(
-            f"Codex query-wiki explorer exceeded {execution_timeout_seconds:g} seconds"
-        ) from exc
+        turn = thread.turn(
+            user_prompt,
+            cwd=str(query_wiki_root),
+            effort=runtime.ReasoningEffort(reasoning_effort),
+            model=model,
+            output_schema=output_schema,
+            sandbox=runtime.Sandbox.read_only,
+        )
+        _write_json(
+            cc_dir / "turn_state.json",
+            {"schema_version": 1, "turn_started": True},
+        )
+        final_response, usage = collect_codex_turn(
+            turn,
+            cc_dir=cc_dir,
+            command_budget=command_budget,
+            query_wiki_root=query_wiki_root,
+        )
+        payload = _strict_json_object(final_response)
+        with state_lock:
+            if timed_out.is_set():
+                raise TimeoutError
+            finished.set()
+        operation_succeeded = True
+        return payload, usage, metadata
     except BaseException as exc:
         primary_error = exc
+        if timed_out.is_set():
+            _write_event(
+                cc_dir,
+                {"event": "sdk:timeout", "timeout_seconds": execution_timeout_seconds},
+            )
+            raise TimeoutError(
+                f"Codex query-wiki explorer exceeded {execution_timeout_seconds:g} seconds"
+            ) from exc
         raise
     finally:
+        with state_lock:
+            finished.set()
+        if watchdog is not None:
+            watchdog.cancel()
         try:
-            await codex.close()
+            codex.close()
         except Exception as exc:
             _write_event(
                 cc_dir,
@@ -147,7 +179,7 @@ async def run_codex_attempt(
                 raise
 
 
-async def collect_codex_turn(
+def collect_codex_turn(
     turn: Any,
     *,
     cc_dir: Path,
@@ -166,7 +198,7 @@ async def collect_codex_turn(
     fallback_response = ""
     usage = None
     completed_turn = None
-    async for event in turn.stream():
+    for event in turn.stream():
         method = str(getattr(event, "method", ""))
         payload = getattr(event, "payload", None)
         item = _root_item(getattr(payload, "item", None))
@@ -174,12 +206,11 @@ async def collect_codex_turn(
         observed_violation = ""
         if method == CODEX_TERMINAL_INTERACTION_EVENT:
             observed_violation = "write_stdin"
-        elif (
-            method in {"item/started", "item/completed"}
-            and item_type
-            and item_type not in CODEX_ALLOWED_ITEM_TYPES
-        ):
-            observed_violation = item_type
+        elif method in {"item/started", "item/completed"}:
+            if not item_type:
+                observed_violation = "unknown_item"
+            elif item_type not in CODEX_ALLOWED_ITEM_TYPES:
+                observed_violation = item_type
         if item_type == "commandExecution":
             audit = _command_audit(item, query_wiki_root=query_wiki_root)
             observed_violation = observed_violation or str(audit["policy_violation"])
@@ -189,12 +220,12 @@ async def collect_codex_turn(
                 cc_dir,
                 {"event": "sdk:policy_violation", "activity": policy_violation},
             )
-            await _best_effort_interrupt(turn)
+            _best_effort_interrupt(turn)
         if method == "item/started" and item_type == "commandExecution":
             command_count += 1
             if command_count > command_budget and not budget_exceeded:
                 budget_exceeded = True
-                await _best_effort_interrupt(turn)
+                _best_effort_interrupt(turn)
         elif method == "item/completed" and item_type == "commandExecution":
             audit = _command_audit(item, query_wiki_root=query_wiki_root)
             if audit["cwd_within_query_wiki"]:
@@ -459,30 +490,55 @@ def _command_policy_violation(
         return "unrestricted_runtime"
     if any(">" in token and set(token) <= set(";&|<>") for token in tokens):
         return "write_attempt"
+    if _uses_command_path(tokens):
+        return "unsupported_command"
     commands = _shell_command_names(tokens)
-    if commands & {
-        "rm",
-        "mv",
-        "cp",
-        "touch",
-        "mkdir",
-        "rmdir",
-        "chmod",
-        "chown",
-        "tee",
-        "truncate",
-        "dd",
-        "install",
-        "patch",
-    }:
+    if not commands or commands - CODEX_READ_COMMANDS:
+        return "unsupported_command"
+    if _uses_unsafe_read_option(commands, tokens):
         return "write_attempt"
-    if commands & {"curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet", "ftp"}:
-        return "network_attempt"
-    if commands & {"python", "python3", "node", "ruby", "perl", "bash", "sh", "zsh"}:
-        return "unrestricted_runtime"
+    if _command_escapes_query_wiki(tokens):
+        return "outside_query_wiki"
     if "&" in tokens:
         return "background_job"
     return ""
+
+
+def _uses_unsafe_read_option(commands: set[str], tokens: list[str]) -> bool:
+    if "rg" in commands and any(
+        token in {"--file", "--hostname-bin", "--pre", "--search-zip", "-f", "-z"}
+        or token.startswith(("--file=", "--hostname-bin=", "--pre="))
+        or re.fullmatch(r"-[^-]*[fz].*", token) is not None
+        for token in tokens
+    ):
+        return True
+    return "wc" in commands and any(
+        token == "--files0-from" or token.startswith("--files0-from=") for token in tokens
+    )
+
+
+def _command_escapes_query_wiki(tokens: list[str]) -> bool:
+    expect_command = True
+    for token in tokens:
+        if token in {";", "&&", "||", "|", "&"}:
+            expect_command = True
+            continue
+        if expect_command:
+            expect_command = False
+            continue
+        if token in {"<", ">", "<<", ">>"}:
+            return True
+        candidate = token.partition("=")[2] if token.startswith("-") and "=" in token else token
+        if not candidate:
+            continue
+        if candidate == "$" or candidate.startswith("~") or "`" in candidate:
+            return True
+        if re.search(r"\$(?:\(|\{|[A-Za-z_])", candidate):
+            return True
+        path = Path(candidate)
+        if path.is_absolute() or ".." in path.parts:
+            return True
+    return False
 
 
 def _unwrap_app_server_shell_wrapper(tokens: list[str]) -> list[str] | None:
@@ -517,6 +573,18 @@ def _shell_command_names(tokens: list[str]) -> set[str]:
     return names
 
 
+def _uses_command_path(tokens: list[str]) -> bool:
+    expect_command = True
+    for token in tokens:
+        if token in {";", "&&", "||", "|", "&"}:
+            expect_command = True
+        elif expect_command and not any(character in token for character in "<>"):
+            if Path(token).name != token:
+                return True
+            expect_command = False
+    return False
+
+
 def _root_item(item: Any) -> Any:
     return getattr(item, "root", item)
 
@@ -525,10 +593,17 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
 
 
-async def _best_effort_interrupt(turn: Any) -> None:
+def _best_effort_interrupt(turn: Any) -> None:
     try:
-        await turn.interrupt()
+        turn.interrupt()
     except Exception:  # noqa: BLE001 - cleanup must preserve the original SDK failure.
+        return
+
+
+def _best_effort_close(codex: Any) -> None:
+    try:
+        codex.close()
+    except Exception:  # noqa: BLE001 - timeout cleanup cannot replace the timeout failure.
         return
 
 

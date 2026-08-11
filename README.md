@@ -210,6 +210,12 @@ Planning checks its estimated prompt size before calling the model. Increase `pl
 Routing uses the Claude explorer by default. An isolated Codex app-server backend can be injected
 through the same public API:
 
+```bash
+python -m pip install "skillfabric-ai[codex]"
+```
+
+This extra installs the stable official `openai-codex` SDK and its matching Codex runtime.
+
 ```python
 from skillfabric import SkillFabric
 from skillfabric.wiki.explorer.backends import CodexWikiExplorerBackend

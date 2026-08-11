@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
-import shutil
-import threading
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,13 +30,12 @@ from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_
 
 CodexSdkRuntime = Any
 CODEX_ALLOWED_TOOLS = ("exec_command",)
-PERMISSION_PROFILE = "skillfabric-query-wiki"
 CODEX_EXECUTION_GUIDANCE = """
 <codex_execution_guidance>
 - Begin with `index.md`, then use non-interactive `exec_command` reads and searches.
 - Keep paths relative to the supplied query-wiki root; inspect cards, sources, and
   `semantic_edges.jsonl` only when they are needed as routing evidence.
-- Use read/list/search commands such as `sed`, `head`, `find`, and `rg`; do not use
+- Use only `cat`, `head`, `tail`, `ls`, `pwd`, `rg`, `stat`, and `wc`; do not use
   `write_stdin`, interactive shells, redirects, file edits, network tools, or background jobs.
 - A successful route must be grounded in files actually read from this query wiki. If a command
   fails, simplify the next read instead of returning a coverage gap without inspecting the wiki.
@@ -74,7 +70,6 @@ def build_codex_prompt_spec(
         "max_selected_skills": context.max_selected_skills,
         "allowed_tools": list(context.allowed_tools),
         "tool_budget": dict(context.tool_budget or {}),
-        "permission_profile": PERMISSION_PROFILE,
         "execution_contract": CODEX_EXECUTION_CONTRACT.to_dict(),
         "system_prompt": render_system_prompt(context) + "\n\n" + CODEX_EXECUTION_GUIDANCE,
         "user_prompt": render_user_prompt(context),
@@ -91,7 +86,7 @@ class CodexExecutionContract:
 
     schema_version: int = 1
     approval_policy: str = "never"
-    filesystem_scope: str = "query-wiki-root"
+    filesystem_scope: str = "task-wiki-event-audited"
     sandbox: str = "read-only"
     network_access: bool = False
     web_search: bool = False
@@ -115,6 +110,12 @@ CODEX_EXECUTION_CONTRACT = CodexExecutionContract()
 
 @dataclass(slots=True)
 class CodexWikiExplorerBackend:
+    """Explore a Task Wiki through an isolated official Codex SDK session.
+
+    The execution watchdog covers login and thread activity after the synchronous
+    SDK client has initialized its app-server process.
+    """
+
     env_file: str | Path = ".env"
     max_selected_skills: int = 8
     model: str | None = None
@@ -182,6 +183,8 @@ class CodexWikiExplorerBackend:
         query_wiki_root = query_wiki_root.resolve()
         if not query_wiki_root.is_dir():
             raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
+        if any(path.is_symlink() for path in query_wiki_root.rglob("*")):
+            raise ValueError("query_wiki must not contain symlinks")
         cc_dir = trace_dir / "cc_explorer"
         cc_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
@@ -216,7 +219,6 @@ class CodexWikiExplorerBackend:
                 "max_selected_skills",
                 "allowed_tools",
                 "tool_budget",
-                "permission_profile",
                 "execution_contract",
             )
         }
@@ -262,19 +264,16 @@ class CodexWikiExplorerBackend:
             with TemporaryDirectory(prefix="skillfabric-codex-") as home:
                 codex_home = Path(home)
                 settings = build_codex_sdk_env(self.env_file, codex_home=home)
-                payload, usage, metadata = _run_codex_sync(
-                    lambda: self._explore_async(
-                        runtime=runtime,
-                        settings=settings,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        query_wiki_root=query_wiki_root,
-                        codex_home=Path(home),
-                        cc_dir=cc_dir,
-                        command_budget=_command_budget(tool_budget),
-                        prompt_id=str(prompt_spec["prompt_id"]),
-                    ),
-                    timeout_seconds=self.execution_timeout_seconds,
+                payload, usage, metadata = self._explore(
+                    runtime=runtime,
+                    settings=settings,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    query_wiki_root=query_wiki_root,
+                    codex_home=Path(home),
+                    cc_dir=cc_dir,
+                    command_budget=_command_budget(tool_budget),
+                    prompt_id=str(prompt_spec["prompt_id"]),
                 )
             _write_json(
                 cc_dir / "backend.json",
@@ -316,7 +315,7 @@ class CodexWikiExplorerBackend:
                 exc.__skillfabric_sanitized_error__ = error["error"]  # type: ignore[attr-defined]
             raise
 
-    async def _explore_async(
+    def _explore(
         self,
         *,
         runtime: CodexSdkRuntime,
@@ -329,7 +328,7 @@ class CodexWikiExplorerBackend:
         command_budget: int,
         prompt_id: str,
     ) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
-        return await run_codex_attempt(
+        return run_codex_attempt(
             runtime,
             settings,
             codex_bin=None if self.codex_bin is None else str(self.codex_bin),
@@ -343,10 +342,8 @@ class CodexWikiExplorerBackend:
             command_budget=command_budget,
             execution_timeout_seconds=self.execution_timeout_seconds,
             thread_config=_thread_config(
-                query_wiki_root=query_wiki_root,
                 codex_home=codex_home,
                 api_base=settings.api_base,
-                codex_bin=_codex_runtime_path(self.codex_bin),
             ),
             output_schema=skill_package_json_schema(),
             metadata_callback=lambda metadata: _write_json(
@@ -372,7 +369,6 @@ class CodexWikiExplorerBackend:
             "reasoning_effort": self.reasoning_effort,
             "sdk_version": str(getattr(runtime, "__version__", "unavailable")),
             "execution_contract": CODEX_EXECUTION_CONTRACT.to_dict(),
-            "permission_profile": PERMISSION_PROFILE,
             "prompt_id": prompt_id,
             "allowed_tools": list(CODEX_ALLOWED_TOOLS),
             "tool_enforcement": "event-audited-fail-closed",
@@ -385,103 +381,31 @@ class CodexWikiExplorerBackend:
 
 def _thread_config(
     *,
-    query_wiki_root: Path,
     codex_home: Path,
     api_base: str,
-    codex_bin: Path | None,
 ) -> dict[str, Any]:
-    filesystem = {
-        ":minimal": "read",
-        str(query_wiki_root): "read",
-    }
-    if codex_bin is not None:
-        filesystem[str(codex_bin)] = "read"
     return {
         "openai_base_url": api_base,
-        "default_permissions": PERMISSION_PROFILE,
-        "permissions": {
-            PERMISSION_PROFILE: {
-                "filesystem": filesystem,
-                "network": {"enabled": False},
-            }
-        },
         "web_search": "disabled",
-        "include_permissions_instructions": False,
-        "include_apps_instructions": False,
-        "include_collaboration_mode_instructions": False,
-        "include_environment_context": False,
         "project_root_markers": [],
         "project_doc_max_bytes": 0,
         "project_doc_fallback_filenames": [],
         "allow_login_shell": False,
-        "check_for_update_on_startup": False,
         "features": {
             "apps": False,
-            "browser_use": False,
-            "browser_use_external": False,
-            "browser_use_full_cdp_access": False,
-            "code_mode": False,
-            "code_mode_host": False,
-            "code_mode_only": False,
-            "collab": False,
-            "collaboration_modes": False,
-            "computer_use": False,
-            "connectors": False,
-            "enable_mcp_apps": False,
-            "external_agent_memory_import": False,
-            "image_generation": False,
-            "imagegenext": False,
-            "memory_tool": False,
             "multi_agent": False,
-            "multi_agent_mode": False,
-            "multi_agent_v2": False,
             "network_proxy": False,
-            "plugin_hooks": False,
-            "plugin_sharing": False,
             "plugins": False,
             "remote_plugin": False,
-            "request_permissions": False,
-            "request_permissions_tool": False,
-            "request_rule": False,
-            "search_tool": False,
             "skill_mcp_dependency_install": False,
-            "skill_search": False,
-            "standalone_web_search": False,
-            "tool_search": False,
-            "tool_suggest": False,
-            "web_search": False,
-            "web_search_cached": False,
-            "web_search_request": False,
-        },
-        "skills": {
-            "bundled": {"enabled": False},
-            "include_instructions": False,
-            "config": [],
-        },
-        "orchestrator": {
-            "skills": {"enabled": False},
-            "mcp": {"enabled": False},
         },
         "mcp_servers": {},
         "shell_environment_policy": {
             "inherit": "core",
             "ignore_default_excludes": False,
-            "exclude": ["*PASSWORD*", "*CREDENTIAL*"],
             "set": {"HOME": str(codex_home)},
-            "include_only": ["PATH", "SHELL", "HOME", "LANG", "LC_*"],
         },
     }
-
-
-def _codex_runtime_path(codex_bin: str | Path | None) -> Path | None:
-    if codex_bin is None:
-        return None
-    candidate = Path(codex_bin).expanduser()
-    if candidate.parent == Path("."):
-        resolved = shutil.which(str(candidate))
-        if resolved is not None:
-            return Path(resolved).resolve()
-    return candidate.resolve()
 
 
 def _normalize_tool_budget(
@@ -538,38 +462,6 @@ def _validate_operational_result(package: SkillPackage, *, cc_dir: Path) -> None
     _write_json(access_path, access)
 
 
-def _run_codex_sync(
-    coroutine_factory: Any,
-    *,
-    timeout_seconds: float,
-) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine_factory())
-
-    result: dict[str, Any] = {}
-    errors: list[BaseException] = []
-
-    def worker() -> None:
-        try:
-            result["value"] = asyncio.run(coroutine_factory())
-        except BaseException as exc:  # noqa: BLE001 - preserve SDK failures across threads.
-            errors.append(exc)
-
-    thread = threading.Thread(target=worker, name="skillfabric-codex-sdk", daemon=True)
-    thread.start()
-    thread.join(None if timeout_seconds == 0 else timeout_seconds + 2.0)
-    if thread.is_alive():
-        raise TimeoutError(f"Codex query-wiki explorer exceeded {timeout_seconds:g} seconds")
-    if errors:
-        raise errors[0]
-    value = result.get("value")
-    if not isinstance(value, tuple) or len(value) != 3:
-        raise RuntimeError("Codex SDK worker did not return an explorer result")
-    return value
-
-
 def _same_json_shape(value: Any, expected: Any) -> bool:
     if type(value) is not type(expected):
         return False
@@ -606,7 +498,7 @@ def _write_event(directory: Path, event: dict[str, Any]) -> None:
 def _load_sdk_runtime() -> Any:
     try:
         import openai_codex
-        from openai_codex import ApprovalMode, AsyncCodex, CodexConfig
+        from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
         from openai_codex.types import ReasoningEffort
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
@@ -619,9 +511,10 @@ def _load_sdk_runtime() -> Any:
 
     Runtime.__version__ = openai_codex.__version__
     Runtime.ApprovalMode = ApprovalMode
-    Runtime.AsyncCodex = AsyncCodex
+    Runtime.Codex = Codex
     Runtime.CodexConfig = CodexConfig
     Runtime.ReasoningEffort = ReasoningEffort
+    Runtime.Sandbox = Sandbox
     return Runtime
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import fnmatch
 import json
 import os
+import threading
+import time
 import tomllib
 import unittest
 from enum import StrEnum
@@ -55,7 +55,7 @@ def _success_events(payload: dict[str, object] | None = None) -> list[SimpleName
             "item/started",
             item=_item(
                 "commandExecution",
-                command="sed -n '1,80p' index.md",
+                command="head -n 80 index.md",
                 status=SimpleNamespace(value="inProgress"),
             ),
         ),
@@ -63,7 +63,7 @@ def _success_events(payload: dict[str, object] | None = None) -> list[SimpleName
             "item/completed",
             item=_item(
                 "commandExecution",
-                command="sed -n '1,80p' index.md",
+                command="head -n 80 index.md",
                 status=SimpleNamespace(value="completed"),
                 exit_code=0,
             ),
@@ -117,14 +117,17 @@ class _Turn:
         self.events = events
         self.interrupts = 0
 
-    async def stream(self):
+    def stream(self):
         for event in self.events:
-            if self.runtime.event_delay:
-                await asyncio.sleep(self.runtime.event_delay)
+            if self.runtime.event_delay and self.runtime.stopped.wait(self.runtime.event_delay):
+                return
             yield event
 
-    async def interrupt(self) -> None:
+    def interrupt(self) -> None:
         self.interrupts += 1
+        if self.runtime.interrupt_delay:
+            time.sleep(self.runtime.interrupt_delay)
+        self.runtime.stopped.set()
         self.runtime.lifecycle.append("interrupt")
 
 
@@ -133,7 +136,7 @@ class _Thread:
         self.runtime = runtime
         self.id = "thread-1"
 
-    async def turn(self, prompt: str, **kwargs: object) -> _Turn:
+    def turn(self, prompt: str, **kwargs: object) -> _Turn:
         self.runtime.turn_calls.append((prompt, kwargs))
         turn = _Turn(self.runtime, list(self.runtime.events))
         self.runtime.turns.append(turn)
@@ -144,31 +147,36 @@ class _Codex:
     def __init__(self, runtime: _Runtime, config: _CodexConfig) -> None:
         self.runtime = runtime
         self.config = config
+        self.closed = False
         self.metadata = SimpleNamespace(
             serverInfo=SimpleNamespace(name="codex-app-server", version="0.144.4"),
             userAgent="codex/0.144.4",
         )
 
-    async def __aenter__(self) -> _Codex:
+    def __enter__(self) -> _Codex:
         self.runtime.configs.append(self.config)
-        if self.runtime.enter_delay:
-            await asyncio.sleep(self.runtime.enter_delay)
+        if self.runtime.enter_delay and self.runtime.stopped.wait(self.runtime.enter_delay):
+            raise RuntimeError("app-server startup interrupted")
         return self
 
-    async def __aexit__(self, *_args: object) -> None:
-        await self.close()
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
-    async def close(self) -> None:
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         self.runtime.closes += 1
+        self.runtime.stopped.set()
         self.runtime.lifecycle.append("close")
         if self.runtime.fail_close:
             raise RuntimeError("app-server close failed")
 
-    async def login_api_key(self, api_key: str) -> None:
+    def login_api_key(self, api_key: str) -> None:
         self.runtime.login_calls.append(api_key)
         self.runtime.lifecycle.append("login")
 
-    async def thread_start(self, **kwargs: object) -> _Thread:
+    def thread_start(self, **kwargs: object) -> _Thread:
         self.runtime.lifecycle.append("thread_start")
         self.runtime.thread_calls.append(kwargs)
         if self.runtime.fail_thread_start:
@@ -193,12 +201,14 @@ class _Runtime:
         *,
         event_delay: float = 0,
         enter_delay: float = 0,
+        interrupt_delay: float = 0,
         fail_close: bool = False,
         fail_thread_start: bool = False,
     ) -> None:
         self.events = events or _success_events()
         self.event_delay = event_delay
         self.enter_delay = enter_delay
+        self.interrupt_delay = interrupt_delay
         self.fail_close = fail_close
         self.fail_thread_start = fail_thread_start
         self.configs: list[_CodexConfig] = []
@@ -208,8 +218,9 @@ class _Runtime:
         self.turns: list[_Turn] = []
         self.closes = 0
         self.lifecycle: list[str] = []
+        self.stopped = threading.Event()
 
-    def AsyncCodex(self, *, config: _CodexConfig) -> _Codex:
+    def Codex(self, *, config: _CodexConfig) -> _Codex:
         return _Codex(self, config)
 
 
@@ -294,6 +305,29 @@ class CodexWikiExplorerTests(unittest.TestCase):
                         )
                     ],
                 ),
+                "outside-without-actions": ("cat ../outside.md", None),
+                "absolute-without-actions": ("cat /etc/passwd", None),
+                "relative-executable": ("./cat index.md", None),
+                "outside-executable": ("/tmp/cat index.md", None),
+                "environment-expansion": ("cat $HOME/.codex/auth.json", None),
+                "command-substitution": ("cat $(pwd)/index.md", None),
+                "sed-in-place": ("sed -i 's/a/b/' index.md", None),
+                "sed-execute": ("sed -n 'e cat /etc/passwd' index.md", None),
+                "sed-read": ("sed -n 'r /etc/passwd' index.md", None),
+                "find-delete": ("find cards -delete", None),
+                "find-exec": ("find cards -exec cat {} ;", None),
+                "find-fprint0": ("find cards -fprint0 paths.txt", None),
+                "grep-pattern-file": ("grep -f/etc/passwd financial index.md", None),
+                "ripgrep-preprocessor": ("rg --pre cat financial cards", None),
+                "ripgrep-pattern-file": ("rg -f/etc/passwd financial index.md", None),
+                "ripgrep-search-zip": ("rg --search-zip financial .", None),
+                "ripgrep-hostname-bin": ("rg --hostname-bin cat financial .", None),
+                "ripgrep-hostname-bin-equals": ("rg --hostname-bin=cat financial .", None),
+                "sort-output": ("sort -o sorted.md index.md", None),
+                "sort-short-output": ("sort -osorted.md index.md", None),
+                "uniq-output": ("uniq index.md unique.md", None),
+                "wc-files0-from": ("wc --files0-from paths.list", None),
+                "wc-files0-from-equals": ("wc --files0-from=paths.list", None),
             }
             for name, (command, actions) in cases.items():
                 command_fields = {
@@ -330,7 +364,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
     def test_command_audit_allows_read_only_app_server_shell_wrapper(self) -> None:
         events = _success_events()
         for event in events[:2]:
-            event.payload.item.root.command = "/bin/bash -lc 'sed -n 1,80p index.md'"
+            event.payload.item.root.command = "/bin/bash -lc 'head -n 80 index.md'"
             event.payload.item.root.command_actions = [
                 SimpleNamespace(root=SimpleNamespace(type="listFiles", path="index.md"))
             ]
@@ -365,7 +399,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
         package_root = Path(__file__).resolve().parents[1]
         pyproject = tomllib.loads((package_root / "pyproject.toml").read_text(encoding="utf-8"))
         extras = pyproject["project"]["optional-dependencies"]
-        codex_requirement = "openai-codex>=0.144.4,<0.145"
+        codex_requirement = "openai-codex>=0.144.4"
 
         self.assertIs(PublicBackend, CodexWikiExplorerBackend)
         self.assertEqual(extras["codex"], [codex_requirement])
@@ -390,6 +424,31 @@ class CodexWikiExplorerTests(unittest.TestCase):
                 ).explore(
                     query="find a skill",
                     query_wiki_root=wiki_link,
+                    trace_dir=root / "trace",
+                )
+
+            self.assertEqual(runtime.configs, [])
+
+    def test_backend_rejects_symlinks_inside_the_query_wiki(self) -> None:
+        runtime = _Runtime()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wiki = root / "query_wiki"
+            wiki.mkdir()
+            outside = root / "outside.md"
+            outside.write_text("private", encoding="utf-8")
+            (wiki / "outside.md").symlink_to(outside)
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                CodexWikiExplorerBackend(
+                    env_file=env_file,
+                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
+                    sdk_runtime=runtime,
+                ).explore(
+                    query="find a skill",
+                    query_wiki_root=wiki,
                     trace_dir=root / "trace",
                 )
 
@@ -428,7 +487,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(config["codex_bin"], str(root / "codex"))
             self.assertEqual(config["env"]["OPENAI_API_KEY"], "sk-experiment-secret")
             self.assertEqual(config["env"]["CODEX_API_KEY"], "")
-            self.assertEqual(config["env"]["CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG"], "1")
+            self.assertNotIn("CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG", config["env"])
             self.assertEqual(runtime.login_calls, ["sk-experiment-secret"])
             self.assertLess(
                 runtime.lifecycle.index("login"),
@@ -439,16 +498,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(config["cwd"], str(codex_home))
             self.assertEqual(
                 config["config_overrides"],
-                (
-                    "project_root_markers=[]",
-                    "check_for_update_on_startup=false",
-                    "features.plugins=false",
-                    "features.remote_plugin=false",
-                    "features.plugin_sharing=false",
-                    "features.plugin_hooks=false",
-                    "skills.bundled.enabled=false",
-                    "orchestrator.skills.enabled=false",
-                ),
+                ("check_for_update_on_startup=false",),
             )
 
             thread = runtime.thread_calls[0]
@@ -456,105 +506,39 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(thread["cwd"], str(wiki.resolve()))
             self.assertEqual(thread["model"], "gpt-5.6-terror")
             self.assertTrue(thread["ephemeral"])
-            self.assertNotIn("sandbox", thread)
+            self.assertEqual(thread["sandbox"], "read-only")
+            self.assertIn("index.md", thread["developer_instructions"])
+            self.assertNotIn("base_instructions", thread)
             thread_config = thread["config"]
-            self.assertEqual(thread_config["web_search"], "disabled")
-            self.assertEqual(thread_config["openai_base_url"], "http://gateway.example/v1")
-            self.assertEqual(thread_config["project_root_markers"], [])
-            profile = thread_config["permissions"]["skillfabric-query-wiki"]
             self.assertEqual(
-                profile["filesystem"],
+                thread_config,
                 {
-                    ":minimal": "read",
-                    str(wiki.resolve()): "read",
-                    str((root / "codex").resolve()): "read",
+                    "openai_base_url": "http://gateway.example/v1",
+                    "web_search": "disabled",
+                    "project_root_markers": [],
+                    "project_doc_max_bytes": 0,
+                    "project_doc_fallback_filenames": [],
+                    "allow_login_shell": False,
+                    "features": {
+                        "apps": False,
+                        "multi_agent": False,
+                        "network_proxy": False,
+                        "plugins": False,
+                        "remote_plugin": False,
+                        "skill_mcp_dependency_install": False,
+                    },
+                    "mcp_servers": {},
+                    "shell_environment_policy": {
+                        "inherit": "core",
+                        "ignore_default_excludes": False,
+                        "set": {"HOME": str(codex_home)},
+                    },
                 },
-            )
-            self.assertFalse(profile["network"]["enabled"])
-
-            disabled_features = {
-                "apps",
-                "browser_use",
-                "browser_use_external",
-                "browser_use_full_cdp_access",
-                "code_mode",
-                "code_mode_host",
-                "code_mode_only",
-                "collab",
-                "collaboration_modes",
-                "computer_use",
-                "connectors",
-                "enable_mcp_apps",
-                "external_agent_memory_import",
-                "image_generation",
-                "imagegenext",
-                "memory_tool",
-                "multi_agent",
-                "multi_agent_mode",
-                "multi_agent_v2",
-                "network_proxy",
-                "plugin_hooks",
-                "plugin_sharing",
-                "plugins",
-                "remote_plugin",
-                "request_permissions",
-                "request_permissions_tool",
-                "request_rule",
-                "search_tool",
-                "skill_mcp_dependency_install",
-                "skill_search",
-                "standalone_web_search",
-                "tool_search",
-                "tool_suggest",
-                "web_search",
-                "web_search_cached",
-                "web_search_request",
-            }
-            self.assertTrue(disabled_features <= set(thread_config["features"]))
-            self.assertTrue(
-                all(thread_config["features"][name] is False for name in disabled_features)
-            )
-            self.assertFalse(thread_config["skills"]["bundled"]["enabled"])
-            self.assertFalse(thread_config["skills"]["include_instructions"])
-            self.assertEqual(thread_config["mcp_servers"], {})
-            self.assertEqual(
-                thread_config["orchestrator"],
-                {"skills": {"enabled": False}, "mcp": {"enabled": False}},
             )
             shell_policy = thread_config["shell_environment_policy"]
             self.assertEqual(shell_policy["inherit"], "core")
             self.assertFalse(shell_policy["ignore_default_excludes"])
-            self.assertEqual(
-                shell_policy["include_only"],
-                ["PATH", "SHELL", "HOME", "LANG", "LC_*"],
-            )
             self.assertEqual(shell_policy["set"], {"HOME": str(codex_home)})
-            self.assertEqual(
-                shell_policy["exclude"],
-                ["*PASSWORD*", "*CREDENTIAL*"],
-            )
-            inherited = {
-                "PATH": "/usr/bin",
-                "HOME": "/personal/home",
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-                "API_PASSWORD": "secret",
-                "DB_CREDENTIAL": "secret",
-                "UNRELATED": "discarded",
-            }
-            included = {
-                name
-                for name in inherited
-                if any(
-                    fnmatch.fnmatchcase(name.casefold(), pattern.casefold())
-                    for pattern in shell_policy["include_only"]
-                )
-                and not any(
-                    fnmatch.fnmatchcase(name.casefold(), pattern.casefold())
-                    for pattern in shell_policy["exclude"]
-                )
-            }
-            self.assertEqual(included, {"PATH", "HOME", "LANG", "LC_ALL"})
             self.assertEqual(thread_config["project_doc_max_bytes"], 0)
             self.assertEqual(thread_config["project_doc_fallback_filenames"], [])
 
@@ -564,7 +548,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(turn["model"], "gpt-5.6-terror")
             self.assertEqual(turn["output_schema"], skill_package_json_schema())
             self.assertEqual(turn["cwd"], str(wiki.resolve()))
-            self.assertNotIn("sandbox", turn)
+            self.assertEqual(turn["sandbox"], "read-only")
 
             prompt_context = json.loads(
                 (trace / "cc_explorer" / "prompt_context.json").read_text(encoding="utf-8")
@@ -643,7 +627,10 @@ class CodexWikiExplorerTests(unittest.TestCase):
 
     def test_command_budget_interrupts_the_turn_and_propagates_failure(self) -> None:
         commands = [
-            _event("item/started", item=_item("commandExecution", command=f"read {index}"))
+            _event(
+                "item/started",
+                item=_item("commandExecution", command=f"head -n {index + 1} index.md"),
+            )
             for index in range(22)
         ]
         runtime = _Runtime([*commands, *_success_events()])
@@ -687,6 +674,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             ],
             "view-image": [_event("item/started", item=_item("imageView"))],
             "update-plan": [_event("item/completed", item=_item("plan"))],
+            "unknown-item": [_event("item/started", item=_item(""))],
         }
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -757,6 +745,29 @@ class CodexWikiExplorerTests(unittest.TestCase):
             runtime.lifecycle,
             ["login", "thread_start", "interrupt", "close"],
         )
+
+    def test_timeout_closes_transport_without_waiting_for_interrupt_rpc(self) -> None:
+        runtime = _Runtime(event_delay=10, interrupt_delay=1)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wiki = root / "query_wiki"
+            wiki.mkdir()
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+
+            started = time.monotonic()
+            with self.assertRaisesRegex(TimeoutError, "exceeded 0.05 seconds"):
+                CodexWikiExplorerBackend(
+                    env_file=env_file,
+                    execution_timeout_seconds=0.05,
+                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
+                    sdk_runtime=runtime,
+                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
+            elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(runtime.closes, 1)
+        self.assertEqual(runtime.turns[0].interrupts, 1)
 
     def test_missing_sdk_is_recorded_as_a_backend_failure(self) -> None:
         with TemporaryDirectory() as tmp:
