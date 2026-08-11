@@ -143,6 +143,72 @@ def test_exact_selected_skill_count_is_enforced(
         )
 
 
+def test_task_wiki_reuses_full_wiki_source_pages(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    bundle = build_router_bundle(
+        RouterBundleConfig(workspace=workspace, query="extract KPIs"),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    query_wiki = materialize_query_wiki(
+        workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "projection-test",
+    )
+
+    full_source = (workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md").read_text(
+        encoding="utf-8"
+    )
+    task_source = (query_wiki.root / "skills" / "sources" / "pdf-table-parser.md").read_text(
+        encoding="utf-8"
+    )
+    metadata = json.loads((query_wiki.root / "source.json").read_text(encoding="utf-8"))
+
+    assert task_source == full_source
+    assert metadata["build_id"] == "test-build"
+    assert set(metadata["skills"]) == {candidate.skill_id for candidate in bundle.selected_skills}
+
+
+def test_task_wiki_rejects_stale_full_wiki(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    manifest_path = workspace / "wiki" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["build_id"] = "stale-build"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    bundle = build_router_bundle(
+        RouterBundleConfig(workspace=workspace, query="extract KPIs"),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+
+    with pytest.raises(ValueError, match="different builds"):
+        materialize_query_wiki(
+            workspace,
+            bundle,
+            trace_dir=workspace / "runs" / "stale-wiki",
+        )
+
+
+def test_task_wiki_supports_default_relative_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    relative_workspace = ".skillfabric"
+    bundle = build_router_bundle(
+        RouterBundleConfig(workspace=relative_workspace, query="extract KPIs"),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+
+    result = materialize_query_wiki(
+        relative_workspace,
+        bundle,
+        trace_dir=workspace / "runs" / "relative-workspace",
+    )
+
+    assert result.root.is_dir()
+    assert (result.root / "skills" / "sources" / "pdf-table-parser.md").is_file()
+
+
 def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> None:
     bundle, query_wiki = _query_context(tmp_path)
     package = _package()

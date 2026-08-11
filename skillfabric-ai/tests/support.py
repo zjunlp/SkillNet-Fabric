@@ -14,6 +14,8 @@ from skillfabric.compiled_graph.contracts.models import SkillContract
 from skillfabric.compiled_graph.models import EvidenceRef
 from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.registry.models import SkillNode
+from skillfabric.wiki.materializer import build_wiki
+from skillfabric.wiki.models import WikiBuildConfig
 
 
 class FakeEmbeddingProvider:
@@ -340,6 +342,7 @@ def _ensure_fixture_workspace() -> None:
             build_id="test-build",
         ),
     )
+    build_wiki(WikiBuildConfig(workspace=_WORKSPACE_CACHE))
 
 
 def _field(skill: SkillNode, name: str, text: str) -> dict[str, Any]:

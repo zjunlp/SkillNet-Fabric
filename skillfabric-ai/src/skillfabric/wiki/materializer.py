@@ -1,14 +1,17 @@
-"""Materialize the Compiled Skill Graph into markdown wiki pages."""
+"""Materialize the stable Full Wiki from canonical graph artifacts."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.health import analyze_wiki_health, write_wiki_health_report
-from skillfabric.wiki.indexer import append_log, render_index
+from skillfabric.wiki.indexer import render_index
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage, WikiSummaryRecord
+from skillfabric.wiki.pages import slug
 from skillfabric.wiki.renderers import (
     _first_paragraph,
     _skill_page,
@@ -31,15 +34,50 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     _reset_wiki_output(workspace)
     for page in pages:
         atomic_write_text(page.path, page.text)
+    _write_manifest(workspace, source, pages)
     health = analyze_wiki_health(workspace)
     write_wiki_health_report(workspace, health)
-    result = WikiBuildResult(
+    return WikiBuildResult(
         pages_written=len(pages),
         health=health,
         workspace=workspace.root,
     )
-    append_log(workspace.reports_dir / "wiki_log.md", result=result, build_id=source.build_id)
-    return result
+
+
+def _write_manifest(workspace: Workspace, source: WikiSource, pages: list[WikiPage]) -> None:
+    """Publish stable page identities for task-wiki projections."""
+
+    page_hashes = {
+        page.path.relative_to(workspace.wiki_dir).as_posix(): _sha256(page.text) for page in pages
+    }
+    skills = []
+    for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
+        card_path = f"skills/cards/{slug(skill_id)}.md"
+        source_path = f"skills/sources/{slug(skill_id)}.md"
+        skills.append(
+            {
+                "skill_id": skill_id,
+                "name": skill.name,
+                "card_path": card_path,
+                "source_path": source_path,
+                "content_hash": skill.content_hash,
+                "card_hash": page_hashes[card_path],
+                "source_hash": page_hashes[source_path],
+            }
+        )
+    manifest = {
+        "build_id": source.build_id,
+        "skills": skills,
+        "page_hashes": dict(sorted(page_hashes.items())),
+    }
+    atomic_write_text(
+        workspace.wiki_dir / "manifest.json",
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+    )
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _entity_pages(

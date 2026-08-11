@@ -39,7 +39,7 @@ class ContractExtractor(Protocol):
 
 @dataclass(slots=True)
 class ContractExtractionRecord:
-    """One validated contract and its cache provenance."""
+    """One validated contract and its cache status."""
 
     contract: SkillContract
     cache_hit: bool = False

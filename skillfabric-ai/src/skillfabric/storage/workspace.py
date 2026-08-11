@@ -25,10 +25,6 @@ class Workspace:
         return self.root / "cache"
 
     @property
-    def reports_dir(self) -> Path:
-        return self.root / "reports"
-
-    @property
     def wiki_dir(self) -> Path:
         return self.root / "wiki"
 
@@ -64,7 +60,6 @@ class Workspace:
         for path in (
             self.graph_dir,
             self.cache_dir,
-            self.reports_dir,
             self.wiki_dir,
             self.wiki_skills_dir,
             self.wiki_skill_cards_dir,

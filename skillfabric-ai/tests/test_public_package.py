@@ -84,7 +84,7 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertEqual(
             dependencies,
-            {"faiss-cpu", "httpx", "litellm", "numpy", "pyyaml"},
+            {"httpx", "litellm", "numpy", "pyyaml"},
         )
 
     def test_public_brand_and_package_identifiers_are_consistent(self) -> None:
@@ -205,7 +205,6 @@ class PublicPackageTests(unittest.TestCase):
 
         client = SkillFabric(workspace=".skillfabric")
         invalid_overrides = [
-            {"skip_wiki": "false"},
             {"llm_concurrency": True},
             {"embedding_model": 123},
         ]
@@ -221,10 +220,12 @@ class PublicPackageTests(unittest.TestCase):
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
-        with patch("skillfabric.api.build_graph") as build_mock:
+        with (
+            patch("skillfabric.api.build_graph") as build_mock,
+            patch("skillfabric.api.build_wiki"),
+        ):
             client.build(
                 FIXTURE_SKILLS,
-                skip_wiki=True,
                 embedding_provider=FakeEmbeddingProvider(),
                 llm_model="openai/responses/gpt-5.6-luna",
                 llm_reasoning_effort="medium",
@@ -244,11 +245,11 @@ class PublicPackageTests(unittest.TestCase):
         client = SkillFabric(workspace=".skillfabric")
         with (
             patch("skillfabric.api.build_graph") as build_mock,
+            patch("skillfabric.api.build_wiki"),
             self.assertRaisesRegex(TypeError, "wiki_summary_mode"),
         ):
             client.build(
                 FIXTURE_SKILLS,
-                skip_wiki=True,
                 embedding_provider=FakeEmbeddingProvider(),
                 wiki_summary_mode="off",
             )

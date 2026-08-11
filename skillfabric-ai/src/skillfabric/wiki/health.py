@@ -120,6 +120,4 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
 def write_wiki_health_report(workspace: Workspace, report: WikiHealthReport) -> None:
     """Write wiki health markdown report."""
 
-    atomic_write_text(
-        workspace.reports_dir / "wiki_health_report.md", render_wiki_health_report(report)
-    )
+    atomic_write_text(workspace.wiki_dir / "health.md", render_wiki_health_report(report))

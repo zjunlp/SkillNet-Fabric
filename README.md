@@ -121,11 +121,12 @@ The build pipeline:
 4. Retrieves bounded candidate pairs from handoff intent, similarity, and explicit references.
 5. Judges each candidate once and requires source evidence for every accepted edge.
 6. Validates relation direction, uniqueness, and dependency acyclicity.
-7. Materializes the graph, wiki, metrics, and usage artifacts.
+7. Materializes the canonical graph and the reusable Full Wiki.
 
 Wiki summaries are derived deterministically from validated contracts. Wiki materialization makes no additional model calls and does not alter contract extraction, semantic relation judgment, or embeddings.
 
-LLM-backed build jobs retry within the compiler. Usage artifacts commit only the accepted attempt for each contract, relation batch, or cycle review, so transient service failures do not inflate method-level token and cost totals.
+LLM-backed build jobs retry within the compiler without creating a default usage or provenance
+report. Runtime usage logging is opt-in for callers that explicitly provide a log path.
 
 ### 2. Model Skill Relationships
 
@@ -166,7 +167,7 @@ The planner receives:
 
 It produces a complete task-specific execution plan. SkillFabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
 
-Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default, and only the accepted response is committed to `llm_usage.jsonl`.
+Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default. Runtime usage is written only when an explicit usage log path is supplied.
 
 ---
 
@@ -339,11 +340,10 @@ SkillFabric writes generated state under the configured workspace:
 │   └── embeddings.json
 ├── wiki/
 │   ├── index.md
+│   ├── manifest.json
+│   ├── health.md
 │   ├── skills/
 │   └── workflows/
-├── reports/
-│   ├── build_summary.json
-│   └── llm_usage.jsonl
 ├── runs/<trace-id>/
 │   ├── query.json
 │   ├── query_wiki/

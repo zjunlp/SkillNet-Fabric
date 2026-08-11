@@ -31,7 +31,6 @@ from skillfabric.router.traces import _new_trace_id, validate_trace_id
 from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import read_env_file
-from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.runtime.progress import ProgressReporter
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.materializer import build_wiki
@@ -96,7 +95,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--skill-root", required=True)
     build_parser.add_argument("--workspace", default=".skillfabric")
     build_parser.add_argument("--env-file", default=".env")
-    build_parser.add_argument("--skip-wiki", action="store_true")
     build_parser.add_argument("--embedding-model")
     _add_llm_options(build_parser)
     _add_progress_options(build_parser)
@@ -314,11 +312,8 @@ def _build(args: argparse.Namespace) -> None:
                 )
             ),
         )
-        wiki_result: WikiBuildResult | None = None
-        if not args.skip_wiki:
-            wiki_result = build_wiki(WikiBuildConfig(workspace=result.workspace.root))
-            merge_wiki_metrics(result.workspace, wiki_result)
-    print(json.dumps(_build_summary(result, wiki_result), ensure_ascii=False, indent=2))
+        wiki_result = build_wiki(WikiBuildConfig(workspace=result.workspace.root))
+    print(json.dumps(_build_output(result, wiki_result), ensure_ascii=False, indent=2))
 
 
 def _require_api_configuration(env_path: Path) -> None:
@@ -330,7 +325,7 @@ def _require_api_configuration(env_path: Path) -> None:
         )
 
 
-def _build_summary(result: BuildResult, wiki: WikiBuildResult | None) -> dict[str, Any]:
+def _build_output(result: BuildResult, wiki: WikiBuildResult) -> dict[str, Any]:
     workspace = result.workspace
     artifacts: dict[str, Any] = {
         "registry": str(workspace.graph_dir / "registry.jsonl"),
@@ -339,15 +334,13 @@ def _build_summary(result: BuildResult, wiki: WikiBuildResult | None) -> dict[st
         "graph": str(workspace.graph_dir / "graph.json"),
         "bm25": str(workspace.graph_dir / "bm25.sqlite"),
         "embeddings": str(workspace.graph_dir / "embeddings.json"),
-        "build_summary": str(workspace.reports_dir / "build_summary.json"),
-        "llm_usage": str(workspace.reports_dir / "llm_usage.jsonl"),
         "status": str(workspace.status_path),
     }
-    if wiki is not None:
-        artifacts["wiki"] = {
-            "index": str(workspace.wiki_dir / "index.md"),
-            "pages_written": wiki.pages_written,
-        }
+    artifacts["wiki"] = {
+        "index": str(workspace.wiki_dir / "index.md"),
+        "manifest": str(workspace.wiki_dir / "manifest.json"),
+        "pages_written": wiki.pages_written,
+    }
     return {
         "workspace": str(workspace.root),
         "build_id": result.graph.build_id,

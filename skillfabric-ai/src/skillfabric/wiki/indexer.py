@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
-from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.loader import WikiSource
-from skillfabric.wiki.models import WikiBuildResult
 from skillfabric.wiki.pages import slug
 
 
@@ -61,19 +58,6 @@ def _clean_summary(value: str) -> str:
         return text
     clipped = text[:237].rsplit(" ", 1)[0].rstrip(" ,;:")
     return f"{clipped}..."
-
-
-def append_log(path: Path, *, result: WikiBuildResult, build_id: str) -> None:
-    """Append one wiki-build log entry."""
-
-    existing = path.read_text(encoding="utf-8") if path.exists() else "# Wiki Log\n\n"
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = (
-        f"## [{now}] wiki-build | build_id={build_id}\n\n"
-        f"- pages_written: {result.pages_written}\n"
-        f"- health_warnings: {sum(result.health.summary.values())}\n\n"
-    )
-    atomic_write_text(path, existing.rstrip() + "\n\n" + entry)
 
 
 def page_path(root: Path, category: str, entity_id: str) -> Path:

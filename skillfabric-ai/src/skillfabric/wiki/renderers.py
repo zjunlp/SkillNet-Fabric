@@ -6,6 +6,7 @@ from skillfabric.compiled_graph.contracts.models import ContractField, SkillCont
 from skillfabric.compiled_graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
+from skillfabric.wiki.contract_pages import render_skill_source_page
 from skillfabric.wiki.indexer import page_path
 from skillfabric.wiki.loader import WikiSource
 from skillfabric.wiki.models import (
@@ -128,25 +129,7 @@ def _skill_source_page(skill: SkillNode, workspace: Workspace) -> WikiPage:
     """Render the full original SKILL.md as the authoritative skill source."""
 
     source_filename = page_path(workspace.wiki_dir, "skills", skill.id).name
-    text = (
-        "\n\n".join(
-            [
-                frontmatter(
-                    {
-                        "type": "Skill Source",
-                        "title": f"{skill.name} Source",
-                        "description": f"Full original SKILL.md for {skill.id}.",
-                        "skill_id": skill.id,
-                        "card": f"../cards/{source_filename}",
-                        "resource": f"skill://{skill.id.removeprefix('skill:')}/SKILL.md",
-                    }
-                ),
-                "# Full SKILL.md",
-                skill.raw_text.rstrip() or skill.description,
-            ]
-        )
-        + "\n"
-    )
+    text = render_skill_source_page(skill, card_path=f"../cards/{source_filename}")
     return WikiPage(
         path=workspace.wiki_skill_sources_dir / source_filename,
         page_type="skill",

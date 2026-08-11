@@ -22,8 +22,8 @@ supported build flags.
 - Use `.claude/skills` when no root is given and that directory exists.
 - Ask for a root if neither is available.
 - Use `.skillfabric` for `--workspace` and `.env` for `--env-file` when omitted.
-- Forward only supported flags: `--skip-wiki`, `--embedding-model`, `--llm-*`,
-  `--progress-json`, and `--quiet`.
+- Forward only supported flags: `--embedding-model`, `--llm-*`, `--progress-json`,
+  and `--quiet`.
 
 ## Safety Boundaries
 

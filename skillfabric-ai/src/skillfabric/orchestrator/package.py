@@ -85,9 +85,7 @@ def plan_execution_package(
     )
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
     planner_usage_path = (
-        workspace.reports_dir / "llm_usage.jsonl"
-        if usage_log_path is None
-        else Path(usage_log_path).expanduser().resolve()
+        None if usage_log_path is None else Path(usage_log_path).expanduser().resolve()
     )
     root = _package_root(workspace, query=task, package_root=package_root)
     if root.exists():

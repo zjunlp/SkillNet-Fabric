@@ -31,7 +31,6 @@ from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
 from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.metrics import merge_wiki_metrics
 from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
 from skillfabric.wiki.materializer import build_wiki
@@ -51,10 +50,6 @@ class SkillFabric:
 
     def build(self, skill_root: str | Path, **overrides: Any) -> BuildResult:
         env_file = overrides.pop("env_file", self.env_file)
-        skip_wiki = _required_bool(
-            overrides.pop("skip_wiki", False),
-            name="skip_wiki",
-        )
         provider = _embedding_provider(
             overrides.pop("embedding_provider", None),
             env_file=env_file,
@@ -91,9 +86,7 @@ class SkillFabric:
             ),
             dependencies=_BuildDependencies(embedding_provider=provider),
         )
-        if not skip_wiki:
-            wiki_result = build_wiki(WikiBuildConfig(workspace=self.workspace.root))
-            merge_wiki_metrics(self.workspace, wiki_result)
+        build_wiki(WikiBuildConfig(workspace=self.workspace.root))
         return result
 
     def route(
@@ -291,12 +284,6 @@ def _optional_float(value: Any) -> float | None:
     if not math.isfinite(resolved):
         raise ValueError("numeric build options must be finite")
     return resolved
-
-
-def _required_bool(value: Any, *, name: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{name} must be a boolean")
-    return value
 
 
 def _optional_string(value: Any, *, name: str) -> str | None:

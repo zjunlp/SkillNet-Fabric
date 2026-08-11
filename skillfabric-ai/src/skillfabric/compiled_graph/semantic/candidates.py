@@ -1,4 +1,4 @@
-"""Contract-aware FAISS retrieval for semantic relation candidates."""
+"""Contract-aware exact retrieval for semantic relation candidates."""
 
 from __future__ import annotations
 
@@ -309,7 +309,7 @@ def _add_handoff_hits(
             same_skill_counts[product.skill_id]
             + ((top_k + len(exact_skill_ids)) * max_fields_per_skill),
         )
-        neighbors = _faiss_search(
+        neighbors = _exact_similarity_search(
             requirement_vectors,
             [records[product.key].vector],
             search_k=search_k,
@@ -358,7 +358,7 @@ def _add_similarity_hits(
     if len(documents) < 2:
         return
     vectors = [records[spec.key].vector for spec in documents]
-    rows = _faiss_search(vectors, vectors, search_k=min(len(documents), top_k + 1))
+    rows = _exact_similarity_search(vectors, vectors, search_k=min(len(documents), top_k + 1))
     for source_index, neighbors in enumerate(rows):
         source = documents[source_index]
         rank = 0
@@ -537,7 +537,7 @@ def _candidate_pairs(
     return pairs
 
 
-def _faiss_search(
+def _exact_similarity_search(
     index_vectors: list[tuple[float, ...]],
     query_vectors: list[tuple[float, ...]],
     *,
@@ -546,30 +546,27 @@ def _faiss_search(
     if not index_vectors or not query_vectors or search_k <= 0:
         return [[] for _ in query_vectors]
     try:
-        import faiss
         import numpy as np
     except ImportError as exc:
-        raise CandidateRetrievalError(
-            "semantic candidate retrieval requires faiss-cpu and numpy"
-        ) from exc
+        raise CandidateRetrievalError("semantic candidate retrieval requires numpy") from exc
     index_matrix = np.ascontiguousarray(np.asarray(index_vectors, dtype="float32"))
     query_matrix = np.ascontiguousarray(np.asarray(query_vectors, dtype="float32"))
     if index_matrix.ndim != 2 or query_matrix.ndim != 2:
-        raise CandidateRetrievalError("FAISS vectors must be two-dimensional matrices")
+        raise CandidateRetrievalError("semantic vectors must be two-dimensional matrices")
     if index_matrix.shape[1] != query_matrix.shape[1]:
-        raise CandidateRetrievalError("FAISS index and query dimensions must match")
-    faiss.normalize_L2(index_matrix)
-    faiss.normalize_L2(query_matrix)
-    index = faiss.IndexFlatIP(index_matrix.shape[1])
-    index.add(index_matrix)
-    scores, indices = index.search(query_matrix, min(search_k, len(index_vectors)))
+        raise CandidateRetrievalError("semantic index and query dimensions must match")
+    index_norms = np.linalg.norm(index_matrix, axis=1, keepdims=True)
+    query_norms = np.linalg.norm(query_matrix, axis=1, keepdims=True)
+    if np.any(index_norms == 0) or np.any(query_norms == 0):
+        raise CandidateRetrievalError("semantic vectors must be non-zero")
+    scores = (query_matrix / query_norms) @ (index_matrix / index_norms).T
+    limit = min(search_k, len(index_vectors))
     return [
         [
-            (int(index_value), float(score))
-            for index_value, score in zip(index_row, score_row, strict=True)
-            if int(index_value) >= 0
+            (int(index_value), float(score_row[index_value]))
+            for index_value in np.argsort(-score_row, kind="stable")[:limit]
         ]
-        for score_row, index_row in zip(scores, indices, strict=True)
+        for score_row in scores
     ]
 
 

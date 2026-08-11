@@ -14,8 +14,8 @@ from skillfabric.compiled_graph.builder import (
 )
 from skillfabric.compiled_graph.semantic.candidates import CandidateRetrievalError
 from skillfabric.indexing.embeddings import DEFAULT_EMBEDDING_MODEL_ID, ApiEmbeddingProvider
-from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.usage import LLMUsageTracker
+from skillfabric.wiki.materializer import build_wiki
+from skillfabric.wiki.models import WikiBuildConfig
 from tests.support import (
     FIXTURE_SKILLS,
     FakeEmbeddingProvider,
@@ -58,21 +58,7 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
         "relation_decisions.json",
         "embeddings.json",
     }
-    assert {path.name for path in (workspace / "reports").iterdir()} == {
-        "build_summary.json",
-        "llm_usage.jsonl",
-    }
-
-
-class FormalFakeEmbeddingProvider(FakeEmbeddingProvider):
-    model_id = "openai/bge-m3"
-    batch_size = 16
-    concurrency = 4
-    timeout = 30.0
-    max_retries = 8
-
-    def __init__(self) -> None:
-        super().__init__(dimension=1024)
+    assert not (workspace / "reports").exists()
 
 
 def test_api_embedding_provider_forwards_request_configuration() -> None:
@@ -152,64 +138,43 @@ def test_api_embedding_provider_prefers_embedding_specific_config(tmp_path) -> N
     assert provider.model_id == "openai/custom-embedding"
 
 
-def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> None:
+def test_build_stats_contain_only_graph_build_counts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
-    provider_model = "openai/responses/gpt-5.6-luna"
+    result = _build(workspace)
 
-    result = build_graph(
-        BuildConfig(
-            skill_root=FIXTURE_SKILLS,
-            workspace=workspace,
-            llm_model=provider_model,
-            llm_reasoning_effort="medium",
-            llm_options=LLMJobOptions(
-                checkpoint_interval=25,
-                circuit_breaker_threshold=7,
-            ),
-        ),
-        dependencies=_BuildDependencies(
-            contract_extractor=FixtureContractExtractor(model_id=provider_model),
-            relation_judge=FixtureRelationJudge(model_id=provider_model),
-            embedding_provider=FormalFakeEmbeddingProvider(),
-            build_id="luna-test-build",
-        ),
-    )
+    assert set(result.stats) == {
+        "skill_count",
+        "edge_count",
+        "edge_counts",
+        "candidate_pair_count",
+        "accepted_relation_count",
+        "rejected_relation_count",
+        "contract_cache_hits",
+        "relation_cache_hits",
+        "cycle_review_count",
+    }
+    assert not (result.workspace.root / "reports").exists()
 
-    summary = json.loads(
-        (result.workspace.reports_dir / "build_summary.json").read_text(encoding="utf-8")
-    )
-    assert summary["builder"] == {
-        "model": "gpt-5.6-luna",
-        "provider_model": provider_model,
-        "reasoning_effort": "medium",
+
+def test_full_wiki_manifest_is_complete_and_hashed(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    _build(workspace)
+
+    result = build_wiki(WikiBuildConfig(workspace=workspace))
+    manifest = json.loads((workspace / "wiki" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert result.pages_written == len(manifest["page_hashes"])
+    assert manifest["build_id"] == "semantic-builder-test"
+    assert {row["skill_id"] for row in manifest["skills"]} == {
+        "skill:analyze-ci",
+        "skill:financial-kpi-extractor",
+        "skill:pdf-table-parser",
+        "skill:report-writer",
+        "skill:testing-python",
+        "skill:webshop-product-evaluator",
+        "skill:webshop-product-search",
     }
-    assert summary["llm_reliability"] == {
-        "checkpoint_interval": 25,
-        "circuit_breaker_threshold": 7,
-    }
-    assert {
-        key: summary["embedding"][key]
-        for key in (
-            "model_id",
-            "dimension",
-            "batch_size",
-            "concurrency",
-            "timeout_seconds",
-            "max_retries",
-        )
-    } == {
-        "model_id": "openai/bge-m3",
-        "dimension": 1024,
-        "batch_size": 16,
-        "concurrency": 4,
-        "timeout_seconds": 30.0,
-        "max_retries": 8,
-    }
-    assert set(summary["skill_pool"]) == {
-        "graph_input_sha256",
-        "package_sha256",
-    }
-    assert all(len(value) == 64 for value in summary["skill_pool"].values())
+    assert all(len(value) == 64 for value in manifest["page_hashes"].values())
 
 
 def test_fixture_build_recovers_operational_chains_without_similarity_noise(tmp_path) -> None:
@@ -337,30 +302,6 @@ def test_rebuild_rejects_corrupted_embedding_store_instead_of_deleting_it(tmp_pa
         _build(workspace)
 
     assert store.read_text(encoding="utf-8") == "not-json\n"
-
-
-def test_build_summary_excludes_usage_from_previous_builds(tmp_path) -> None:
-    workspace = tmp_path / ".skillfabric"
-    usage_path = workspace / "reports" / "llm_usage.jsonl"
-    tracker = LLMUsageTracker(usage_path)
-    tracker.record_completion(
-        model="gpt-5.4-mini",
-        messages=[{"role": "user", "content": "old build"}],
-        response={
-            "choices": [{"message": {"content": "done"}}],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
-        },
-        operation="graph.contract_extraction",
-        duration_ms=1,
-        status="completed",
-        metadata={"build_id": "old-build"},
-    )
-
-    _build(workspace)
-
-    summary = json.loads((workspace / "reports" / "build_summary.json").read_text(encoding="utf-8"))
-    assert summary["llm_usage"]["total_calls"] == 0
-    assert summary["llm_usage"]["total_tokens"] == 0
 
 
 def test_rebuild_replaces_existing_status_without_a_version_gate(tmp_path) -> None:

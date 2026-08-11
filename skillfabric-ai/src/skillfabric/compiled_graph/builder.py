@@ -34,12 +34,10 @@ from skillfabric.compiled_graph.semantic.validation import (
 from skillfabric.indexing.bm25 import build_bm25_index
 from skillfabric.indexing.embeddings import EmbeddingProvider, default_embedding_provider
 from skillfabric.registry.models import SkillNode
-from skillfabric.registry.provenance import skill_pool_provenance
 from skillfabric.registry.scanner import scan_and_parse
 from skillfabric.runtime.jobs import LLMJobOptions
-from skillfabric.runtime.llm import LLMConfig, llm_usage_context
-from skillfabric.runtime.usage import load_usage_records, summarize_usage
-from skillfabric.storage import Workspace, atomic_write_text
+from skillfabric.runtime.llm import LLMConfig
+from skillfabric.storage import Workspace
 
 
 @dataclass(slots=True)
@@ -74,21 +72,6 @@ class BuildResult:
     stats: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
-class _StageTimer:
-    started_at: float = field(default_factory=time.perf_counter)
-    last_mark: float = field(default_factory=time.perf_counter)
-    timings: dict[str, float] = field(default_factory=dict)
-
-    def mark(self, stage: str) -> None:
-        now = time.perf_counter()
-        self.timings[stage] = round(now - self.last_mark, 6)
-        self.last_mark = now
-
-    def total(self) -> float:
-        return round(time.perf_counter() - self.started_at, 6)
-
-
 def build_graph(
     config: BuildConfig,
     *,
@@ -99,10 +82,8 @@ def build_graph(
     deps = dependencies or _BuildDependencies()
     workspace = Workspace(config.workspace)
     workspace.ensure()
-    _prepare_usage_log(workspace)
     build_id = deps.build_id or str(time.time_ns())
     stage = "initialization"
-    timer = _StageTimer()
     lock_acquired = False
     resolved_llm_config: LLMConfig | None = None
 
@@ -117,13 +98,7 @@ def build_graph(
         return resolved_llm_config
 
     try:
-        with (
-            workspace.lock(),
-            llm_usage_context(
-                log_path=workspace.reports_dir / "llm_usage.jsonl",
-                metadata={"build_id": build_id},
-            ),
-        ):
+        with workspace.lock():
             lock_acquired = True
             contract_extractor = deps.contract_extractor or LiteLLMContractExtractor(
                 config=build_llm_config()
@@ -152,7 +127,6 @@ def build_graph(
             )
             if duplicate_ids:
                 raise ValueError(f"duplicate skill id(s): {', '.join(duplicate_ids)}")
-            timer.mark(stage)
 
             stage = "contracts"
             _write_running_status(workspace, build_id, stage=stage)
@@ -163,7 +137,6 @@ def build_graph(
                 job_options=job_options,
             )
             contracts = {record.contract.skill_id: record.contract for record in contract_records}
-            timer.mark(stage)
 
             stage = "indexes"
             _write_running_status(workspace, build_id, stage=stage)
@@ -181,7 +154,6 @@ def build_graph(
                 binary_store_path=workspace.graph_dir / "embeddings.json",
                 candidate_top_k=DEFAULT_CANDIDATE_TOP_K,
             )
-            timer.mark(stage)
 
             stage = "decisions"
             _write_running_status(workspace, build_id, stage=stage)
@@ -193,7 +165,6 @@ def build_graph(
                 cache_path=workspace.cache_dir / "relation_decisions.json",
                 job_options=job_options,
             )
-            timer.mark(stage)
 
             stage = "projection"
             _write_running_status(workspace, build_id, stage=stage)
@@ -202,14 +173,12 @@ def build_graph(
                 skills,
                 cycle_adjudicator=cycle_adjudicator,
             )
-            timer.mark(stage)
 
             stage = "artifacts"
             _write_running_status(workspace, build_id, stage=stage)
             edge_counts = Counter(edge.type for edge in projection.edges)
             stats = {
                 "skill_count": len(skills),
-                "skill_pool": skill_pool_provenance(config.skill_root, skills=skills),
                 "edge_count": len(projection.edges),
                 "edge_counts": {
                     "depend_on": edge_counts.get("depend_on", 0),
@@ -226,13 +195,6 @@ def build_graph(
                 "contract_cache_hits": sum(record.cache_hit for record in contract_records),
                 "relation_cache_hits": sum(decision.cache_hit for decision in decisions),
                 "cycle_review_count": projection.cycle_review_count,
-                "contract_model_id": contract_extractor.model_id,
-                "relation_model_id": relation_judge.model_id,
-                "builder": _builder_protocol(config, contract_extractor),
-                "llm_reliability": _llm_reliability_protocol(job_options),
-                "embedding": _embedding_protocol(embedding_provider, retrieval.metrics),
-                "stage_wall_time_seconds": timer.timings,
-                "build_wall_time_seconds": timer.total(),
             }
             _write_canonical_artifacts(
                 workspace,
@@ -240,16 +202,12 @@ def build_graph(
                 contracts=contracts,
                 decisions=projection.decisions,
             )
-            timer.mark(stage)
-            stats["stage_wall_time_seconds"] = timer.timings
-            stats["build_wall_time_seconds"] = timer.total()
             graph = GraphDocument(
                 build_id=build_id,
                 nodes=skills,
                 edges=list(projection.edges),
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
-            _write_build_summary(workspace, build_id, stats)
             _write_ready_status(
                 workspace,
                 graph=graph,
@@ -288,26 +246,6 @@ def _write_canonical_artifacts(
     workspace.write_jsonl(
         workspace.graph_dir / "relation_decisions.jsonl",
         [decision.to_dict() for decision in decisions],
-    )
-
-
-def _write_build_summary(
-    workspace: Workspace,
-    build_id: str,
-    stats: dict[str, Any],
-) -> None:
-    usage_path = workspace.reports_dir / "llm_usage.jsonl"
-    usage = summarize_usage(
-        load_usage_records(usage_path),
-        metadata={"build_id": build_id},
-    ).to_dict()
-    workspace.write_json(
-        workspace.reports_dir / "build_summary.json",
-        {
-            "build_id": build_id,
-            **stats,
-            "llm_usage": usage,
-        },
     )
 
 
@@ -373,12 +311,6 @@ def _safe_error(error: Exception, *, limit: int = 500) -> str:
     return text[:limit]
 
 
-def _prepare_usage_log(workspace: Workspace) -> None:
-    path = workspace.reports_dir / "llm_usage.jsonl"
-    if not path.exists():
-        atomic_write_text(path, "")
-
-
 def _resolve_cycle_adjudicator(
     deps: _BuildDependencies,
     relation_judge: RelationJudge,
@@ -388,37 +320,3 @@ def _resolve_cycle_adjudicator(
     if isinstance(relation_judge, LiteLLMRelationJudge):
         return LiteLLMCycleAdjudicator(config=relation_judge.config)
     return None
-
-
-def _builder_protocol(
-    config: BuildConfig,
-    contract_extractor: ContractExtractor,
-) -> dict[str, str | None]:
-    provider_model = contract_extractor.model_id
-    extractor_config = getattr(contract_extractor, "config", None)
-    return {
-        "model": provider_model.rsplit("/", 1)[-1],
-        "provider_model": provider_model,
-        "reasoning_effort": config.llm_reasoning_effort
-        or getattr(extractor_config, "reasoning_effort", None),
-    }
-
-
-def _embedding_protocol(
-    provider: EmbeddingProvider,
-    retrieval_metrics: dict[str, int | float | str],
-) -> dict[str, Any]:
-    return {
-        **retrieval_metrics,
-        "batch_size": getattr(provider, "batch_size", None),
-        "concurrency": getattr(provider, "concurrency", None),
-        "timeout_seconds": getattr(provider, "timeout", None),
-        "max_retries": getattr(provider, "max_retries", None),
-    }
-
-
-def _llm_reliability_protocol(options: LLMJobOptions) -> dict[str, int]:
-    return {
-        "checkpoint_interval": options.checkpoint_interval,
-        "circuit_breaker_threshold": options.circuit_breaker_threshold,
-    }
