@@ -11,7 +11,7 @@ import pytest
 from skillfabric.cli import PUBLIC_COMMANDS
 from skillfabric.cli import main as cli_main
 from skillfabric.router.models import RouteResult, RouteSelectedSkill
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import build_fixture_workspace
 
 
 def _route() -> RouteResult:

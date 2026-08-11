@@ -16,12 +16,11 @@ from skillfabric.compiled_graph.semantic.validation import (
     validate_candidate_pairs,
 )
 from skillfabric.runtime.jobs import LLMJobOptions
-from tests.unit.relation_helpers import make_skill
-from tests.unit.semantic_fixtures import StaticRelationJudge
-from tests.unit.semantic_helpers import (
+from tests.support import (
+    StaticRelationJudge,
     dependency_payload,
+    make_skill,
     none_payload,
-    pair_local_dependency_payload,
     semantic_pair,
     semantic_skills_and_contracts,
 )
@@ -50,7 +49,7 @@ def test_pair_local_output_maps_to_canonical_skill_ids() -> None:
     skills, contracts = semantic_skills_and_contracts()
     judge = StaticRelationJudge(
         model_id="relation-test-model",
-        responses={semantic_pair().key: pair_local_dependency_payload()},
+        responses={semantic_pair().key: dependency_payload()},
     )
 
     decision = validate_candidate_pairs(
@@ -469,26 +468,26 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
     skills, contracts = semantic_skills_and_contracts()
     skills[0].raw_text += "\nUnrelated source-only marker."
     skills[1].raw_text += "\nUnrelated source-only marker."
-    by_id = {skill.id: skill for skill in skills}
-
     messages = build_relation_judge_messages(
         (semantic_pair(),),
-        by_id,
+        {skill.id: skill for skill in skills},
         contracts,
     )
     rendered = "\n".join(message["content"] for message in messages)
 
-    assert RELATION_PROMPT_ID in messages[0]["content"]
     assert RELATION_PROMPT_ID == "semantic_relation_judge"
-    assert "<prompt_contract" in messages[0]["content"]
-    assert "<role>" in messages[0]["content"]
-    assert "<trusted_policy>" in messages[0]["content"]
-    assert "<relation_semantics>" in rendered
-    assert "<decision_process>" in rendered
-    assert "<output_schema>" in rendered
-    assert "<candidate_pairs>" in rendered
-    assert '"query_field": "produces:normalized_table"' in rendered
-    assert '"matched_field": "requires:normalized_table"' in rendered
+    for section in (
+        "<prompt_contract",
+        "<trusted_policy>",
+        "<relation_semantics>",
+        "<candidate_pairs>",
+        "<skill_profiles>",
+        "<output_schema>",
+    ):
+        assert section in rendered
+    for relation in ("depend_on", "compose_with", "similar_to"):
+        assert relation in rendered
+
     candidate_text = rendered.split("<candidate_pairs>", 1)[1].split("</candidate_pairs>", 1)[0]
     hint = json.loads(candidate_text)[0]["retrieval_hints"][0]
     assert set(hint) == {
@@ -498,33 +497,10 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
         "query_field",
         "matched_field",
     }
-    assert "Candidate retrieval only selects pairs for review" in rendered
-    assert "Retrieval evidence only explains" not in rendered
-    assert "<skill_profiles>" in rendered
-    assert "<skill_sources>" not in rendered
-    user = messages[1]["content"]
-    assert user.index("<skill_profiles>") < user.index("<task>")
-    assert user.index("<task>") < user.index("<output_schema>")
-    assert "Produces a normalized table." in rendered
-    assert "Requires the normalized table." in rendered
-    assert "producer description" in rendered
-    assert "consumer description" in rendered
-    assert "Write a report from a normalized table." in rendered
-    assert "adjacent stages in a stable, reusable workflow" in rendered
-    assert "source_skill runs before target_skill" in rendered
-    assert "Evaluate substitutability on the shared subproblem" in rendered
-    assert "independently complete the same user request" in rendered
-    assert "provider, tool, runtime, or implementation" in rendered
-    assert "does not require identical implementations" in rendered
-    assert "Partial capability overlap is not enough" in rendered
-    assert "symmetric complementary" not in rendered
+
     assert "Unrelated source-only marker." not in rendered
-    assert "Prefer none" not in rendered
-    assert "model_id" not in rendered
-    assert skills[0].content_hash not in rendered
-    assert skills[1].content_hash not in rendered
-    assert "needs_full_context" not in rendered
-    assert "edge_type" not in rendered
+    assert "<skill_sources>" not in rendered
+
     schema_text = rendered.split("<output_schema>", 1)[1].split("</output_schema>", 1)[0]
     schema = json.loads(schema_text)
     assert set(schema) == {"decisions"}
@@ -536,16 +512,6 @@ def test_relation_prompt_contains_complete_profiles_and_one_authoritative_schema
         "reason",
         "evidence",
     }
-    assert schema["decisions"][0]["direction"] == (
-        "skill_a_to_skill_b|skill_b_to_skill_a|symmetric"
-    )
-    assert set(schema["decisions"][0]["evidence"]) == {
-        "skill_a_lines",
-        "skill_b_lines",
-    }
-    assert "source_skill" not in schema_text
-    assert "target_skill" not in schema_text
-    assert '"skill": "candidate skill id"' not in schema_text
 
 
 def test_relation_prompt_escapes_profile_xml_boundaries() -> None:

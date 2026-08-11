@@ -1,6 +1,6 @@
 <div align="center">
 
-# SkillNet-Fabric
+# SkillFabric
 
 **Compile native agent skills into an evidence-grounded graph, select the right skills for each task, and produce one execution-ready prompt.**
 
@@ -15,11 +15,11 @@
 
 ---
 
-## Why SkillNet-Fabric?
+## Why SkillFabric?
 
 Large skill collections create two practical problems for agents: the model cannot read every skill for every task, and file-level similarity alone does not explain how skills work together.
 
-SkillNet-Fabric turns a local collection of native `SKILL.md` files into a reusable orchestration substrate:
+SkillFabric turns a local collection of native `SKILL.md` files into a reusable orchestration substrate:
 
 - **Source-grounded compilation:** extract a strict contract from every skill and retain evidence for every accepted relationship.
 - **Semantic skill graph:** distinguish prerequisites, useful compositions, close alternatives, and unrelated pairs.
@@ -28,7 +28,7 @@ SkillNet-Fabric turns a local collection of native `SKILL.md` files into a reusa
 - **Constraint-preserving planning:** give the planner the selected contracts and complete skill sources, then combine its complete execution plan with the original task in one validated `execution_prompt.md`.
 - **Explicit failure:** malformed model output, incompatible artifacts, missing credentials, and context overflow stop the workflow instead of silently generating a fallback.
 
-The repository is named **SkillNet-Fabric**. Its installable Python package remains `skillfabric-ai`, and its CLI command remains `skillfabric`.
+The project is named **SkillFabric**. Its installable Python package is `skillfabric-ai`, and its CLI command is `skillfabric`.
 
 ---
 
@@ -46,8 +46,8 @@ The repository is named **SkillNet-Fabric**. Its installable Python package rema
 From the repository:
 
 ```bash
-git clone https://github.com/zjunlp/SkillNet-Fabric.git
-cd SkillNet-Fabric/skillfabric-ai
+git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
+cd SkillFabric/skillfabric-ai
 python -m pip install -e ".[claude]"
 ```
 
@@ -164,7 +164,7 @@ The planner receives:
 - each selected `SkillContract`, and
 - the complete source of every selected skill.
 
-It produces a complete task-specific execution plan. SkillNet-Fabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
+It produces a complete task-specific execution plan. SkillFabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
 
 Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default, and only the accepted response is committed to `llm_usage.jsonl`.
 
@@ -245,7 +245,7 @@ The bundled plugin provides four user-facing commands:
 Load the plugin directly from a clone:
 
 ```bash
-claude --plugin-dir /path/to/SkillNet-Fabric/plugins/claude-code/skillfabric
+claude --plugin-dir /path/to/SkillFabric/plugins/claude-code/skillfabric
 ```
 
 Then run:
@@ -260,7 +260,7 @@ For a user-level installation:
 
 ```bash
 mkdir -p ~/.claude/skills
-cp -R /path/to/SkillNet-Fabric/plugins/claude-code/skillfabric \
+cp -R /path/to/SkillFabric/plugins/claude-code/skillfabric \
   ~/.claude/skills/skillfabric
 claude plugin validate --strict ~/.claude/skills/skillfabric
 claude plugin list --json
@@ -326,7 +326,7 @@ Project-specific LLM aliases such as `SKILLFABRIC_LLM_API_KEY`, `SKILLFABRIC_LLM
 
 ## Workspace Artifacts
 
-SkillNet-Fabric writes generated state under the configured workspace:
+SkillFabric writes generated state under the configured workspace:
 
 ```text
 .skillfabric/
@@ -361,7 +361,7 @@ Artifacts use exact validated fields. Rebuild a workspace when canonical artifac
 ## Repository Layout
 
 ```text
-SkillNet-Fabric/
+SkillFabric/
 ├── skillfabric-ai/                  # Python package, CLI, and tests
 ├── plugins/claude-code/skillfabric/ # Claude Code plugin
 ├── README.md
@@ -373,8 +373,8 @@ SkillNet-Fabric/
 ## Development
 
 ```bash
-git clone https://github.com/zjunlp/SkillNet-Fabric.git
-cd SkillNet-Fabric/skillfabric-ai
+git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
+cd SkillFabric/skillfabric-ai
 python -m pip install -e ".[dev,claude]"
 
 python -m compileall -q src tests
@@ -384,12 +384,13 @@ python -m ruff format --check src tests
 python -m build
 ```
 
-Deterministic unit tests do not require real model calls. Real API and Claude SDK checks are opt-in and should use a small disposable skill corpus.
+The published test suite is deterministic and does not invoke real model or SDK services.
+Validate provider integrations separately in a controlled environment with a disposable skill corpus.
 
 The suite covers native skill parsing, contract extraction, semantic projection, graph validation,
 hybrid retrieval, all three relation types, query-wiki generation, explorer package validation,
 planner finalization, public CLI and Python APIs, artifact caching, usage accounting, plugin
-behavior, and secret handling. Real SDK checks are gated and skipped during normal test runs.
+behavior, and secret handling.
 
 Contributions should keep public interfaces stable, include focused tests, and avoid committing credentials, generated workspaces, or run artifacts.
 
@@ -397,4 +398,4 @@ Contributions should keep public interfaces stable, include focused tests, and a
 
 ## License
 
-SkillNet-Fabric is released under the [MIT License](LICENSE).
+SkillFabric is released under the [MIT License](LICENSE).

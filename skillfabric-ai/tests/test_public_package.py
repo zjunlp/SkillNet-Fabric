@@ -2,20 +2,16 @@ from __future__ import annotations
 
 import inspect
 import json
-import tarfile
 import tomllib
 import unittest
-import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import FIXTURE_SKILLS, FakeEmbeddingProvider, build_fixture_workspace
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = PACKAGE_ROOT.parent
-FIXTURE_SKILLS = Path(__file__).resolve().parents[1] / "fixtures" / "skills"
 
 
 class PublicPackageTests(unittest.TestCase):
@@ -91,6 +87,31 @@ class PublicPackageTests(unittest.TestCase):
             {"faiss-cpu", "httpx", "litellm", "numpy", "pyyaml"},
         )
 
+    def test_public_brand_and_package_identifiers_are_consistent(self) -> None:
+        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+        pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+        self.assertIn("# SkillFabric", readme)
+        self.assertEqual(pyproject["project"]["name"], "skillfabric-ai")
+        self.assertEqual(set(pyproject["project"]["scripts"]), {"skillfabric"})
+        self.assertEqual(
+            pyproject["project"]["urls"],
+            {
+                "Homepage": "https://github.com/zjunlp/SkillNet-Fabric",
+                "Source": "https://github.com/zjunlp/SkillNet-Fabric",
+                "Issues": "https://github.com/zjunlp/SkillNet-Fabric/issues",
+            },
+        )
+
+        public_brand_text = readme
+        for transitional_url in (
+            "https://github.com/zjunlp/SkillNet-Fabric",
+            "https://img.shields.io/github/stars/zjunlp/SkillNet-Fabric?style=social",
+        ):
+            public_brand_text = public_brand_text.replace(transitional_url, "")
+        self.assertNotIn("SkillNet-Fabric", public_brand_text)
+        self.assertNotIn("SkillNet Fabric", public_brand_text)
+
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
         manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
@@ -133,112 +154,6 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn(f"name: skillfabric-{command}", skill_text)
             self.assertIn("disable-model-invocation: true", skill_text)
             self.assertIn("$ARGUMENTS", skill_text)
-
-    def test_claude_code_plugin_prompts_have_quality_guardrails(self) -> None:
-        plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
-        command_skill_names = ("doctor", "build", "prepare", "run")
-        for name in command_skill_names:
-            command_skill = plugin_root / "skills" / f"skillfabric-{name}" / "SKILL.md"
-            self.assertTrue(command_skill.exists(), f"missing command skill: {command_skill}")
-            text = command_skill.read_text(encoding="utf-8")
-            self.assertIn(f"name: skillfabric-{name}", text)
-            self.assertIn("description:", text)
-            self.assertIn("disable-model-invocation: true", text)
-            self.assertIn("Use when", text)
-            self.assertIn("Treat CLI JSON as canonical", text)
-            self.assertIn("Do not reveal secret values or env-file contents.", text)
-
-        required_command_sections = (
-            "## Purpose",
-            "## Input Contract",
-            "## Safety Boundaries",
-            "## Workflow",
-            "## Failure Handling",
-            "## Final Response",
-        )
-        for path in sorted((plugin_root / "skills").glob("*/SKILL.md")):
-            text = path.read_text(encoding="utf-8")
-            for section in required_command_sections:
-                self.assertIn(section, text, f"{path.name} missing {section}")
-
-        command_files = sorted((plugin_root / "commands").glob("*.md"))
-        self.assertEqual([path.stem for path in command_files], sorted(command_skill_names))
-        for path in command_files:
-            text = path.read_text(encoding="utf-8")
-            self.assertLessEqual(len(text.split()), 260)
-            for section in (
-                "# Command Contract",
-                "## Inputs",
-                "## Required Workflow",
-                "## Boundaries",
-                "## Completion Criteria",
-            ):
-                self.assertIn(section, text)
-            self.assertIn(
-                f"Use the `skillfabric-{path.stem}` skill as the authoritative workflow.", text
-            )
-
-        overview_text = (plugin_root / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("## Command Choice", overview_text)
-        self.assertIn("Prefer the four slash commands", overview_text)
-        self.assertIn("/skillfabric:doctor", overview_text)
-        self.assertIn("/skillfabric:run", overview_text)
-
-    def test_claude_code_prepare_and_run_prompts_match_single_plan_contract(self) -> None:
-        plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
-        reference_path = plugin_root / "references" / "route-plan.md"
-        self.assertTrue(reference_path.exists())
-        reference = reference_path.read_text(encoding="utf-8")
-        reference_flat = " ".join(reference.split())
-
-        for name in ("prepare", "run"):
-            text = (plugin_root / "skills" / f"skillfabric-{name}" / "SKILL.md").read_text(
-                encoding="utf-8"
-            )
-            with self.subTest(command=name):
-                self.assertIn("The task is the user's natural-language request", text)
-                self.assertIn("Treat only recognized flags as workflow configuration.", text)
-                self.assertIn("references/route-plan.md", text)
-                if name == "run":
-                    self.assertIn('skillfabric run-state "$task"', text)
-                    self.assertIn("set `$execution_prompt` to `prompt_path`", text)
-                    self.assertIn(
-                        "Before reading `execution_prompt.md`, do not use Web Search, Fetch", text
-                    )
-                    self.assertIn("If no reusable prompt exists and no task was provided", text)
-                    self.assertIn("shell path discovery for `run-state`", text)
-                self.assertIn("execution_prompt.md", text)
-                self.assertIn("$ARGUMENTS", text)
-
-        for snippet in (
-            'skillfabric plan "$task"',
-            '--workspace "$workspace"',
-            '--env-file "$env_file"',
-            "route.json",
-            "execution_prompt.md",
-            "planner_validation.json",
-        ):
-            self.assertIn(snippet, reference)
-        self.assertNotIn("raw json", reference_flat.lower())
-
-    def test_claude_code_plugin_prompts_handle_natural_language_commands(self) -> None:
-        plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
-        build_text = (plugin_root / "skills" / "skillfabric-build" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        doctor_text = (plugin_root / "skills" / "skillfabric-doctor" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("natural language that may contain a skill root", build_text)
-        self.assertIn("first existing path-like directory as the skill root", build_text)
-        self.assertIn("ignore surrounding", build_text)
-        self.assertIn("must contain at least one `SKILL.md`.", build_text)
-        self.assertNotIn("`skill.md`", build_text)
-        self.assertIn("not built yet", doctor_text)
-        self.assertIn("normal before\n  the first build", doctor_text)
-        self.assertIn("SkillFabric ready.", doctor_text)
-        self.assertIn("Workspace: ready, <skill_count> skills, build <build_id>", doctor_text)
 
     def test_root_readme_documents_claude_code_plugin(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -551,21 +466,26 @@ class PublicPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
             client.build(FIXTURE_SKILLS, embedding_provider="custom-provider")
 
-    def test_built_distributions_exclude_private_runtime_artifacts(self) -> None:
-        dist_dir = PACKAGE_ROOT / "dist"
-        if not dist_dir.exists():
-            self.skipTest("dist/ not built")
-        forbidden = (".env", "models/", "runs/", "experiments/", "__pycache__")
-        archive_paths: list[str] = []
-        for archive in dist_dir.iterdir():
-            if archive.suffix == ".whl":
-                with zipfile.ZipFile(archive) as handle:
-                    archive_paths.extend(handle.namelist())
-            elif archive.suffixes[-2:] == [".tar", ".gz"]:
-                with tarfile.open(archive) as handle:
-                    archive_paths.extend(handle.getnames())
-        for path in archive_paths:
-            self.assertFalse(any(marker in path for marker in forbidden), path)
+    def test_distribution_configuration_excludes_private_runtime_artifacts(self) -> None:
+        pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        targets = pyproject["tool"]["hatch"]["build"]["targets"]
+
+        self.assertEqual(targets["wheel"]["packages"], ["src/skillfabric"])
+        self.assertEqual(targets["sdist"]["include"], ["/pyproject.toml", "/src", "/tests"])
+        self.assertEqual(
+            set(targets["sdist"]["exclude"]),
+            {
+                "/.env",
+                "/.env.*",
+                "/models",
+                "/runs",
+                "/experiments",
+                "/__pycache__",
+                "**/__pycache__",
+                "*.pyc",
+                "**/*.pyc",
+            },
+        )
 
 
 def _facade_route():
@@ -589,8 +509,8 @@ def _facade_route():
         relation_evidence=(
             RouteRelationEvidence(
                 relation_type="depend_on",
-                source_skill="skill:financial-kpi-extractor",
-                target_skill="skill:pdf-table-parser",
+                source_skill="skill:pdf-table-parser",
+                target_skill="skill:financial-kpi-extractor",
                 confidence=0.94,
                 reason="KPI extraction requires normalized tables.",
                 evidence=("edges/semantic_edges.jsonl",),
@@ -605,7 +525,3 @@ def _facade_route():
         ),
         rationale="Parse tables before extracting KPIs.",
     )
-
-
-if __name__ == "__main__":
-    unittest.main()

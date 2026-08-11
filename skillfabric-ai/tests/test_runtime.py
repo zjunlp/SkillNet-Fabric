@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
 import types
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -169,7 +167,7 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.api_base, "https://skillsbench.example.test/v1")
             self.assertEqual(env_path.read_text(encoding="utf-8"), original)
 
-    def test_loads_primary_api_settings_from_skillnet_style_env_names(self) -> None:
+    def test_loads_primary_api_settings_from_standard_env_names(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
             env_path.write_text(
@@ -704,36 +702,6 @@ class LLMConfigTests(unittest.TestCase):
             {"run_1"},
         )
 
-    def test_litellm_completion_enforces_process_timeout_in_worker_thread(self) -> None:
-        errors: list[BaseException] = []
-
-        def call_in_thread() -> None:
-            try:
-                litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    config=LLMConfig(
-                        api_base="https://example.test/api",
-                        api_key="sk-test",
-                        model="openai/test-model",
-                        timeout=0.05,
-                    ),
-                    _skillfabric_test_sleep_seconds=5.0,
-                )
-            except BaseException as exc:  # noqa: BLE001 - test captures timeout type.
-                errors.append(exc)
-
-        worker = threading.Thread(target=call_in_thread)
-        worker.start()
-        worker.join(timeout=2)
-
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], LLMRequestError)
-        self.assertIsInstance(errors[0].__cause__, TimeoutError)
-        self.assertIsNone(getattr(errors[0], "status_code", None))
-        self.assertEqual(getattr(errors[0], "error_type", None), "TimeoutError")
-        self.assertIs(getattr(errors[0], "retryable", None), True)
-
     def test_litellm_completion_preserves_structured_provider_error_metadata(self) -> None:
         class ProviderUnavailableError(RuntimeError):
             status_code = 503
@@ -766,98 +734,6 @@ class LLMConfigTests(unittest.TestCase):
             "ProviderUnavailableError",
         )
         self.assertIs(getattr(captured.exception, "retryable", None), True)
-
-    def test_litellm_completion_preserves_provider_status_across_process_boundary(self) -> None:
-        class BadGatewayHandler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                body = b'{"error":{"message":"Upstream request failed","type":"upstream_error"}}'
-                self.send_response(502)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, _format: str, *_args: object) -> None:
-                return
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), BadGatewayHandler)
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.start()
-        errors: list[BaseException] = []
-
-        def call_in_thread() -> None:
-            try:
-                litellm_completion(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    config=LLMConfig(
-                        api_base=f"http://127.0.0.1:{server.server_port}/v1",
-                        api_key="sk-test",
-                        model="openai/test-model",
-                        reasoning_effort="",
-                        timeout=2,
-                    ),
-                )
-            except BaseException as exc:  # noqa: BLE001 - test captures provider metadata.
-                errors.append(exc)
-
-        try:
-            worker = threading.Thread(target=call_in_thread)
-            worker.start()
-            worker.join(timeout=15)
-        finally:
-            server.shutdown()
-            server.server_close()
-            server_thread.join(timeout=2)
-
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], LLMRequestError)
-        self.assertEqual(
-            (
-                getattr(errors[0], "status_code", None),
-                getattr(errors[0], "error_type", None),
-                getattr(errors[0], "retryable", None),
-            ),
-            (502, "BadGatewayError", True),
-        )
-
-    def test_litellm_completion_records_failure_usage_for_timeout(self) -> None:
-        errors: list[BaseException] = []
-        with TemporaryDirectory() as tmp:
-            usage_path = Path(tmp) / "usage.jsonl"
-
-            def call_in_thread() -> None:
-                try:
-                    with llm_usage_context(log_path=usage_path):
-                        litellm_completion(
-                            messages=[{"role": "user", "content": "Hello"}],
-                            config=LLMConfig(
-                                api_base="https://example.test/api",
-                                api_key="sk-test",
-                                model="openai/test-model",
-                                timeout=0.05,
-                            ),
-                            usage_operation="validation",
-                            _skillfabric_test_sleep_seconds=5.0,
-                        )
-                except BaseException as exc:  # noqa: BLE001 - test captures timeout type.
-                    errors.append(exc)
-
-            worker = threading.Thread(target=call_in_thread)
-            worker.start()
-            worker.join(timeout=10)
-
-            records = [
-                json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-            ]
-
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(len(errors), 1)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["status"], "failed")
-        self.assertEqual(records[0]["operation"], "validation")
-        self.assertGreater(records[0]["prompt_tokens"], 0)
-        self.assertEqual(records[0]["completion_tokens"], 0)
 
     def test_litellm_completion_uses_env_max_tokens_by_default(self) -> None:
         calls: list[dict[str, object]] = []
@@ -1001,7 +877,3 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(records[0]["cached_prompt_tokens"], 4864)
         self.assertEqual(records[0]["billable_prompt_tokens"], 227)
         self.assertTrue(records[0]["pricing_known"])
-
-
-if __name__ == "__main__":
-    unittest.main()

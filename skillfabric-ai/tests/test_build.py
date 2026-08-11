@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -12,18 +13,17 @@ from skillfabric.compiled_graph.builder import (
     build_graph,
 )
 from skillfabric.compiled_graph.semantic.candidates import CandidateRetrievalError
+from skillfabric.indexing.embeddings import DEFAULT_EMBEDDING_MODEL_ID, ApiEmbeddingProvider
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.usage import LLMUsageTracker
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.semantic_fixtures import (
+from tests.support import (
+    FIXTURE_SKILLS,
+    FakeEmbeddingProvider,
     FixtureContractExtractor,
     FixtureRelationJudge,
     StaticContractExtractor,
     StaticRelationJudge,
 )
-
-ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_SKILLS = ROOT / "fixtures" / "skills"
 
 
 def _build(workspace: Path, *, contracts=None, judge=None):
@@ -73,6 +73,83 @@ class FormalFakeEmbeddingProvider(FakeEmbeddingProvider):
 
     def __init__(self) -> None:
         super().__init__(dimension=1024)
+
+
+def test_api_embedding_provider_forwards_request_configuration() -> None:
+    provider = ApiEmbeddingProvider(
+        dimension=2,
+        api_key="embedding-key",
+        api_base="https://embedding.example/v1",
+        timeout=17,
+        max_retries=4,
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_embedding(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        return {"data": [{"embedding": [0.25, 0.75]}]}
+
+    fake_litellm = type("FakeLiteLLM", (), {"embedding": staticmethod(fake_embedding)})
+    with patch.dict("sys.modules", {"litellm": fake_litellm}):
+        vector = provider.embed("find pdf table parser")
+
+    assert vector == [0.25, 0.75]
+    assert calls == [
+        {
+            "model": DEFAULT_EMBEDDING_MODEL_ID,
+            "input": ["find pdf table parser"],
+            "timeout": 17,
+            "request_timeout": 17,
+            "max_retries": 4,
+            "api_key": "embedding-key",
+            "api_base": "https://embedding.example/v1",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("vector", "dimension", "message"),
+    [
+        ([0.2, 0.8], 3, "dimension"),
+        ([0.0, 0.0], 2, "finite and non-zero"),
+        ([float("nan"), 1.0], 2, "finite and non-zero"),
+    ],
+)
+def test_api_embedding_provider_rejects_invalid_vectors(
+    vector: list[float],
+    dimension: int,
+    message: str,
+) -> None:
+    provider = ApiEmbeddingProvider(dimension=dimension)
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {"embedding": staticmethod(lambda **_kwargs: {"data": [{"embedding": vector}]})},
+    )
+
+    with (
+        patch.dict("sys.modules", {"litellm": fake_litellm}),
+        pytest.raises(RuntimeError, match=message),
+    ):
+        provider.embed("invalid vector")
+
+
+def test_api_embedding_provider_prefers_embedding_specific_config(tmp_path) -> None:
+    env_path = tmp_path / ".env.test"
+    env_path.write_text(
+        "API_KEY=shared-key\n"
+        "BASE_URL=https://shared.example/v1\n"
+        "EMBEDDING_API_KEY=embedding-key\n"
+        "EMBEDDING_BASE_URL=https://embedding.example/v1\n"
+        "EMBEDDING_MODEL=openai/custom-embedding\n",
+        encoding="utf-8",
+    )
+
+    provider = ApiEmbeddingProvider.from_env(env_path=env_path)
+
+    assert provider.api_key == "embedding-key"
+    assert provider.api_base == "https://embedding.example/v1"
+    assert provider.model_id == "openai/custom-embedding"
 
 
 def test_build_summary_publishes_builder_and_embedding_protocol(tmp_path) -> None:

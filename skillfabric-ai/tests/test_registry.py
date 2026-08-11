@@ -6,8 +6,7 @@ from skillfabric.compiled_graph.models import Edge, GraphDocument
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root
-
-FIXTURE_SKILLS = pytest.importorskip("tests.unit.wiki_helpers").FIXTURE_SKILLS
+from tests.support import FIXTURE_SKILLS
 
 
 def test_parser_uses_frontmatter_and_keeps_source_out_of_canonical_node() -> None:

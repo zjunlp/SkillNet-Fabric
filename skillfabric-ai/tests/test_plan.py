@@ -21,7 +21,7 @@ from skillfabric.router.models import (
 )
 from skillfabric.runtime.llm import LLMRequestError
 from skillfabric.runtime.usage import load_usage_records
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import build_fixture_workspace
 
 
 @pytest.fixture(autouse=True)

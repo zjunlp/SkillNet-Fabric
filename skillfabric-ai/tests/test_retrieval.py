@@ -11,9 +11,7 @@ from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.expansion import ExpansionResult, expand_semantic_candidates
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
 from skillfabric.wiki.loader import WikiSource
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.relation_helpers import make_skill
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import FakeEmbeddingProvider, build_fixture_workspace, make_skill
 
 
 def _edge(source: str, target: str, edge_type: str, confidence: float = 0.9) -> Edge:

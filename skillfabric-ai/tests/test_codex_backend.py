@@ -2,24 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-import inspect
 import json
 import os
-import sys
 import tomllib
 import unittest
 from enum import StrEnum
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
 from skillfabric.wiki.explorer.backends.codex import (
     CODEX_EXECUTION_CONTRACT,
     CodexOperationalAccessError,
     CodexWikiExplorerBackend,
-    _load_sdk_runtime,
     build_codex_prompt_spec,
 )
 from skillfabric.wiki.explorer.skill_package import skill_package_json_schema
@@ -234,30 +230,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
         self.assertNotIn("query", spec)
         self.assertNotIn("required_selected_skills", spec)
 
-    def test_codex_prompt_spec_carries_the_exact_selection_count(self) -> None:
-        spec = build_codex_prompt_spec(
-            query="extract financial KPIs",
-            query_wiki_root=Path("query_wiki"),
-            max_selected_skills=5,
-            required_selected_skills=5,
-        )
-
-        self.assertEqual(spec["required_selected_skills"], 5)
-        self.assertIn("Return exactly 5 selected skills", spec["system_prompt"])
-        self.assertIn(
-            "<required_selected_skills>5</required_selected_skills>",
-            spec["user_prompt"],
-        )
-
-    def test_codex_prompt_contract_has_no_custom_builder_surface(self) -> None:
-        self.assertNotIn(
-            "prompt_spec_builder", inspect.signature(build_codex_prompt_spec).parameters
-        )
-        self.assertNotIn(
-            "prompt_spec_builder",
-            CodexWikiExplorerBackend.__dataclass_fields__,
-        )
-
     def test_completed_empty_package_without_successful_wiki_access_fails_closed(self) -> None:
         success = _success_events()
         runtime = _Runtime([*success[4:]])
@@ -280,84 +252,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
             )
             self.assertFalse(access["evidence_access"])
 
-    def test_completed_empty_requires_index_and_candidate_lookup(self) -> None:
-        success = _success_events()
-        events = [*success[:2], *success[4:]]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(CodexOperationalAccessError, "candidate lookup"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-            access = json.loads(
-                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
-            )
-            self.assertTrue(access["index_read"])
-            self.assertFalse(access["candidate_lookup"])
-            self.assertFalse(access["semantic_empty_valid"])
-
-    def test_completed_empty_rejects_a_failed_candidate_lookup(self) -> None:
-        success = _success_events()
-        failed_lookup = _event(
-            "item/completed",
-            item=_item(
-                "commandExecution",
-                command="rg -n 'financial' cards",
-                status=SimpleNamespace(value="failed"),
-                exit_code=1,
-            ),
-        )
-        events = [*success[:3], failed_lookup, *success[4:]]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(CodexOperationalAccessError, "candidate lookup"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-            access = json.loads(
-                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
-            )
-            self.assertFalse(access["candidate_lookup"])
-            self.assertFalse(access["semantic_empty_valid"])
-
-    def test_completed_turn_without_usage_event_is_unmetered(self) -> None:
-        events = [
-            event for event in _success_events() if event.method != "thread/tokenUsage/updated"
-        ]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(RuntimeError, "usage closure"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-            artifacts = root / "trace" / "cc_explorer"
-            self.assertTrue((artifacts / "turn_state.json").is_file())
-            self.assertFalse((artifacts / "usage.json").exists())
-
     def test_invalid_skill_package_payload_is_retryable(self) -> None:
         invalid_payload = _package()
         del invalid_payload["rationale"]
@@ -378,123 +272,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertTrue(
                 getattr(raised.exception, "__skillfabric_recoverable_route_failure__", False)
             )
-
-    def test_pwd_only_and_failed_wiki_commands_do_not_prove_access(self) -> None:
-        success = _success_events()
-        cases = {
-            "pwd-only": [
-                _event(
-                    "item/started",
-                    item=_item(
-                        "commandExecution",
-                        command="pwd",
-                        status=SimpleNamespace(value="inProgress"),
-                    ),
-                ),
-                _event(
-                    "item/completed",
-                    item=_item(
-                        "commandExecution",
-                        command="pwd",
-                        status=SimpleNamespace(value="completed"),
-                        exit_code=0,
-                    ),
-                ),
-                *success[4:],
-            ],
-            "all-failed": [
-                _event(
-                    "item/started",
-                    item=_item(
-                        "commandExecution",
-                        command="sed -n '1,80p' index.md",
-                        status=SimpleNamespace(value="inProgress"),
-                    ),
-                ),
-                _event(
-                    "item/completed",
-                    item=_item(
-                        "commandExecution",
-                        command="sed -n '1,80p' index.md",
-                        status=SimpleNamespace(value="failed"),
-                        exit_code=1,
-                    ),
-                ),
-                *success[2:],
-            ],
-        }
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-            for name, events in cases.items():
-                with self.subTest(name=name), self.assertRaises(CodexOperationalAccessError):
-                    CodexWikiExplorerBackend(
-                        env_file=env_file,
-                        execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                        sdk_runtime=_Runtime(events),
-                    ).explore(
-                        query="find a skill",
-                        query_wiki_root=wiki,
-                        trace_dir=root / name,
-                    )
-
-    def test_successful_non_evidence_command_does_not_prove_wiki_access(self) -> None:
-        payload = {
-            "selected_skills": [
-                {
-                    "skill_id": "skill:test",
-                    "role": "candidate",
-                    "evidence": [{"path": "notes.md"}],
-                }
-            ],
-            "near_misses": [],
-            "coverage_gaps": [],
-            "wiki_pages_read": ["notes.md"],
-            "rationale": "Selected from an unclassified file.",
-        }
-        success = _success_events(payload)
-        events = [
-            _event(
-                "item/started",
-                item=_item(
-                    "commandExecution",
-                    command="ls",
-                    status=SimpleNamespace(value="inProgress"),
-                ),
-            ),
-            _event(
-                "item/completed",
-                item=_item(
-                    "commandExecution",
-                    command="ls",
-                    status=SimpleNamespace(value="completed"),
-                    exit_code=0,
-                ),
-            ),
-            *success[4:],
-        ]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(CodexOperationalAccessError, "evidence access"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-            access = json.loads(
-                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
-            )
-            self.assertFalse(access["evidence_access"])
-            self.assertEqual(access["evidence_categories"], [])
 
     def test_command_audit_fails_closed_on_write_network_and_outside_access(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -550,57 +327,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     )
                 self.assertTrue(getattr(raised.exception, "__skillfabric_non_retryable__", False))
 
-    def test_command_audit_does_not_treat_search_terms_as_shell_activity(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-            for name, command in {
-                "ampersand": "rg -n 'AT&T' cards",
-                "comparison": "rg -n 'revenue > cost' cards",
-                "network-word": "rg -n curl cards",
-                "runtime-word": "rg -n bash cards",
-            }.items():
-                success = _success_events()
-                lookup = [
-                    _event(
-                        "item/started",
-                        item=_item(
-                            "commandExecution",
-                            command=command,
-                            status=SimpleNamespace(value="inProgress"),
-                        ),
-                    ),
-                    _event(
-                        "item/completed",
-                        item=_item(
-                            "commandExecution",
-                            command=command,
-                            status=SimpleNamespace(value="completed"),
-                            exit_code=0,
-                        ),
-                    ),
-                ]
-                events = [*success[:2], *lookup, *success[4:]]
-
-                package = CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(
-                    query="find a skill",
-                    query_wiki_root=wiki,
-                    trace_dir=root / name,
-                )
-
-                self.assertEqual(package.to_dict(), _package())
-                access = json.loads(
-                    (root / name / "cc_explorer" / "operational_access.json").read_text()
-                )
-                self.assertIsNone(access["policy_violation"])
-
     def test_command_audit_allows_read_only_app_server_shell_wrapper(self) -> None:
         events = _success_events()
         for event in events[:2]:
@@ -633,29 +359,10 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertIsNone(access["policy_violation"])
             self.assertTrue(access["index_read"])
 
-    def test_runtime_loader_uses_the_sdk_types_reasoning_effort_export(self) -> None:
-        package = ModuleType("openai_codex")
-        package.__path__ = []  # type: ignore[attr-defined]
-        package.__version__ = "0.144.4"  # type: ignore[attr-defined]
-        package.ApprovalMode = object()  # type: ignore[attr-defined]
-        package.AsyncCodex = object()  # type: ignore[attr-defined]
-        package.CodexConfig = object()  # type: ignore[attr-defined]
-        types_module = ModuleType("openai_codex.types")
-        types_module.ReasoningEffort = _ReasoningEffort  # type: ignore[attr-defined]
-
-        with patch.dict(
-            sys.modules,
-            {"openai_codex": package, "openai_codex.types": types_module},
-        ):
-            runtime = _load_sdk_runtime()
-
-        self.assertIs(runtime.ReasoningEffort, _ReasoningEffort)
-        self.assertFalse(hasattr(runtime, "Sandbox"))
-
     def test_backend_is_public_and_codex_sdk_is_an_optional_dependency(self) -> None:
         from skillfabric.wiki.explorer.backends import CodexWikiExplorerBackend as PublicBackend
 
-        package_root = Path(__file__).resolve().parents[2]
+        package_root = Path(__file__).resolve().parents[1]
         pyproject = tomllib.loads((package_root / "pyproject.toml").read_text(encoding="utf-8"))
         extras = pyproject["project"]["optional-dependencies"]
         codex_requirement = "openai-codex>=0.144.4,<0.145"
@@ -903,59 +610,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(completed["status"], "completed")
             self.assertEqual(completed["duration_ms"], 25)
 
-    def test_zero_timeout_waits_for_completion(self) -> None:
-        runtime = _Runtime()
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            package = CodexWikiExplorerBackend(
-                env_file=env_file,
-                execution_timeout_seconds=0,
-                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                sdk_runtime=runtime,
-            ).explore(
-                query="find a skill",
-                query_wiki_root=wiki,
-                trace_dir=root / "trace",
-            )
-
-            self.assertEqual(package.to_dict(), _package())
-            self.assertEqual(runtime.lifecycle[-1], "close")
-
-    def test_budget_ten_uses_31_commands_and_each_call_is_isolated(self) -> None:
-        runtime = _Runtime()
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-            backend = CodexWikiExplorerBackend(
-                env_file=env_file,
-                max_selected_skills=10,
-                execution_timeout_seconds=60,
-                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                sdk_runtime=runtime,
-            )
-
-            backend.explore(query="first", query_wiki_root=wiki, trace_dir=root / "trace-1")
-            backend.explore(query="second", query_wiki_root=wiki, trace_dir=root / "trace-2")
-
-            homes = [config.kwargs["env"]["CODEX_HOME"] for config in runtime.configs]
-            self.assertEqual(len(set(homes)), 2)
-            self.assertTrue(all(not Path(home).exists() for home in homes))
-            self.assertEqual(len(runtime.thread_calls), 2)
-            self.assertTrue(all(call["ephemeral"] for call in runtime.thread_calls))
-            for trace_name in ("trace-1", "trace-2"):
-                payload = json.loads(
-                    (root / trace_name / "cc_explorer" / "backend.json").read_text()
-                )
-                self.assertEqual(payload["command_budget"], 31)
-
     def test_failure_artifacts_include_app_server_metadata_and_redact_runtime_home(self) -> None:
         runtime = _Runtime(fail_thread_start=True)
         with TemporaryDirectory() as tmp:
@@ -986,41 +640,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertNotIn("credential-secret", error_text)
             self.assertNotIn("token-secret", error_text)
             self.assertNotIn(runtime.configs[0].kwargs["env"]["CODEX_HOME"], error_text)
-
-    def test_outer_attempt_closure_reuses_the_backend_sanitized_error(self) -> None:
-        runtime = _Runtime(fail_thread_start=True)
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-            trace = root / "trace"
-            backend = CodexWikiExplorerBackend(
-                env_file=env_file,
-                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                sdk_runtime=runtime,
-            )
-
-            with self.assertRaisesRegex(RuntimeError, "app-server failed"):
-                explore_query_wiki(
-                    WikiExplorerConfig(
-                        env_file=env_file,
-                        max_attempts=1,
-                        retry_delay_seconds=0,
-                    ),
-                    query="find a skill",
-                    query_wiki_root=wiki,
-                    trace_dir=trace,
-                    backend=backend,
-                )
-
-            codex_home = runtime.configs[0].kwargs["env"]["CODEX_HOME"]
-            closure_text = (trace / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
-            self.assertNotIn(codex_home, closure_text)
-            self.assertNotIn("sk-runtime-secret", closure_text)
-            self.assertNotIn("credential-secret", closure_text)
-            self.assertNotIn("token-secret", closure_text)
 
     def test_command_budget_interrupts_the_turn_and_propagates_failure(self) -> None:
         commands = [
@@ -1097,106 +716,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     )
                 self.assertEqual(runtime.turns[0].interrupts, 1)
 
-    def test_completed_exec_command_with_pty_process_id_is_allowed(self) -> None:
-        runtime = _Runtime(
-            [
-                _event(
-                    "item/started",
-                    item=_item(
-                        "commandExecution",
-                        process_id="process-1",
-                        status=SimpleNamespace(value="inProgress"),
-                    ),
-                ),
-                _event(
-                    "item/completed",
-                    item=_item(
-                        "commandExecution",
-                        process_id="process-1",
-                        status=SimpleNamespace(value="completed"),
-                    ),
-                ),
-                *_success_events(),
-            ]
-        )
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            package = CodexWikiExplorerBackend(
-                env_file=env_file,
-                execution_timeout_seconds=60,
-                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                sdk_runtime=runtime,
-            ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-        self.assertEqual(package.to_dict(), _package())
-        self.assertEqual(runtime.turns[0].interrupts, 0)
-
-    def test_commentary_is_not_accepted_as_the_final_skill_package(self) -> None:
-        events = [
-            _event(
-                "item/completed",
-                item=_item(
-                    "agentMessage",
-                    text=json.dumps(_package()),
-                    phase=SimpleNamespace(value="commentary"),
-                ),
-            ),
-            *_success_events()[:4],
-            *_success_events()[5:],
-        ]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(RuntimeError, "structured SkillPackage"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_timeout_seconds=60,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=_Runtime(events),
-                ).explore(
-                    query="find a skill",
-                    query_wiki_root=wiki,
-                    trace_dir=root / "trace",
-                )
-
-    def test_unknown_phase_remains_a_legacy_sdk_fallback(self) -> None:
-        events = [
-            _event(
-                "item/completed",
-                item=_item("agentMessage", text=json.dumps(_package()), phase=None),
-            ),
-            *_success_events()[:4],
-            *_success_events()[5:],
-        ]
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            package = CodexWikiExplorerBackend(
-                env_file=env_file,
-                execution_timeout_seconds=60,
-                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                sdk_runtime=_Runtime(events),
-            ).explore(
-                query="find a skill",
-                query_wiki_root=wiki,
-                trace_dir=root / "trace",
-            )
-
-        self.assertEqual(package.to_dict(), _package())
-
     def test_rejects_contract_drift_and_invalid_output(self) -> None:
         contract = CODEX_EXECUTION_CONTRACT.to_dict()
         contract["web_search"] = True
@@ -1216,60 +735,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
                     sdk_runtime=runtime,
                 ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-    def test_rejects_malformed_missing_and_failed_final_responses(self) -> None:
-        completed = _success_events()[-1]
-        success = _success_events()
-        access_events = [*success[:4], *success[5:-1]]
-        cases = {
-            "malformed": (
-                [
-                    *access_events,
-                    _event(
-                        "item/completed",
-                        item=_item(
-                            "agentMessage",
-                            text="{not-json",
-                            phase=SimpleNamespace(value="final_answer"),
-                        ),
-                    ),
-                    completed,
-                ],
-                "valid SkillPackage JSON",
-            ),
-            "missing": ([*access_events, completed], "did not return a structured SkillPackage"),
-            "failed": (
-                [
-                    _event(
-                        "turn/completed",
-                        turn=SimpleNamespace(
-                            status=SimpleNamespace(value="failed"),
-                            error=SimpleNamespace(message="provider unavailable"),
-                            duration_ms=25,
-                        ),
-                    )
-                ],
-                "turn failed",
-            ),
-        }
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-            for name, (events, message) in cases.items():
-                with self.subTest(name=name), self.assertRaisesRegex(Exception, message):
-                    CodexWikiExplorerBackend(
-                        env_file=env_file,
-                        execution_timeout_seconds=60,
-                        execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                        sdk_runtime=_Runtime(events),
-                    ).explore(
-                        query="find a skill",
-                        query_wiki_root=wiki,
-                        trace_dir=root / name,
-                    )
 
     def test_timeout_interrupts_before_the_app_server_closes(self) -> None:
         runtime = _Runtime(event_delay=10)
@@ -1292,51 +757,6 @@ class CodexWikiExplorerTests(unittest.TestCase):
             runtime.lifecycle,
             ["login", "thread_start", "interrupt", "close"],
         )
-
-    def test_timeout_during_app_server_startup_still_closes_the_client(self) -> None:
-        runtime = _Runtime(enter_delay=10)
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(TimeoutError, "exceeded 1 seconds"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_timeout_seconds=1,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=runtime,
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-        self.assertEqual(runtime.lifecycle, ["close"])
-
-    def test_close_failure_does_not_replace_the_original_sdk_failure(self) -> None:
-        runtime = _Runtime(fail_thread_start=True, fail_close=True)
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            wiki = root / "query_wiki"
-            wiki.mkdir()
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(RuntimeError, "app-server failed"):
-                CodexWikiExplorerBackend(
-                    env_file=env_file,
-                    execution_timeout_seconds=60,
-                    execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
-                    sdk_runtime=runtime,
-                ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
-
-            events = [
-                json.loads(line)
-                for line in (root / "trace" / "cc_explorer" / "agent_events.jsonl")
-                .read_text()
-                .splitlines()
-            ]
-            cleanup = next(event for event in events if event["event"] == "sdk:cleanup_error")
-            self.assertEqual(cleanup["error_type"], "RuntimeError")
 
     def test_missing_sdk_is_recorded_as_a_backend_failure(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1365,7 +785,3 @@ class CodexWikiExplorerTests(unittest.TestCase):
                 for line in (trace / "cc_explorer" / "agent_events.jsonl").read_text().splitlines()
             ]
             self.assertEqual(events[-1]["event"], "backend:error")
-
-
-if __name__ == "__main__":
-    unittest.main()

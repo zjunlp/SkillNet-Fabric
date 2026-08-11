@@ -11,8 +11,7 @@ from skillfabric.router.config import RouterConfig
 from skillfabric.router.routing import route_task
 from skillfabric.router.traces import _new_trace_id
 from skillfabric.wiki.explorer.skill_package import SkillPackage
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import FakeEmbeddingProvider, build_fixture_workspace
 
 
 class StubSdkRuntime:

@@ -10,8 +10,7 @@ from skillfabric.router.models import RouterAlternative, RouterBundle
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
 from skillfabric.wiki.query_wiki import materialize_query_wiki
-from tests.unit.fake_embeddings import FakeEmbeddingProvider
-from tests.unit.wiki_helpers import build_fixture_workspace
+from tests.support import FakeEmbeddingProvider, build_fixture_workspace
 
 
 def _package(**overrides: Any) -> SkillPackage:

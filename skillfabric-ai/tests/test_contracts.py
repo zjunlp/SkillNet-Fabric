@@ -17,8 +17,7 @@ from skillfabric.compiled_graph.contracts.prompts import (
     build_contract_extraction_messages,
 )
 from skillfabric.runtime.jobs import LLMJobOptions
-from tests.unit.relation_helpers import make_skill
-from tests.unit.semantic_fixtures import StaticContractExtractor
+from tests.support import StaticContractExtractor, make_skill
 
 
 def _payload() -> dict[str, Any]:
