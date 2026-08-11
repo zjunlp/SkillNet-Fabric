@@ -13,7 +13,7 @@ Execute through a finalized SkillFabric prompt.
 Use this Run State JSON as canonical:
 
 ```json
-!`skillfabric run-state $ARGUMENTS`
+!`skillfabric run-state --json $ARGUMENTS`
 ```
 
 ## Inputs

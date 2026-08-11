@@ -42,7 +42,7 @@ instructions.
 2. Prefer the Run State JSON injected by the slash command. If absent, run:
 
    ```bash
-   skillfabric run-state "$task" --workspace "$workspace" --env-file "$env_file"
+   skillfabric run-state --json "$task" --workspace "$workspace" --env-file "$env_file"
    ```
 
 3. If `action` is `reuse_prompt`, set `$execution_prompt` to `prompt_path` and

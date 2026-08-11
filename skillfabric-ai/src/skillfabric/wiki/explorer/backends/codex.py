@@ -264,7 +264,7 @@ class CodexWikiExplorerBackend:
             with TemporaryDirectory(prefix="skillfabric-codex-") as home:
                 codex_home = Path(home)
                 settings = build_codex_sdk_env(self.env_file, codex_home=home)
-                payload, usage, metadata = self._explore(
+                payload, metadata = self._explore(
                     runtime=runtime,
                     settings=settings,
                     system_prompt=system_prompt,
@@ -283,7 +283,6 @@ class CodexWikiExplorerBackend:
                     prompt_id=str(prompt_spec["prompt_id"]),
                 ),
             )
-            _write_json(cc_dir / "usage.json", usage)
             try:
                 package = SkillPackage.from_dict(payload)
             except (TypeError, ValueError) as exc:
@@ -327,7 +326,7 @@ class CodexWikiExplorerBackend:
         cc_dir: Path,
         command_budget: int,
         prompt_id: str,
-    ) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         return run_codex_attempt(
             runtime,
             settings,

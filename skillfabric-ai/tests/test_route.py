@@ -18,16 +18,6 @@ class StubSdkRuntime:
     class ResultMessage:
         def __init__(self, structured_output: dict[str, Any]) -> None:
             self.structured_output = structured_output
-            self.duration_ms = 1
-            self.total_cost_usd = 0.0
-            self.usage = {
-                "input_tokens": 10,
-                "output_tokens": 10,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 0,
-            }
-            self.model_usage = {}
-            self.num_turns = 1
             self.is_error = False
             self.subtype = "success"
 

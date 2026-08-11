@@ -1,4 +1,4 @@
-"""Codex turn lifecycle, fail-closed event auditing, and usage telemetry."""
+"""Codex turn lifecycle and fail-closed event auditing."""
 
 from __future__ import annotations
 
@@ -66,8 +66,8 @@ def run_codex_attempt(
     thread_config: dict[str, Any],
     output_schema: dict[str, Any],
     metadata_callback: Callable[[dict[str, str]], None] | None = None,
-) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
-    """Run one isolated app-server attempt and return structured output and telemetry.
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Run one isolated app-server attempt and return structured output and metadata.
 
     The backend owns prompt construction and result validation. This module owns the
     SDK lifecycle so login, thread/turn ordering, event closure, interruption, and
@@ -135,7 +135,7 @@ def run_codex_attempt(
             cc_dir / "turn_state.json",
             {"schema_version": 1, "turn_started": True},
         )
-        final_response, usage = collect_codex_turn(
+        final_response = collect_codex_turn(
             turn,
             cc_dir=cc_dir,
             command_budget=command_budget,
@@ -147,7 +147,7 @@ def run_codex_attempt(
                 raise TimeoutError
             finished.set()
         operation_succeeded = True
-        return payload, usage, metadata
+        return payload, metadata
     except BaseException as exc:
         primary_error = exc
         if timed_out.is_set():
@@ -185,7 +185,7 @@ def collect_codex_turn(
     cc_dir: Path,
     command_budget: int,
     query_wiki_root: Path,
-) -> tuple[str, dict[str, int]]:
+) -> str:
     command_count = 0
     successful_read_commands = 0
     query_wiki_commands = 0
@@ -196,7 +196,6 @@ def collect_codex_turn(
     policy_violation = ""
     final_response = ""
     fallback_response = ""
-    usage = None
     completed_turn = None
     for event in turn.stream():
         method = str(getattr(event, "method", ""))
@@ -242,8 +241,6 @@ def collect_codex_turn(
                 final_response = text
             elif not phase and text:
                 fallback_response = text
-        elif method == "thread/tokenUsage/updated":
-            usage = getattr(payload, "token_usage", None)
         elif method == "turn/completed":
             completed_turn = getattr(payload, "turn", None)
         _write_event(
@@ -270,14 +267,6 @@ def collect_codex_turn(
         "policy_violation": policy_violation or None,
     }
     _write_json(cc_dir / "operational_access.json", operational_access)
-    usage_payload: dict[str, int] | None = None
-    if completed_turn is not None and usage is not None:
-        usage_payload = _sdk_usage(
-            usage,
-            completed_turn=completed_turn,
-            command_count=command_count,
-        )
-        _write_json(cc_dir / "usage.json", usage_payload)
     if budget_exceeded:
         raise RuntimeError(f"Codex query-wiki tool budget exceeded: exec_command<={command_budget}")
     if policy_violation:
@@ -295,8 +284,6 @@ def collect_codex_turn(
         raise RuntimeError(
             f"Codex agent turn failed: {_safe_error_text(detail, paths=(query_wiki_root,))}"
         )
-    if usage_payload is None:
-        raise RuntimeError("Codex agent completed without a token usage closure")
     response = final_response or fallback_response
     if not response.strip():
         raise RuntimeError("Codex agent did not return a structured SkillPackage")
@@ -304,24 +291,9 @@ def collect_codex_turn(
         error = CodexOperationalAccessError(
             "Codex query-wiki explorer completed without successful Wiki evidence access"
         )
-        error.usage = usage_payload  # type: ignore[attr-defined]
         error.operational_access = operational_access  # type: ignore[attr-defined]
         raise error
-    return response, usage_payload
-
-
-def _sdk_usage(usage: Any, *, completed_turn: Any, command_count: int) -> dict[str, int]:
-    total = getattr(usage, "total", None)
-    return {
-        "duration_ms": _nonnegative_int(getattr(completed_turn, "duration_ms", 0)),
-        "input_tokens": _nonnegative_int(getattr(total, "input_tokens", 0)),
-        "cache_read_input_tokens": _nonnegative_int(getattr(total, "cached_input_tokens", 0)),
-        "output_tokens": _nonnegative_int(getattr(total, "output_tokens", 0)),
-        "reasoning_output_tokens": _nonnegative_int(getattr(total, "reasoning_output_tokens", 0)),
-        "total_tokens": _nonnegative_int(getattr(total, "total_tokens", 0)),
-        "total_calls": command_count,
-        "num_turns": 1,
-    }
+    return response
 
 
 def _event_summary(
@@ -605,12 +577,6 @@ def _best_effort_close(codex: Any) -> None:
         codex.close()
     except Exception:  # noqa: BLE001 - timeout cleanup cannot replace the timeout failure.
         return
-
-
-def _nonnegative_int(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return 0
-    return value
 
 
 def _strict_json_object(value: str) -> dict[str, Any]:

@@ -10,12 +10,11 @@ import threading
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from skillfabric.runtime.llm import LLMRequestError, llm_usage_transaction, read_env_file
+from skillfabric.runtime.llm import LLMRequestError, read_env_file
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -30,7 +29,7 @@ class LLMJobOptions:
     rate_limit_per_minute: float = 0.0
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
-    progress_every: int = 10
+    progress_every: int = 0
     batch_size: int | None = None
     checkpoint_interval: int = 100
     circuit_breaker_threshold: int = 10
@@ -65,7 +64,7 @@ class LLMJobOptions:
                 retry_backoff_seconds,
                 1.0,
             ),
-            progress_every=_int_value(values, "SKILLFABRIC_LLM_PROGRESS_EVERY", progress_every, 10),
+            progress_every=_int_value(values, "SKILLFABRIC_LLM_PROGRESS_EVERY", progress_every, 0),
             batch_size=_optional_int_value(
                 values,
                 "SKILLFABRIC_LLM_BATCH_SIZE",
@@ -209,14 +208,7 @@ def run_llm_jobs(
             attempts += 1
             try:
                 limiter.wait()
-                with llm_usage_transaction() as usage:
-                    try:
-                        value = worker(item)
-                    except Exception as exc:
-                        usage.reject(exc)
-                        raise
-                    else:
-                        usage.commit()
+                value = worker(item)
                 return LLMJobOutcome(
                     index=index, item=item, ok=True, value=value, attempts=attempts
                 )
@@ -245,8 +237,7 @@ def run_llm_jobs(
                 return
             index = next_index
             next_index += 1
-            context = copy_context()
-            future = executor.submit(context.run, run_one, index, job_items[index])
+            future = executor.submit(run_one, index, job_items[index])
             futures[future] = index
             future.add_done_callback(completed_futures.put)
 

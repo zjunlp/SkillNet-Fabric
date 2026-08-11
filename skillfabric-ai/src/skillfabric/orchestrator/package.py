@@ -17,11 +17,9 @@ from skillfabric.runtime.llm import (
     LLMConfig,
     LLMRequestError,
     litellm_completion,
-    llm_usage_context,
-    llm_usage_transaction,
 )
 from skillfabric.runtime.prompting import render_untrusted_json
-from skillfabric.runtime.usage import count_message_tokens
+from skillfabric.runtime.tokens import count_message_tokens
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.contract_pages import render_contract_card, render_untrusted_skill_source
 from skillfabric.wiki.loader import load_wiki_source
@@ -59,7 +57,6 @@ def plan_execution_package(
     query: str,
     env_file: str | Path = ".env",
     package_root: str | Path | None = None,
-    usage_log_path: str | Path | None = None,
     llm_model: str | None = None,
     llm_reasoning_effort: str | None = None,
     llm_api_key: str | None = None,
@@ -84,9 +81,6 @@ def plan_execution_package(
         name="planner_retry_delay_seconds",
     )
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
-    planner_usage_path = (
-        None if usage_log_path is None else Path(usage_log_path).expanduser().resolve()
-    )
     root = _package_root(workspace, query=task, package_root=package_root)
     if root.exists():
         raise FileExistsError(f"execution package already exists: {root}")
@@ -126,25 +120,13 @@ def plan_execution_package(
     for attempt in range(1, planner_max_attempts + 1):
         attempt_errors: list[str] = []
         try:
-            with llm_usage_transaction() as usage:
-                try:
-                    with llm_usage_context(log_path=planner_usage_path):
-                        response = litellm_completion(
-                            messages=messages,
-                            config=llm_config,
-                            usage_operation="planner.execution_prompt",
-                            usage_metadata={"selected_skill_count": len(route.selected_skills)},
-                        )
-                    candidate = parse_json_response(response)
-                    attempt_errors = validate_planner_output(candidate)
-                    if attempt_errors:
-                        raise ValueError("invalid planner output: " + "; ".join(attempt_errors))
-                except Exception as exc:
-                    usage.reject(exc)
-                    raise
-                planner_output = candidate
-                errors = attempt_errors
-                usage.commit()
+            response = litellm_completion(messages=messages, config=llm_config)
+            candidate = parse_json_response(response)
+            attempt_errors = validate_planner_output(candidate)
+            if attempt_errors:
+                raise ValueError("invalid planner output: " + "; ".join(attempt_errors))
+            planner_output = candidate
+            errors = attempt_errors
             break
         except Exception as exc:
             if isinstance(exc, LLMRequestError) or attempt == planner_max_attempts:

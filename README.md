@@ -90,7 +90,7 @@ skillfabric plan \
 `plan` can perform routing itself, so the shortest complete workflow is `init`, `build`, then `plan`.
 
 > [!NOTE]
-> Build, route, and plan use external model services. Start with a small skill corpus when validating a new endpoint or estimating cost.
+> Build, route, and plan use external model services. Start with a small skill corpus when validating a new endpoint or its service limits.
 
 ---
 
@@ -125,8 +125,8 @@ The build pipeline:
 
 Wiki summaries are derived deterministically from validated contracts. Wiki materialization makes no additional model calls and does not alter contract extraction, semantic relation judgment, or embeddings.
 
-LLM-backed build jobs retry within the compiler without creating a default usage or provenance
-report. Runtime usage logging is opt-in for callers that explicitly provide a log path.
+LLM-backed build jobs retry within the compiler. SkillFabric writes canonical graph and Wiki
+artifacts without producing a separate billing or usage report.
 
 ### 2. Model Skill Relationships
 
@@ -167,7 +167,7 @@ The planner receives:
 
 It produces a complete task-specific execution plan. SkillFabric places the original task first and the plan second in one `execution_prompt.md`. It does not create an intermediate workflow DAG or execute the task from the CLI.
 
-Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default. Runtime usage is written only when an explicit usage log path is supplied.
+Planner messages, selected skill context, and the token estimate are constructed once. The planner receives at most two attempts by default.
 
 ---
 
@@ -184,6 +184,8 @@ Planner messages, selected skill context, and the token estimate are constructed
 | `run-state` | Resolve the latest finalized execution package | `skillfabric run-state --workspace .skillfabric` |
 
 Use `skillfabric help workflow` for the short workflow or `skillfabric <command> --help` for all options.
+Build, route, and plan print concise terminal summaries by default. Add `--json` when a script or
+plugin needs the stable machine-readable payload.
 
 ---
 
@@ -269,7 +271,7 @@ For a user-level installation:
 mkdir -p ~/.claude/skills
 cp -R /path/to/SkillFabric/plugins/claude-code/skillfabric \
   ~/.claude/skills/skillfabric
-claude plugin validate --strict ~/.claude/skills/skillfabric
+claude plugin validate ~/.claude/skills/skillfabric
 claude plugin list --json
 ```
 
@@ -285,7 +287,7 @@ To diagnose installation or configuration:
 which skillfabric
 skillfabric --help
 skillfabric init --check --json --env-file .env
-claude plugin validate --strict ~/.claude/skills/skillfabric
+claude plugin validate ~/.claude/skills/skillfabric
 claude plugin list --json
 ```
 
@@ -395,7 +397,7 @@ Validate provider integrations separately in a controlled environment with a dis
 
 The suite covers native skill parsing, contract extraction, semantic projection, graph validation,
 hybrid retrieval, all three relation types, query-wiki generation, explorer package validation,
-planner finalization, public CLI and Python APIs, artifact caching, usage accounting, plugin
+planner finalization, public CLI and Python APIs, artifact caching, plugin
 behavior, and secret handling.
 
 Contributions should keep public interfaces stable, include focused tests, and avoid committing credentials, generated workspaces, or run artifacts.

@@ -28,10 +28,10 @@ from skillfabric.router.config import RouterConfig
 from skillfabric.router.models import RouteResult
 from skillfabric.router.routing import route_task
 from skillfabric.router.traces import _new_trace_id, validate_trace_id
+from skillfabric.runtime.console import command_status, print_command_result
 from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import read_env_file
-from skillfabric.runtime.progress import ProgressReporter
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
@@ -97,7 +97,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--env-file", default=".env")
     build_parser.add_argument("--embedding-model")
     _add_llm_options(build_parser)
-    _add_progress_options(build_parser)
+    _add_output_options(build_parser)
     build_parser.set_defaults(handler=_build)
     commands["build"] = build_parser
 
@@ -129,6 +129,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
         default=DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
     )
     _add_route_tuning(plan_parser)
+    _add_output_options(plan_parser)
     plan_parser.set_defaults(handler=_plan)
     commands["plan"] = plan_parser
 
@@ -174,8 +175,8 @@ def _add_llm_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--llm-circuit-breaker-threshold", type=int)
 
 
-def _add_progress_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--progress-json", action="store_true")
+def _add_output_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     parser.add_argument("--quiet", action="store_true")
 
 
@@ -184,7 +185,7 @@ def _add_route_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--trace-id")
     _add_route_tuning(parser)
-    _add_progress_options(parser)
+    _add_output_options(parser)
 
 
 def _add_route_tuning(parser: argparse.ArgumentParser) -> None:
@@ -294,8 +295,7 @@ def _write_env_values(path: Path, updates: dict[str, str]) -> None:
 def _build(args: argparse.Namespace) -> None:
     _require_api_configuration(Path(args.env_file))
     jobs = _llm_options(args)
-    reporter = _progress_reporter(args)
-    with reporter.phase("build"):
+    with command_status("Building skill graph and Full Wiki...", enabled=_show_status(args)):
         result = build_graph(
             BuildConfig(
                 skill_root=args.skill_root,
@@ -313,7 +313,7 @@ def _build(args: argparse.Namespace) -> None:
             ),
         )
         wiki_result = build_wiki(WikiBuildConfig(workspace=result.workspace.root))
-    print(json.dumps(_build_output(result, wiki_result), ensure_ascii=False, indent=2))
+    print_command_result("build", _build_output(result, wiki_result), json_mode=args.json)
 
 
 def _require_api_configuration(env_path: Path) -> None:
@@ -355,27 +355,29 @@ def _build_output(result: BuildResult, wiki: WikiBuildResult) -> dict[str, Any]:
 
 
 def _route(args: argparse.Namespace) -> None:
-    payload = route_task(_router_config(args, query=args.query)).to_dict()
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    with command_status("Routing through the Task Wiki...", enabled=_show_status(args)):
+        payload = route_task(_router_config(args, query=args.query)).to_dict()
+    print_command_result("route", payload, json_mode=args.json)
 
 
 def _plan(args: argparse.Namespace) -> None:
-    route, query, default_root = _plan_route_context(args)
-    workspace = Workspace(args.workspace)
-    package_root = (
-        _inside(workspace.runs_dir, args.package_root) if args.package_root else default_root
-    )
-    result = plan_execution_package(
-        workspace,
-        route,
-        query=query,
-        env_file=args.env_file,
-        package_root=package_root,
-        planner_context_max_tokens=args.planner_context_max_tokens,
-        planner_max_attempts=args.planner_max_attempts,
-        planner_retry_delay_seconds=args.planner_retry_delay_seconds,
-    )
-    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    with command_status("Routing and preparing the execution plan...", enabled=_show_status(args)):
+        route, query, default_root = _plan_route_context(args)
+        workspace = Workspace(args.workspace)
+        package_root = (
+            _inside(workspace.runs_dir, args.package_root) if args.package_root else default_root
+        )
+        result = plan_execution_package(
+            workspace,
+            route,
+            query=query,
+            env_file=args.env_file,
+            package_root=package_root,
+            planner_context_max_tokens=args.planner_context_max_tokens,
+            planner_max_attempts=args.planner_max_attempts,
+            planner_retry_delay_seconds=args.planner_retry_delay_seconds,
+        )
+    print_command_result("plan", result.to_dict(), json_mode=args.json)
 
 
 def _plan_route_context(args: argparse.Namespace) -> tuple[RouteResult, str, Path]:
@@ -427,7 +429,7 @@ def _doctor_state(args: argparse.Namespace) -> None:
         if config["configured"]
         else "init",
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print_command_result("doctor-state", payload, json_mode=parsed["json"])
 
 
 def _workspace_readiness(workspace: Workspace) -> tuple[bool, str, int]:
@@ -495,7 +497,7 @@ def _run_state(args: argparse.Namespace) -> None:
             "workspace": str(Workspace(parsed["workspace"]).root),
             "env_file": parsed["env_file"],
         }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print_command_result("run-state", payload, json_mode=parsed["json"])
 
 
 def _latest_execution_package(workspace_root: str | Path) -> dict[str, Any]:
@@ -622,12 +624,8 @@ def _llm_options(args: argparse.Namespace) -> LLMJobOptions:
     )
 
 
-def _progress_reporter(args: argparse.Namespace) -> ProgressReporter:
-    return ProgressReporter(
-        enabled=bool(args.progress_json),
-        json_mode=bool(args.progress_json),
-        quiet=bool(args.quiet),
-    )
+def _show_status(args: argparse.Namespace) -> bool:
+    return not args.json and not args.quiet
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -655,13 +653,18 @@ def _trace_dir(workspace: Workspace, trace_id: str) -> Path:
     )
 
 
-def _parse_control_tokens(tokens: list[str]) -> dict[str, str]:
+def _parse_control_tokens(tokens: list[str]) -> dict[str, Any]:
     workspace = ".skillfabric"
     env_file = ".env"
+    json_mode = False
     query: list[str] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
+        if token == "--json":
+            json_mode = True
+            index += 1
+            continue
         if token in {"--workspace", "--env-file"}:
             if index + 1 >= len(tokens):
                 raise SystemExit(f"{token} requires a value")
@@ -682,6 +685,7 @@ def _parse_control_tokens(tokens: list[str]) -> dict[str, str]:
         "workspace": workspace,
         "env_file": env_file,
         "query": " ".join(query).strip(),
+        "json": json_mode,
     }
 
 

@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.runtime.usage import estimate_cost_usd
 from skillfabric.storage import atomic_write_text
 from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
 from skillfabric.wiki.explorer.backends.claude_code import (
@@ -151,7 +150,6 @@ def explore_query_wiki(
                 error=terminal_error,
                 started=started,
                 trace_root=trace_dir,
-                model=config.model,
                 redaction_roots=(
                     query_wiki_root.resolve(),
                     trace_dir.resolve(),
@@ -164,11 +162,7 @@ def explore_query_wiki(
             break
         if terminal_error is None:
             terminal_error = RuntimeError("explorer attempt ended without a result")
-        if (
-            attempt_record.get("unmetered_attempt")
-            or attempt == config.max_attempts
-            or not _retryable_explorer_error(terminal_error)
-        ):
+        if attempt == config.max_attempts or not _retryable_explorer_error(terminal_error):
             break
         LOGGER.warning(
             "explorer_retry attempt=%d/%d delay_seconds=%.3f error_type=%s",
@@ -204,7 +198,6 @@ def _archive_attempt(
     error: Exception | None,
     started: float,
     trace_root: Path,
-    model: str | None,
     redaction_roots: tuple[Path, ...],
 ) -> None:
     source = attempt_trace / "cc_explorer"
@@ -242,34 +235,24 @@ def _archive_attempt(
     duration = time.monotonic() - started
     if not math.isfinite(duration) or duration < 0:
         duration = 0.0
-    usage = _optional_json(attempt_dir / "usage.json")
-    unmetered_attempt = (
-        (attempt_dir / "turn_state.json").exists()
-        or (attempt_dir / "operational_access.json").exists()
-    ) and usage is None
     payload = {
         "schema_version": 1,
         "attempt": int(attempt_dir.name.removeprefix("attempt-")),
         "status": "completed" if error is None else "failed",
-        "failure_kind": None if error is None else _failure_kind(error, unmetered_attempt),
-        "retryable": (
-            False if error is None or unmetered_attempt else _retryable_explorer_error(error)
-        ),
+        "failure_kind": None if error is None else _failure_kind(error),
+        "retryable": False if error is None else _retryable_explorer_error(error),
         "duration_seconds": duration,
-        "usage": usage,
-        "unmetered_attempt": unmetered_attempt,
-        "cost_usd": _usage_cost(usage, model=model),
         "operational_access": _optional_json(attempt_dir / "operational_access.json"),
         "validation": validation.to_dict() if validation is not None else None,
         "error_class": None if error is None else type(error).__name__,
         "sanitized_error": safe_error,
-        "artifact_paths": _artifact_paths(attempt_dir, trace_root),
+        "artifact_paths": sorted(
+            [
+                *_artifact_paths(attempt_dir, trace_root),
+                str(Path("cc_explorer") / "attempts" / attempt_dir.name / "attempt.json"),
+            ]
+        ),
     }
-    atomic_write_text(
-        attempt_dir / "attempt.json",
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-    )
-    payload["artifact_paths"] = _artifact_paths(attempt_dir, trace_root)
     atomic_write_text(
         attempt_dir / "attempt.json",
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -314,43 +297,12 @@ def _publish_explorer_closure(
         validation = winner_dir / "validation.json"
         if validation.exists():
             shutil.copy2(validation, cc_dir / "validation.json")
-    usages = [
-        record.get("usage") for record in attempt_records if isinstance(record.get("usage"), dict)
-    ]
-    aggregate_usage: dict[str, Any] = {"attempts": usages}
-    for field in (
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_write_input_tokens",
-        "billable_input_tokens",
-        "reasoning_output_tokens",
-        "duration_ms",
-        "total_tokens",
-        "total_calls",
-        "num_turns",
-    ):
-        values = [item[field] for item in usages if isinstance(item.get(field), (int, float))]
-        if values:
-            aggregate_usage[field] = sum(values)
-    costs = [
-        record["cost_usd"]
-        for record in attempt_records
-        if isinstance(record.get("cost_usd"), (int, float))
-    ]
-    if costs:
-        aggregate_usage["total_cost_usd"] = round(sum(costs), 10)
-    atomic_write_text(
-        cc_dir / "usage.json",
-        json.dumps(aggregate_usage, ensure_ascii=False, indent=2) + "\n",
-    )
     closure = {
         "schema_version": 1,
         "status": "completed" if winner is not None else "route_failed",
         "outcome": _closure_outcome(winner_dir) if winner_dir is not None else "route_failed",
         "winning_attempt": winner,
         "attempts": attempt_records,
-        "aggregate_usage": aggregate_usage,
     }
     atomic_write_text(
         cc_dir / "closure.json",
@@ -413,33 +365,6 @@ def _read_json(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
-def _cost_value(payload: dict[str, Any] | None) -> float | None:
-    if not payload:
-        return None
-    value = payload.get("total_cost_usd", payload.get("cost_usd"))
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-
-
-def _usage_cost(payload: dict[str, Any] | None, *, model: str | None) -> float | None:
-    explicit = _cost_value(payload)
-    if explicit is not None or not payload or not model:
-        return explicit
-    input_tokens = payload.get("input_tokens")
-    output_tokens = payload.get("output_tokens")
-    cached_tokens = payload.get("cache_read_input_tokens", 0)
-    if any(
-        isinstance(value, bool) or not isinstance(value, int) or value < 0
-        for value in (input_tokens, output_tokens, cached_tokens)
-    ):
-        return None
-    return estimate_cost_usd(
-        model=model,
-        prompt_tokens=input_tokens,
-        completion_tokens=output_tokens,
-        cached_prompt_tokens=cached_tokens,
-    )
-
-
 def _retryable_explorer_error(error: Exception) -> bool:
     if getattr(error, "__skillfabric_non_retryable__", False):
         return False
@@ -491,9 +416,7 @@ def _retryable_explorer_error(error: Exception) -> bool:
     return any(marker in message for marker in retry_markers)
 
 
-def _failure_kind(error: Exception, unmetered_attempt: bool) -> str:
-    if unmetered_attempt:
-        return "unmetered_attempt"
+def _failure_kind(error: Exception) -> str:
     if isinstance(error, _RetryableExplorerValidationError):
         return "validation"
     if type(error).__name__ == "CodexOperationalAccessError":
