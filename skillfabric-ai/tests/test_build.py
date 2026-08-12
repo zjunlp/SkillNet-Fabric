@@ -138,7 +138,7 @@ def test_api_embedding_provider_prefers_embedding_specific_config(tmp_path) -> N
     assert provider.model_id == "openai/custom-embedding"
 
 
-def test_build_stats_contain_only_graph_build_counts(tmp_path) -> None:
+def test_build_stats_contain_public_build_counts(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     result = _build(workspace)
 
