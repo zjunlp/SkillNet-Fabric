@@ -308,6 +308,65 @@ def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -
     assert payload["skill_count"] == 7
     assert payload["next_action"] == "ready"
     assert "private-value" not in text
+    assert payload["llm_configured"] is True
+    assert payload["embedding_configured"] is True
+
+
+def test_doctor_state_accepts_a_dedicated_embedding_key(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    env_file = tmp_path / ".env.test"
+    env_file.write_text(
+        "API_KEY=llm-value\nEMBEDDING_API_KEY=embedding-value\n",
+        encoding="utf-8",
+    )
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(
+            [
+                "doctor-state",
+                "--json",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert payload["api_configured"] is True
+    assert payload["llm_configured"] is True
+    assert payload["embedding_configured"] is True
+    assert payload["next_action"] == "ready"
+    assert "llm-value" not in output.getvalue()
+    assert "embedding-value" not in output.getvalue()
+
+
+def test_doctor_state_reports_missing_embedding_configuration(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    build_fixture_workspace(workspace)
+    env_file = tmp_path / ".env.test"
+    env_file.write_text("ANTHROPIC_API_KEY=llm-value\n", encoding="utf-8")
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        cli_main(
+            [
+                "doctor-state",
+                "--json",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert payload["api_configured"] is False
+    assert payload["llm_configured"] is True
+    assert payload["embedding_configured"] is False
+    assert payload["missing_configuration"] == ["EMBEDDING_API_KEY"]
 
 
 def test_doctor_state_rejects_graph_from_a_different_build(tmp_path) -> None:

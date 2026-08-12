@@ -1,0 +1,17 @@
+{
+  "name": "skillfabric",
+  "owner": {
+    "name": "SkillFabric Contributors"
+  },
+  "metadata": {
+    "description": "SkillFabric plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "skillfabric",
+      "description": "Compile native skills and route tasks through a bounded Task Wiki",
+      "source": "./skillfabric",
+      "category": "productivity"
+    }
+  ]
+}

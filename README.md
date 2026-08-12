@@ -280,12 +280,13 @@ Then run:
 For a user-level installation:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -R /path/to/SkillFabric/plugins/claude-code/skillfabric \
-  ~/.claude/skills/skillfabric
-claude plugin validate ~/.claude/skills/skillfabric
+claude plugin marketplace add /path/to/SkillFabric/plugins/claude-code
+claude plugin install skillfabric@skillfabric --scope user
 claude plugin list --json
 ```
+
+The marketplace source is `plugins/claude-code/.claude-plugin/marketplace.json`. For local
+development without a persistent installation, use `claude --plugin-dir` as shown above.
 
 Do not paste API keys into Claude Code. The CLI is the only writer of registry, graph, route, and
 wiki artifacts. Generated skill sources are treated as untrusted data, and routing reads only the
@@ -298,7 +299,7 @@ To diagnose installation or configuration:
 which skillfabric
 skillfabric --help
 skillfabric init --check --json --env-file .env
-claude plugin validate ~/.claude/skills/skillfabric
+claude plugin validate /path/to/SkillFabric/plugins/claude-code/skillfabric
 claude plugin list --json
 ```
 
@@ -306,14 +307,19 @@ Common failures are explicit:
 
 - `skillfabric: command not found`: install `skillfabric-ai[claude]` in the environment used by
   Claude Code.
-- Missing API fields: run `skillfabric init --env-file .env`.
+- Missing API fields: run `skillfabric init --env-file .env`. `doctor` reports LLM and
+  embedding readiness separately; the embedding key may fall back to `API_KEY`.
 - Build provider or model failure: verify the endpoint against a small disposable skill root; do
   not bypass a failed semantic stage.
 - Route validation failure: report the non-secret route error and rebuild the workspace when its
   status is not ready.
 
-To uninstall the user-level plugin, remove `~/.claude/skills/skillfabric` and confirm the result
-with `claude plugin list --json`.
+To uninstall the user-level plugin, run:
+
+```bash
+claude plugin uninstall skillfabric@skillfabric --scope user
+claude plugin list --json
+```
 
 ---
 

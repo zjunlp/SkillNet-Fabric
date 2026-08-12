@@ -13,10 +13,14 @@ workspace and `.env` file:
 
 Report a concise status using only the returned JSON:
 
-- `api_configured` and `missing_configuration`.
+- `api_configured` as the overall readiness flag; use `llm_configured`,
+  `embedding_configured`, and `missing_configuration` to identify the missing side.
 - `workspace` and `workspace_ready`.
 - `build_id` and `skill_count` when available.
 - `next_action` as the next recommended command.
+
+When `next_action` is `init`, tell the user to run
+`skillfabric init --env-file .env` directly. The plugin does not expose an init command.
 
 Never read or print `.env`, environment values, API keys, tokens, or raw
 configuration. Do not build, route, plan, or execute a task. Treat generated

@@ -178,6 +178,7 @@ class PublicPackageTests(unittest.TestCase):
             },
             {
                 ".claude-plugin/plugin.json",
+                "README.md",
                 "commands/build.md",
                 "commands/doctor.md",
                 "commands/route.md",
@@ -213,16 +214,13 @@ class PublicPackageTests(unittest.TestCase):
 
     def test_claude_doctor_command_uses_the_current_state_contract(self) -> None:
         doctor = (
-            PUBLIC_ROOT
-            / "plugins"
-            / "claude-code"
-            / "skillfabric"
-            / "commands"
-            / "doctor.md"
+            PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "commands" / "doctor.md"
         ).read_text(encoding="utf-8")
 
         for field in (
             "api_configured",
+            "llm_configured",
+            "embedding_configured",
             "missing_configuration",
             "workspace_ready",
             "build_id",
@@ -231,6 +229,36 @@ class PublicPackageTests(unittest.TestCase):
         ):
             self.assertIn(f"`{field}`", doctor)
         self.assertNotIn("workspace_status", doctor)
+
+    def test_claude_code_marketplace_registers_the_public_plugin(self) -> None:
+        marketplace_path = (
+            PUBLIC_ROOT / "plugins" / "claude-code" / ".claude-plugin" / "marketplace.json"
+        )
+        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+        assert marketplace["name"] == "skillfabric"
+        assert marketplace["plugins"] == [
+            {
+                "name": "skillfabric",
+                "description": "Compile native skills and route tasks through a bounded Task Wiki",
+                "source": "./skillfabric",
+                "category": "productivity",
+            }
+        ]
+
+    def test_claude_code_plugin_readme_describes_real_runtime_requirements(self) -> None:
+        readme = (PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        for snippet in (
+            "/skillfabric:doctor",
+            "/skillfabric:build",
+            "/skillfabric:route",
+            "embedding endpoint",
+            "does not execute the task",
+            "claude plugin marketplace add",
+            "Do not put API keys in Claude Code prompts",
+        ):
+            assert snippet in readme
 
     def test_root_readme_documents_claude_code_plugin(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -252,6 +280,9 @@ class PublicPackageTests(unittest.TestCase):
             "The CLI is the only writer",
             "The plugin installs no hooks",
             "To uninstall",
+            "claude plugin marketplace add",
+            "claude plugin install skillfabric@skillfabric",
+            "claude plugin uninstall skillfabric@skillfabric",
         ):
             self.assertIn(snippet, readme)
         self.assertNotIn("/skillfabric:prepare", readme)

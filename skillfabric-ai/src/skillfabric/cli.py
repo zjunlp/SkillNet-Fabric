@@ -45,10 +45,14 @@ PUBLIC_COMMANDS = (
     "run-state",
 )
 _CONFIG_ALIASES = {
-    "API_KEY": ("API_KEY", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
-    "BASE_URL": ("BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "ANTHROPIC_BASE_URL"),
-    "MODEL": ("MODEL", "ANTHROPIC_MODEL"),
-    "EMBEDDING_MODEL": ("EMBEDDING_MODEL",),
+    "LLM_API_KEY": (
+        "SKILLFABRIC_LLM_API_KEY",
+        "API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+    ),
+    "EMBEDDING_API_KEY": ("EMBEDDING_API_KEY", "API_KEY", "OPENAI_API_KEY"),
 }
 
 
@@ -240,9 +244,13 @@ def _configuration_status(env_path: Path) -> dict[str, Any]:
         present[field] = bool(file_key or shell_key)
         sources[field] = "env_file" if file_key else "environment" if shell_key else "missing"
     missing = [field for field in _CONFIG_ALIASES if not present[field]]
+    llm_configured = present["LLM_API_KEY"]
+    embedding_configured = present["EMBEDDING_API_KEY"]
     return {
         "env_file": str(env_path),
         "configured": not missing,
+        "llm_configured": llm_configured,
+        "embedding_configured": embedding_configured,
         "present": present,
         "sources": sources,
         "missing": missing,
@@ -400,6 +408,8 @@ def _doctor_state(args: argparse.Namespace) -> None:
     ready, build_id, skill_count = _workspace_readiness(workspace)
     payload = {
         "api_configured": config["configured"],
+        "llm_configured": config["llm_configured"],
+        "embedding_configured": config["embedding_configured"],
         "missing_configuration": config["missing"],
         "workspace": str(workspace.root),
         "workspace_ready": ready,
