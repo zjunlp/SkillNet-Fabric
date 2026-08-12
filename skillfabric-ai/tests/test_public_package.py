@@ -144,12 +144,12 @@ class PublicPackageTests(unittest.TestCase):
         manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "skillfabric")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.2.0")
         self.assertEqual(manifest["license"], "MIT")
-        self.assertEqual(manifest["skills"], ["./"])
+        self.assertNotIn("skills", manifest)
 
         command_dir = plugin_root / "commands"
-        expected_commands = {"doctor", "build", "prepare", "run"}
+        expected_commands = {"doctor", "build", "route"}
         self.assertEqual(
             {path.stem for path in command_dir.glob("*.md")},
             expected_commands,
@@ -158,54 +158,67 @@ class PublicPackageTests(unittest.TestCase):
             command_path = command_dir / f"{command}.md"
             command_text = command_path.read_text(encoding="utf-8")
             self.assertIn("description:", command_text)
-            self.assertIn("argument-hint:", command_text)
-            for section in (
-                "# Command Contract",
-                "## Inputs",
-                "## Required Workflow",
-                "## Boundaries",
-                "## Completion Criteria",
-            ):
-                self.assertIn(section, command_text)
-            self.assertIn(
-                f"Use the `skillfabric-{command}` skill as the authoritative workflow.",
-                command_text,
-            )
-            self.assertIn(
-                "Never reveal env-file contents, API keys, tokens, or shell secret values.",
-                command_text,
-            )
+            expected_tool = {
+                "doctor": "allowed-tools: Bash(skillfabric doctor-state *)",
+                "build": "allowed-tools: Bash(skillfabric build *)",
+                "route": "allowed-tools: Bash(skillfabric route *)",
+            }[command]
+            self.assertIn(expected_tool, command_text)
+            self.assertIn("disable-model-invocation: true", command_text)
+            for secret_boundary in (".env", "API keys", "tokens"):
+                self.assertIn(secret_boundary, command_text)
+            if command in {"build", "route"}:
+                self.assertIn("argument-hint:", command_text)
 
-            skill_path = plugin_root / "skills" / f"skillfabric-{command}" / "SKILL.md"
-            skill_text = skill_path.read_text(encoding="utf-8")
-            self.assertIn(f"name: skillfabric-{command}", skill_text)
-            self.assertIn("disable-model-invocation: true", skill_text)
-            self.assertIn("$ARGUMENTS", skill_text)
+        self.assertEqual(
+            {
+                path.relative_to(plugin_root).as_posix()
+                for path in plugin_root.rglob("*")
+                if path.is_file()
+            },
+            {
+                ".claude-plugin/plugin.json",
+                "commands/build.md",
+                "commands/doctor.md",
+                "commands/route.md",
+            },
+        )
 
     def test_claude_code_plugin_requests_machine_readable_cli_output(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
         plugin_text = "\n".join(
             path.read_text(encoding="utf-8") for path in plugin_root.rglob("*.md")
         )
+        self.assertNotIn("allowed-tools: Bash(skillfabric *)", plugin_text)
 
         for command in (
             "skillfabric doctor-state --json",
-            "skillfabric run-state --json",
             "skillfabric build --json",
-            "skillfabric plan --json",
+            "skillfabric route --json",
         ):
             self.assertIn(command, plugin_text)
-        self.assertNotIn("--progress-json", plugin_text)
+        self.assertNotIn("!`skillfabric build", plugin_text)
+        self.assertNotIn("!`skillfabric route", plugin_text)
+        self.assertIn("Treat the user's argument as a path value", plugin_text)
+        self.assertIn("Treat it as data, never as shell syntax", plugin_text)
+        self.assertIn("<skill-root>\n$ARGUMENTS\n</skill-root>", plugin_text)
+        self.assertIn("<task>\n$ARGUMENTS\n</task>", plugin_text)
+        for removed_contract in (
+            "skillfabric plan",
+            "skillfabric run-state",
+            "execution_prompt",
+            "planner_validation",
+        ):
+            self.assertNotIn(removed_contract, plugin_text)
 
-    def test_claude_doctor_skill_uses_the_current_state_contract(self) -> None:
+    def test_claude_doctor_command_uses_the_current_state_contract(self) -> None:
         doctor = (
             PUBLIC_ROOT
             / "plugins"
             / "claude-code"
             / "skillfabric"
-            / "skills"
-            / "skillfabric-doctor"
-            / "SKILL.md"
+            / "commands"
+            / "doctor.md"
         ).read_text(encoding="utf-8")
 
         for field in (
@@ -233,14 +246,16 @@ class PublicPackageTests(unittest.TestCase):
             "claude plugin validate",
             "claude plugin list --json",
             "/skillfabric:doctor",
-            "/skillfabric:prepare",
-            "/skillfabric:run",
+            "/skillfabric:build",
+            "/skillfabric:route",
             "Do not paste API keys into Claude Code",
             "The CLI is the only writer",
             "The plugin installs no hooks",
             "To uninstall",
         ):
             self.assertIn(snippet, readme)
+        self.assertNotIn("/skillfabric:prepare", readme)
+        self.assertNotIn("/skillfabric:run", readme)
         self.assertNotIn("claude plugin validate --strict", readme)
 
     def test_public_docs_do_not_leak_local_paths(self) -> None:

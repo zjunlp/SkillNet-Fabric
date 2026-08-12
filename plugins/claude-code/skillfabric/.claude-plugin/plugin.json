@@ -1,11 +1,10 @@
 {
   "name": "skillfabric",
-  "version": "0.1.0",
-  "description": "Route tasks through a SkillFabric workspace and build external-agent execution packages.",
+  "version": "0.2.0",
+  "description": "Build a SkillFabric workspace and route tasks to relevant native skills.",
   "author": {
     "name": "SkillFabric Contributors"
   },
   "license": "MIT",
-  "keywords": ["agents", "skills", "routing", "execution-package"],
-  "skills": ["./"]
+  "keywords": ["agents", "skills", "routing"]
 }

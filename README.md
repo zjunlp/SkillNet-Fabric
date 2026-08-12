@@ -68,7 +68,7 @@ skillfabric init --check --json --env-file .env
 
 The interactive command does not echo secret input. Do not commit `.env` files.
 
-### Build, Route, and Plan
+### Build and Route
 
 ```bash
 skillfabric build \
@@ -80,14 +80,13 @@ skillfabric route \
   "Summarize this repository and identify release risks" \
   --workspace .skillfabric \
   --env-file .env
-
-skillfabric plan \
-  "Summarize this repository and identify release risks" \
-  --workspace .skillfabric \
-  --env-file .env
 ```
 
-`plan` can perform routing itself, so the shortest complete workflow is `init`, `build`, then `plan`.
+The shortest routing workflow is `init`, `build`, then `route`. `route` returns the selected
+Skills and their evidence; it does not execute the task. The optional `plan` CLI remains available
+for downstream runtimes that need a generated execution prompt. The bundled Claude Code plugin
+provides only `doctor`, `build`, and `route`; it does not call `init` automatically and keeps
+workspace and environment options at their CLI defaults.
 
 Builds are incremental by default. Re-run the same `build` command after adding, editing, or
 removing `SKILL.md` files: unchanged contracts, embeddings, and relation judgments are reused,
@@ -161,6 +160,9 @@ endpoint as an explicit alternative. The relation informs exploration but never 
 endpoint into the final selected set.
 
 ### 4. Generate the Execution Prompt
+
+Planning is an optional Python/CLI stage for downstream runtimes. The bundled Claude Code plugin
+ends after route selection and does not create or consume this package.
 
 The planner receives:
 
@@ -251,12 +253,15 @@ explorer validation owns bounded recovery, so the backend does not add a nested 
 
 ## Claude Code Plugin
 
-The bundled plugin provides four user-facing commands:
+The bundled plugin provides three user-facing commands:
 
 - `/skillfabric:doctor` checks CLI, API, and workspace readiness.
 - `/skillfabric:build` compiles a skill corpus.
-- `/skillfabric:prepare` creates a validated route and execution prompt, then stops.
-- `/skillfabric:run` prepares or reuses a prompt and executes it in the active Claude Code session.
+- `/skillfabric:route` selects relevant native Skills for one task and reports the evidence.
+
+The plugin stops after routing. It does not call the optional `plan` CLI, generate an execution
+prompt, execute the task, or manage historical run state. Claude Code remains responsible for
+loading and using the selected native Skills.
 
 Load the plugin directly from a clone:
 
@@ -267,9 +272,9 @@ claude --plugin-dir /path/to/SkillFabric/plugins/claude-code/skillfabric
 Then run:
 
 ```text
-/skillfabric:doctor --workspace .skillfabric
-/skillfabric:build .claude/skills --workspace .skillfabric
-/skillfabric:prepare "Summarize this repository and identify release risks" --workspace .skillfabric
+/skillfabric:doctor
+/skillfabric:build .claude/skills
+/skillfabric:route "Summarize this repository and identify release risks"
 ```
 
 For a user-level installation:
@@ -282,11 +287,10 @@ claude plugin validate ~/.claude/skills/skillfabric
 claude plugin list --json
 ```
 
-Do not paste API keys into Claude Code. The CLI is the only writer of registry, graph, route,
-planner-validation, and prompt artifacts. Generated skill sources are treated as untrusted data;
-routing reads only the bounded query wiki, and planning reads only selected contracts and sources
-from the graph workspace. The plugin installs no hooks, MCP servers, settings, or background
-tasks. Only `/skillfabric:run` proceeds to task execution.
+Do not paste API keys into Claude Code. The CLI is the only writer of registry, graph, route, and
+wiki artifacts. Generated skill sources are treated as untrusted data, and routing reads only the
+bounded query Wiki. The plugin installs no hooks, MCP servers, settings, or background tasks. It
+only reports a validated Skill selection; it does not execute the task.
 
 To diagnose installation or configuration:
 
@@ -305,8 +309,8 @@ Common failures are explicit:
 - Missing API fields: run `skillfabric init --env-file .env`.
 - Build provider or model failure: verify the endpoint against a small disposable skill root; do
   not bypass a failed semantic stage.
-- Route or plan validation failure: inspect the non-secret validation artifact in the returned run
-  directory.
+- Route validation failure: report the non-secret route error and rebuild the workspace when its
+  status is not ready.
 
 To uninstall the user-level plugin, remove `~/.claude/skills/skillfabric` and confirm the result
 with `claude plugin list --json`.
@@ -367,6 +371,9 @@ SkillFabric writes generated state under the configured workspace:
 ```
 
 Artifacts use exact validated fields. Rebuild a workspace when canonical artifact validation fails instead of mutating generated files by hand.
+
+The `runs/<trace-id>/execution_package` subtree is created only by the optional `plan` stage; it is
+not required for routing or used by the bundled plugin.
 
 ---
 
