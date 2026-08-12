@@ -143,6 +143,11 @@ def test_build_stats_contain_only_graph_build_counts(tmp_path) -> None:
     result = _build(workspace)
 
     assert set(result.stats) == {
+        "incremental",
+        "added_skill_count",
+        "modified_skill_count",
+        "removed_skill_count",
+        "reused_skill_count",
         "skill_count",
         "edge_count",
         "edge_counts",
@@ -152,6 +157,8 @@ def test_build_stats_contain_only_graph_build_counts(tmp_path) -> None:
         "contract_cache_hits",
         "relation_cache_hits",
         "cycle_review_count",
+        "embedding_cache_hits",
+        "new_embedding_count",
     }
     assert not (result.workspace.root / "reports").exists()
 
