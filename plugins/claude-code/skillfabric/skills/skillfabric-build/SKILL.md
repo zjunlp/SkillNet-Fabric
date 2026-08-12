@@ -22,7 +22,8 @@ supported build flags.
 - Use `.claude/skills` when no root is given and that directory exists.
 - Ask for a root if neither is available.
 - Use `.skillfabric` for `--workspace` and `.env` for `--env-file` when omitted.
-- Forward only supported flags: `--embedding-model`, `--llm-*`, and `--quiet`.
+- Forward only supported flags: `--embedding-model`, `--llm-model`,
+  `--llm-reasoning-effort`, and `--llm-progress-every`.
 
 ## Safety Boundaries
 
@@ -42,7 +43,8 @@ artifact paths.
 2. Run `skillfabric init --check --json --env-file $env_file` without printing
    the env file. Stop if configuration is incomplete.
 3. Run `skillfabric build --json --skill-root $skill_root --workspace $workspace --env-file $env_file`
-   with supported forwarded flags.
+   with supported forwarded flags. Progress is disabled unless the user
+   explicitly supplies `--llm-progress-every N`.
 4. Parse the CLI JSON and confirm every returned artifact path stays under the
    intended workspace.
 

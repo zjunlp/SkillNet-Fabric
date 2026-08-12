@@ -14,11 +14,14 @@ execution.
 
 ## Input Contract
 
-Treat `$ARGUMENTS` as task text plus recognized SkillFabric flags.
+Treat `$ARGUMENTS` as task text plus the small set of recognized SkillFabric
+workflow flags.
 
 - The task is the user's natural-language request after removing explicit
   workflow flags. Preserve the user's wording.
-- Treat only recognized flags as workflow configuration.
+- Treat only `--workspace`, `--env-file`, and `--skill-root` as workflow
+  configuration. Keep route and planner implementation limits at their stable
+  runtime defaults.
 - Use `.skillfabric` for the workspace and `.env` for the env file when omitted.
 - Use `--skill-root` only when a build is required.
 

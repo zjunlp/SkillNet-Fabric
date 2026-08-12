@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,8 +20,6 @@ from skillfabric.indexing.embeddings import (
 )
 from skillfabric.orchestrator.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
-    DEFAULT_PLANNER_MAX_ATTEMPTS,
-    DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
     ExecutionPackageResult,
     plan_execution_package,
 )
@@ -48,33 +45,32 @@ class SkillFabric:
         if not isinstance(self.workspace, Workspace):
             self.workspace = Workspace(self.workspace)
 
-    def build(self, skill_root: str | Path, **overrides: Any) -> BuildResult:
-        env_file = overrides.pop("env_file", self.env_file)
+    def build(
+        self,
+        skill_root: str | Path,
+        *,
+        env_file: str | Path | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        embedding_model: str | None = None,
+        llm_model: str | None = None,
+        llm_reasoning_effort: str | None = None,
+        llm_progress_every: int | None = None,
+    ) -> BuildResult:
+        env_file = self.env_file if env_file is None else env_file
         provider = _embedding_provider(
-            overrides.pop("embedding_provider", None),
+            embedding_provider,
             env_file=env_file,
-            model_id=overrides.pop("embedding_model", None),
+            model_id=embedding_model,
         )
         llm_options = LLMJobOptions.from_env(
             env_path=env_file,
-            concurrency=_optional_int(overrides.pop("llm_concurrency", None)),
-            rate_limit_per_minute=_optional_float(overrides.pop("llm_rate_limit_per_minute", None)),
-            max_retries=_optional_int(overrides.pop("llm_max_retries", None)),
-            retry_backoff_seconds=_optional_float(overrides.pop("llm_retry_backoff_seconds", None)),
-            progress_every=_optional_int(overrides.pop("llm_progress_every", None)),
-            batch_size=_optional_int(overrides.pop("llm_batch_size", None)),
-            checkpoint_interval=_optional_int(overrides.pop("llm_checkpoint_interval", None)),
-            circuit_breaker_threshold=_optional_int(
-                overrides.pop("llm_circuit_breaker_threshold", None)
-            ),
+            progress_every=_optional_int(llm_progress_every, name="llm_progress_every"),
         )
-        llm_model = _optional_string(overrides.pop("llm_model", None), name="llm_model")
+        llm_model = _optional_string(llm_model, name="llm_model")
         llm_reasoning_effort = _optional_string(
-            overrides.pop("llm_reasoning_effort", None),
+            llm_reasoning_effort,
             name="llm_reasoning_effort",
         )
-        if overrides:
-            raise TypeError(f"unsupported build option(s): {', '.join(sorted(overrides))}")
         result = build_graph(
             BuildConfig(
                 skill_root=skill_root,
@@ -94,49 +90,38 @@ class SkillFabric:
         query: str,
         *,
         explorer_backend: WikiExplorerBackend | None = None,
-        **overrides: Any,
+        sdk_runtime: Any = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        env_file: str | Path | None = None,
+        max_selected_skills: int | None = None,
+        required_selected_skills: int | None = None,
+        trace_id: str | None = None,
+        explorer_model: str | None = None,
+        explorer_reasoning_effort: str | None = None,
     ) -> RouteResult:
         defaults = default_router_options()
-        sdk_runtime = overrides.pop("sdk_runtime", None)
-        embedding_provider = overrides.pop("embedding_provider", None)
         config = RouterConfig(
             workspace=self.workspace.root,
             query=query,
-            env_file=overrides.pop("env_file", self.env_file),
-            max_selected_skills=overrides.pop(
-                "max_selected_skills",
-                defaults.max_selected_skills,
+            env_file=self.env_file if env_file is None else env_file,
+            max_selected_skills=(
+                defaults.max_selected_skills
+                if max_selected_skills is None
+                else max_selected_skills
             ),
-            required_selected_skills=overrides.pop("required_selected_skills", None),
-            seed_limit=overrides.pop("seed_limit", defaults.seed_limit),
-            expanded_limit=overrides.pop("expanded_limit", defaults.expanded_limit),
-            max_depth=overrides.pop("max_depth", defaults.max_depth),
-            trace_id=overrides.pop("trace_id", None),
-            explorer_model=overrides.pop("explorer_model", None),
-            explorer_reasoning_effort=overrides.pop("explorer_reasoning_effort", None),
-            explorer_max_turns=overrides.pop(
-                "explorer_max_turns",
-                defaults.explorer_max_turns,
-            ),
-            explorer_load_timeout_ms=overrides.pop(
-                "explorer_load_timeout_ms",
-                defaults.explorer_load_timeout_ms,
-            ),
-            explorer_timeout_seconds=overrides.pop(
-                "explorer_timeout_seconds",
-                defaults.explorer_timeout_seconds,
-            ),
-            explorer_max_attempts=overrides.pop(
-                "explorer_max_attempts",
-                defaults.explorer_max_attempts,
-            ),
-            explorer_retry_delay_seconds=overrides.pop(
-                "explorer_retry_delay_seconds",
-                defaults.explorer_retry_delay_seconds,
-            ),
+            required_selected_skills=required_selected_skills,
+            seed_limit=defaults.seed_limit,
+            expanded_limit=defaults.expanded_limit,
+            max_depth=defaults.max_depth,
+            trace_id=trace_id,
+            explorer_model=explorer_model,
+            explorer_reasoning_effort=explorer_reasoning_effort,
+            explorer_max_turns=defaults.explorer_max_turns,
+            explorer_load_timeout_ms=defaults.explorer_load_timeout_ms,
+            explorer_timeout_seconds=defaults.explorer_timeout_seconds,
+            explorer_max_attempts=defaults.explorer_max_attempts,
+            explorer_retry_delay_seconds=defaults.explorer_retry_delay_seconds,
         )
-        if overrides:
-            raise TypeError(f"unsupported route option(s): {', '.join(sorted(overrides))}")
         return route_task(
             config,
             sdk_runtime=sdk_runtime,
@@ -158,9 +143,13 @@ class SkillFabric:
         llm_api_base: str | None = None,
         llm_timeout_seconds: float | None = None,
         planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
-        planner_max_attempts: int = DEFAULT_PLANNER_MAX_ATTEMPTS,
-        planner_retry_delay_seconds: float = DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
-        **route_overrides: Any,
+        explorer_backend: WikiExplorerBackend | None = None,
+        sdk_runtime: Any = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        max_selected_skills: int | None = None,
+        required_selected_skills: int | None = None,
+        explorer_model: str | None = None,
+        explorer_reasoning_effort: str | None = None,
     ) -> ExecutionPackageResult:
         if route is not None and route_file is not None:
             raise TypeError("plan accepts route and route_file as mutually exclusive inputs")
@@ -177,11 +166,28 @@ class SkillFabric:
                 raise ValueError("plan requires a query, route, or route_file")
             resolved_route = self.route(
                 resolved_query,
-                env_file=env_file or self.env_file,
-                **route_overrides,
+                explorer_backend=explorer_backend,
+                sdk_runtime=sdk_runtime,
+                embedding_provider=embedding_provider,
+                env_file=env_file,
+                max_selected_skills=max_selected_skills,
+                required_selected_skills=required_selected_skills,
+                explorer_model=explorer_model,
+                explorer_reasoning_effort=explorer_reasoning_effort,
             )
-        elif route_overrides:
-            raise TypeError("route options are only valid when plan performs routing")
+        elif any(
+            option is not None
+            for option in (
+                explorer_backend,
+                sdk_runtime,
+                embedding_provider,
+                max_selected_skills,
+                required_selected_skills,
+                explorer_model,
+                explorer_reasoning_effort,
+            )
+        ):
+            raise TypeError("routing options require plan to perform routing")
         if not resolved_query:
             raise ValueError("plan requires the original task query")
         resolved_root = package_root if package_root is not None else default_root
@@ -191,7 +197,7 @@ class SkillFabric:
             self.workspace,
             resolved_route,
             query=resolved_query,
-            env_file=env_file or self.env_file,
+            env_file=self.env_file if env_file is None else env_file,
             package_root=resolved_root,
             llm_model=llm_model,
             llm_reasoning_effort=llm_reasoning_effort,
@@ -199,8 +205,6 @@ class SkillFabric:
             llm_api_base=llm_api_base,
             llm_timeout_seconds=llm_timeout_seconds,
             planner_context_max_tokens=planner_context_max_tokens,
-            planner_max_attempts=planner_max_attempts,
-            planner_retry_delay_seconds=planner_retry_delay_seconds,
         )
 
     def _route_context(
@@ -262,23 +266,12 @@ def _embedding_provider(
     return provider
 
 
-def _optional_int(value: Any) -> int | None:
+def _optional_int(value: Any, *, name: str) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("integer build options must be integers")
+        raise ValueError(f"{name} must be an integer")
     return value
-
-
-def _optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("numeric build options must be numbers")
-    resolved = float(value)
-    if not math.isfinite(resolved):
-        raise ValueError("numeric build options must be finite")
-    return resolved
 
 
 def _optional_string(value: Any, *, name: str) -> str | None:

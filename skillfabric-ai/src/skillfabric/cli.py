@@ -19,9 +19,6 @@ from skillfabric.compiled_graph.builder import (
 from skillfabric.compiled_graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
-    DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
-    DEFAULT_PLANNER_MAX_ATTEMPTS,
-    DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
     plan_execution_package,
 )
 from skillfabric.router.config import RouterConfig
@@ -113,21 +110,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     plan_parser.add_argument("--workspace", default=".skillfabric")
     plan_parser.add_argument("--env-file", default=".env")
     plan_parser.add_argument("--package-root")
-    plan_parser.add_argument(
-        "--planner-context-max-tokens",
-        type=int,
-        default=DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
-    )
-    plan_parser.add_argument(
-        "--planner-max-attempts",
-        type=int,
-        default=DEFAULT_PLANNER_MAX_ATTEMPTS,
-    )
-    plan_parser.add_argument(
-        "--planner-retry-delay-seconds",
-        type=float,
-        default=DEFAULT_PLANNER_RETRY_DELAY_SECONDS,
-    )
     _add_route_tuning(plan_parser)
     _add_output_options(plan_parser)
     plan_parser.set_defaults(handler=_plan)
@@ -163,21 +145,19 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
 
 
 def _add_llm_options(parser: argparse.ArgumentParser) -> None:
+    """Add the small set of build options users may need to change."""
+
     parser.add_argument("--llm-model")
     parser.add_argument("--llm-reasoning-effort")
-    parser.add_argument("--llm-concurrency", type=int)
-    parser.add_argument("--llm-rate-limit-per-minute", type=float)
-    parser.add_argument("--llm-max-retries", type=int)
-    parser.add_argument("--llm-retry-backoff-seconds", type=float)
-    parser.add_argument("--llm-progress-every", type=int)
-    parser.add_argument("--llm-batch-size", type=int)
-    parser.add_argument("--llm-checkpoint-interval", type=int)
-    parser.add_argument("--llm-circuit-breaker-threshold", type=int)
+    parser.add_argument(
+        "--llm-progress-every",
+        type=int,
+        help="Print batch progress to stderr every N completed jobs (default: disabled)",
+    )
 
 
 def _add_output_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
-    parser.add_argument("--quiet", action="store_true")
 
 
 def _add_route_options(parser: argparse.ArgumentParser) -> None:
@@ -189,16 +169,10 @@ def _add_route_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_route_tuning(parser: argparse.ArgumentParser) -> None:
+    """Add route controls that describe the requested result, not internals."""
+
     parser.add_argument("--max-selected-skills", type=int)
-    parser.add_argument("--seed-limit", type=int)
-    parser.add_argument("--expanded-limit", type=int)
-    parser.add_argument("--max-depth", type=int)
     parser.add_argument("--explorer-model")
-    parser.add_argument("--explorer-max-turns", type=int)
-    parser.add_argument("--explorer-load-timeout-ms", type=int)
-    parser.add_argument("--explorer-timeout-seconds", type=float)
-    parser.add_argument("--explorer-max-attempts", type=int)
-    parser.add_argument("--explorer-retry-delay-seconds", type=float)
 
 
 def _help(
@@ -373,9 +347,6 @@ def _plan(args: argparse.Namespace) -> None:
             query=query,
             env_file=args.env_file,
             package_root=package_root,
-            planner_context_max_tokens=args.planner_context_max_tokens,
-            planner_max_attempts=args.planner_max_attempts,
-            planner_retry_delay_seconds=args.planner_retry_delay_seconds,
         )
     print_command_result("plan", result.to_dict(), json_mode=args.json)
 
@@ -576,56 +547,27 @@ def _router_config(
             if args.max_selected_skills is None
             else args.max_selected_skills
         ),
-        seed_limit=defaults.seed_limit if args.seed_limit is None else args.seed_limit,
-        expanded_limit=(
-            defaults.expanded_limit if args.expanded_limit is None else args.expanded_limit
-        ),
-        max_depth=defaults.max_depth if args.max_depth is None else args.max_depth,
+        seed_limit=defaults.seed_limit,
+        expanded_limit=defaults.expanded_limit,
+        max_depth=defaults.max_depth,
         explorer_model=args.explorer_model,
-        explorer_max_turns=(
-            defaults.explorer_max_turns
-            if args.explorer_max_turns is None
-            else args.explorer_max_turns
-        ),
-        explorer_load_timeout_ms=(
-            defaults.explorer_load_timeout_ms
-            if args.explorer_load_timeout_ms is None
-            else args.explorer_load_timeout_ms
-        ),
-        explorer_timeout_seconds=(
-            defaults.explorer_timeout_seconds
-            if args.explorer_timeout_seconds is None
-            else args.explorer_timeout_seconds
-        ),
-        explorer_max_attempts=(
-            defaults.explorer_max_attempts
-            if args.explorer_max_attempts is None
-            else args.explorer_max_attempts
-        ),
-        explorer_retry_delay_seconds=(
-            defaults.explorer_retry_delay_seconds
-            if args.explorer_retry_delay_seconds is None
-            else args.explorer_retry_delay_seconds
-        ),
+        explorer_max_turns=defaults.explorer_max_turns,
+        explorer_load_timeout_ms=defaults.explorer_load_timeout_ms,
+        explorer_timeout_seconds=defaults.explorer_timeout_seconds,
+        explorer_max_attempts=defaults.explorer_max_attempts,
+        explorer_retry_delay_seconds=defaults.explorer_retry_delay_seconds,
     )
 
 
 def _llm_options(args: argparse.Namespace) -> LLMJobOptions:
     return LLMJobOptions.from_env(
         env_path=args.env_file,
-        concurrency=args.llm_concurrency,
-        rate_limit_per_minute=args.llm_rate_limit_per_minute,
-        max_retries=args.llm_max_retries,
-        retry_backoff_seconds=args.llm_retry_backoff_seconds,
         progress_every=args.llm_progress_every,
-        batch_size=args.llm_batch_size,
-        checkpoint_interval=args.llm_checkpoint_interval,
-        circuit_breaker_threshold=args.llm_circuit_breaker_threshold,
     )
 
 
 def _show_status(args: argparse.Namespace) -> bool:
-    return not args.json and not args.quiet
+    return not args.json
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:

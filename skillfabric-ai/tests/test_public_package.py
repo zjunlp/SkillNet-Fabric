@@ -248,15 +248,11 @@ class PublicPackageTests(unittest.TestCase):
         text = readme.read_text(encoding="utf-8")
         self.assertNotIn("/Users/", text, readme)
 
-    def test_python_facade_rejects_coerced_route_limits(self) -> None:
+    def test_python_facade_exposes_only_stable_route_options(self) -> None:
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
-        invalid_overrides = [
-            {"max_selected_skills": True},
-            {"seed_limit": "3"},
-            {"explorer_timeout_seconds": "30"},
-        ]
+        invalid_overrides = [{"max_selected_skills": True}]
 
         with patch("skillfabric.api.route_task") as route_mock:
             for overrides in invalid_overrides:
@@ -265,23 +261,21 @@ class PublicPackageTests(unittest.TestCase):
 
         route_mock.assert_not_called()
 
-    def test_python_facade_rejects_coerced_build_options(self) -> None:
+    def test_python_facade_rejects_internal_build_options(self) -> None:
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
-        invalid_overrides = [
-            {"llm_concurrency": True},
-            {"embedding_model": 123},
-        ]
+        invalid_overrides = [{"llm_concurrency": True}, {"embedding_model": 123}]
 
         with patch("skillfabric.api.build_graph") as build_mock:
             for overrides in invalid_overrides:
-                with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                expected = TypeError if "llm_concurrency" in overrides else ValueError
+                with self.subTest(overrides=overrides), self.assertRaises(expected):
                     client.build(FIXTURE_SKILLS, **overrides)
 
         build_mock.assert_not_called()
 
-    def test_python_facade_forwards_build_only_llm_overrides(self) -> None:
+    def test_python_facade_forwards_stable_build_options(self) -> None:
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
@@ -294,15 +288,13 @@ class PublicPackageTests(unittest.TestCase):
                 embedding_provider=FakeEmbeddingProvider(),
                 llm_model="openai/responses/gpt-5.6-luna",
                 llm_reasoning_effort="medium",
-                llm_checkpoint_interval=25,
-                llm_circuit_breaker_threshold=7,
+                llm_progress_every=25,
             )
 
         config = build_mock.call_args.args[0]
         self.assertEqual(config.llm_model, "openai/responses/gpt-5.6-luna")
         self.assertEqual(config.llm_reasoning_effort, "medium")
-        self.assertEqual(config.llm_options.checkpoint_interval, 25)
-        self.assertEqual(config.llm_options.circuit_breaker_threshold, 7)
+        self.assertEqual(config.llm_options.progress_every, 25)
 
     def test_python_facade_rejects_removed_wiki_summary_mode(self) -> None:
         from skillfabric import SkillFabric

@@ -183,9 +183,10 @@ Planner messages, selected skill context, and the token estimate are constructed
 | `doctor-state` | Report plugin and workspace readiness | `skillfabric doctor-state --workspace .skillfabric` |
 | `run-state` | Resolve the latest finalized execution package | `skillfabric run-state --workspace .skillfabric` |
 
-Use `skillfabric help workflow` for the short workflow or `skillfabric <command> --help` for all options.
-Build, route, and plan print concise terminal summaries by default. Add `--json` when a script or
-plugin needs the stable machine-readable payload.
+Use `skillfabric help workflow` for the short workflow or `skillfabric <command> --help` for the
+documented options. Build, route, and plan print concise terminal summaries by default. Add
+`--json` when a script or plugin needs the stable machine-readable payload. Batch progress is
+quiet by default; pass `--llm-progress-every N` to `build` when observing a large build.
 
 ---
 
@@ -207,7 +208,8 @@ print([skill.skill_id for skill in route.selected_skills])
 print(package.prompt_path)
 ```
 
-Planning checks its estimated prompt size before calling the model. Increase `planner_context_max_tokens` only when the configured model can accept the larger context.
+Planning checks its estimated prompt size before calling the model. The planner
+context and recovery policy use stable runtime defaults.
 
 Routing uses the Claude explorer by default. An isolated Codex app-server backend can be injected
 through the same public API:
@@ -323,13 +325,11 @@ with `claude plugin list --json`.
 | `EMBEDDING_TEXT_CHARS` | Maximum characters retained per embedding input; `0` disables truncation | `4000` |
 | `EMBEDDING_MAX_RETRIES` | Retries for each embedding batch | `2` |
 | `SKILLFABRIC_MAX_SELECTED_SKILLS` | Maximum explorer selection size | `8` |
-| `SKILLFABRIC_SEED_LIMIT` | Hybrid retrieval seed count | `24` |
-| `SKILLFABRIC_EXPANDED_LIMIT` | Maximum candidates after graph expansion | `100` |
-| `SKILLFABRIC_MAX_GRAPH_DEPTH` | Operational graph traversal depth | `2` |
-| `SKILLFABRIC_EXPLORER_MAX_ATTEMPTS` | Maximum explorer calls for one materialized query wiki | `2` |
-| `SKILLFABRIC_EXPLORER_RETRY_DELAY_SECONDS` | Delay between explorer attempts | `1` |
 
-Project-specific LLM aliases such as `SKILLFABRIC_LLM_API_KEY`, `SKILLFABRIC_LLM_API_BASE`, and `SKILLFABRIC_LLM_MODEL` are also supported. CLI flags override routing defaults where an equivalent option exists.
+Project-specific LLM aliases such as `SKILLFABRIC_LLM_API_KEY`, `SKILLFABRIC_LLM_API_BASE`, and
+`SKILLFABRIC_LLM_MODEL` are also supported. Build concurrency, retries, rate limits, batching,
+checkpointing, circuit breaking, graph expansion, and explorer recovery use stable internal
+defaults; they are intentionally omitted from the routine configuration surface.
 
 ---
 
