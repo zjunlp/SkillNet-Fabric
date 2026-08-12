@@ -96,6 +96,12 @@ class JsonObjectCheckpointCache:
         if len(self._pending) >= self.interval:
             self.flush()
 
+    def retain(self, keys: set[str]) -> None:
+        """Drop entries that no longer belong to the current build input."""
+
+        self._entries = {key: value for key, value in self._entries.items() if key in keys}
+        self._pending = {key: value for key, value in self._pending.items() if key in keys}
+
     def flush(self) -> None:
         """Atomically write the current partial shard, if any."""
 

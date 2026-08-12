@@ -89,6 +89,11 @@ skillfabric plan \
 
 `plan` can perform routing itself, so the shortest complete workflow is `init`, `build`, then `plan`.
 
+Builds are incremental by default. Re-run the same `build` command after adding, editing, or
+removing `SKILL.md` files: unchanged contracts, embeddings, and relation judgments are reused,
+while affected skills and relationships are refreshed. The final graph, indexes, and Full Wiki
+are still validated and published as one consistent workspace.
+
 > [!NOTE]
 > Build, route, and plan use external model services. Start with a small skill corpus when validating a new endpoint or its service limits.
 
@@ -123,7 +128,7 @@ The build pipeline:
 6. Validates relation direction, uniqueness, and dependency acyclicity.
 7. Materializes the canonical graph and the reusable Full Wiki.
 
-Wiki summaries are derived deterministically from validated contracts. Wiki materialization makes no additional model calls and does not alter contract extraction, semantic relation judgment, or embeddings.
+Full Wiki cards are rendered deterministically from validated contracts. Wiki materialization makes no additional model calls and does not alter contract extraction, semantic relation judgment, or embeddings.
 
 LLM-backed build jobs retry within the compiler. SkillFabric writes canonical graph and Wiki
 artifacts without producing a separate billing or usage report.
@@ -350,8 +355,7 @@ SkillFabric writes generated state under the configured workspace:
 │   ├── index.md
 │   ├── manifest.json
 │   ├── health.md
-│   ├── skills/
-│   └── workflows/
+│   └── skills/
 ├── runs/<trace-id>/
 │   ├── query.json
 │   ├── query_wiki/

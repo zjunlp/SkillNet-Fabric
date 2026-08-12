@@ -26,7 +26,6 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         "",
         "## Corpus",
         f"- skills: {len(source.skills)}",
-        f"- workflows: {len(source.operational_edges)}",
         "",
         "## Skill Cards",
     ]
@@ -38,14 +37,6 @@ def _root_index(source: WikiSource, page_summaries: dict[str, str]) -> str:
         if description:
             lines.append(f"  summary: {description}")
         lines.append(f"  source: [full SKILL.md]({source_path})")
-    if source.operational_edges:
-        lines.extend(["", "## Workflows"])
-        for edge in sorted(
-            source.operational_edges, key=lambda item: (item.type, item.source, item.target)
-        ):
-            entity_id = f"{edge.source}__{edge.target}__{edge.type}"
-            title = f"{edge.source} -> {edge.target}"
-            lines.append(f"- [{title}](workflows/{slug(entity_id)}.md): {edge.type}. {edge.reason}")
     lines.extend(["", "## Full Skill Sources"])
     for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
         lines.append(f"- [{skill.name}](skills/sources/{slug(skill_id)}.md)")

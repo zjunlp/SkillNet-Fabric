@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import Counter
@@ -100,6 +101,7 @@ def build_graph(
     try:
         with workspace.lock():
             lock_acquired = True
+            previous_skills = _load_previous_skill_snapshot(workspace)
             contract_extractor = deps.contract_extractor or LiteLLMContractExtractor(
                 config=build_llm_config()
             )
@@ -127,6 +129,7 @@ def build_graph(
             )
             if duplicate_ids:
                 raise ValueError(f"duplicate skill id(s): {', '.join(duplicate_ids)}")
+            change_stats = _skill_change_stats(previous_skills, skills)
 
             stage = "contracts"
             _write_running_status(workspace, build_id, stage=stage)
@@ -178,6 +181,7 @@ def build_graph(
             _write_running_status(workspace, build_id, stage=stage)
             edge_counts = Counter(edge.type for edge in projection.edges)
             stats = {
+                **change_stats,
                 "skill_count": len(skills),
                 "edge_count": len(projection.edges),
                 "edge_counts": {
@@ -195,6 +199,8 @@ def build_graph(
                 "contract_cache_hits": sum(record.cache_hit for record in contract_records),
                 "relation_cache_hits": sum(decision.cache_hit for decision in decisions),
                 "cycle_review_count": projection.cycle_review_count,
+                "embedding_cache_hits": int(retrieval.metrics.get("cache_hit_count", 0)),
+                "new_embedding_count": int(retrieval.metrics.get("new_embedding_count", 0)),
             }
             _write_canonical_artifacts(
                 workspace,
@@ -247,6 +253,75 @@ def _write_canonical_artifacts(
         workspace.graph_dir / "relation_decisions.jsonl",
         [decision.to_dict() for decision in decisions],
     )
+
+
+def _load_previous_skill_snapshot(workspace: Workspace) -> dict[str, str] | None:
+    """Load the last ready registry for user-facing incremental build reporting."""
+
+    status_path = workspace.status_path
+    registry_path = workspace.graph_dir / "registry.jsonl"
+    if not status_path.is_file() or not registry_path.is_file():
+        return None
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(status, dict)
+            or status.get("state") != "ready"
+            or status.get("stage") != "complete"
+        ):
+            return None
+        snapshot: dict[str, str] = {}
+        for line in registry_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                return None
+            skill_id = row.get("id")
+            content_hash = row.get("content_hash")
+            if (
+                not isinstance(skill_id, str)
+                or not skill_id.strip()
+                or not isinstance(content_hash, str)
+                or not content_hash.strip()
+                or skill_id in snapshot
+            ):
+                return None
+            snapshot[skill_id] = content_hash
+        return snapshot or None
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _skill_change_stats(
+    previous: dict[str, str] | None,
+    skills: list[SkillNode],
+) -> dict[str, int | bool]:
+    """Describe source changes without exposing internal cache controls."""
+
+    current = {skill.id: skill.content_hash for skill in skills}
+    if previous is None:
+        return {
+            "incremental": False,
+            "added_skill_count": 0,
+            "modified_skill_count": 0,
+            "removed_skill_count": 0,
+            "reused_skill_count": 0,
+        }
+    added = set(current) - set(previous)
+    removed = set(previous) - set(current)
+    modified = {
+        skill_id
+        for skill_id in set(current) & set(previous)
+        if current[skill_id] != previous[skill_id]
+    }
+    return {
+        "incremental": True,
+        "added_skill_count": len(added),
+        "modified_skill_count": len(modified),
+        "removed_skill_count": len(removed),
+        "reused_skill_count": len(set(current) - added - modified),
+    }
 
 
 def _write_running_status(

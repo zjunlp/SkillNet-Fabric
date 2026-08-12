@@ -318,6 +318,17 @@ def _build_output(result: BuildResult, wiki: WikiBuildResult) -> dict[str, Any]:
     return {
         "workspace": str(workspace.root),
         "build_id": result.graph.build_id,
+        "incremental": bool(result.stats.get("incremental", False)),
+        "added_skill_count": int(result.stats.get("added_skill_count", 0)),
+        "modified_skill_count": int(result.stats.get("modified_skill_count", 0)),
+        "removed_skill_count": int(result.stats.get("removed_skill_count", 0)),
+        "reused_skill_count": int(result.stats.get("reused_skill_count", 0)),
+        "cache": {
+            "contracts_reused": int(result.stats.get("contract_cache_hits", 0)),
+            "relations_reused": int(result.stats.get("relation_cache_hits", 0)),
+            "embeddings_reused": int(result.stats.get("embedding_cache_hits", 0)),
+            "embeddings_created": int(result.stats.get("new_embedding_count", 0)),
+        },
         "skill_count": len(result.graph.nodes),
         "graph": {
             "node_count": len(result.graph.nodes),

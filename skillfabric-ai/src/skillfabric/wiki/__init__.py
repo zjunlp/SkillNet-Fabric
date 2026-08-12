@@ -1,1 +1,1 @@
-"""Wiki package for skill pages, workflow pages, and query wiki."""
+"""Wiki package for Full Wiki pages and task-local query wikis."""

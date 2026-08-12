@@ -37,8 +37,8 @@ def analyze_wiki_health(workspace: Workspace) -> WikiHealthReport:
             report.raw_llm_output_leaks.append(str(page))
         if page.parent == workspace.wiki_skill_cards_dir and "## Inputs" not in text:
             report.skills_without_contract_sections.append(page.stem)
-        if page.parent == workspace.wiki_skill_cards_dir and "## Composition Notes" not in text:
-            report.skills_without_graph_links.append(page.stem)
+        if page.parent == workspace.wiki_skill_cards_dir and "## Related Skills" not in text:
+            report.skills_without_related_links.append(page.stem)
         for target in WIKILINK_RE.findall(_strip_fenced_code_blocks(generated_text)):
             target_path = _wikilink_target_path(wiki_dir, target)
             if not target_path.exists():
@@ -108,7 +108,7 @@ def render_wiki_health_report(report: WikiHealthReport) -> str:
         "Broken Links": report.broken_links,
         "Orphan Skill Pages": report.orphan_skill_pages,
         "Skills Without Contract Sections": report.skills_without_contract_sections,
-        "Skills Without Graph Links": report.skills_without_graph_links,
+        "Skills Without Related Links": report.skills_without_related_links,
         "Raw LLM Output Leaks": report.raw_llm_output_leaks,
     }
     for title, values in details.items():

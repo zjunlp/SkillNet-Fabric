@@ -190,6 +190,12 @@ def validate_candidate_pairs(
             f"relation validation failed for {pair_keys}: {error}"
         ) from error
     try:
+        checkpoint_cache.retain(
+            {
+                _cache_key(pair, skills_by_id, contracts, judge.model_id)
+                for pair in ordered_pairs
+            }
+        )
         checkpoint_cache.compact()
     except CheckpointCacheError as exc:
         raise RelationValidationError(f"failed to compact relation cache: {exc}") from exc

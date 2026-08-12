@@ -10,16 +10,13 @@ from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.health import analyze_wiki_health, write_wiki_health_report
 from skillfabric.wiki.indexer import render_index
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
-from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage, WikiSummaryRecord
+from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage
 from skillfabric.wiki.pages import slug
 from skillfabric.wiki.renderers import (
     _first_paragraph,
     _skill_page,
     _skill_source_page,
-    _skill_summary_payload,
-    _workflow_page,
 )
-from skillfabric.wiki.summaries import summary_from_payload
 
 
 def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
@@ -86,17 +83,9 @@ def _entity_pages(
     workspace: Workspace,
 ) -> list[WikiPage]:
     pages: list[WikiPage] = []
-    summaries = _summary_records(source)
     for _skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
-        pages.append(_skill_page(source, skill, config, summaries, workspace))
+        pages.append(_skill_page(source, skill, config, workspace))
         pages.append(_skill_source_page(skill, workspace))
-    pages.extend(
-        _workflow_page(source, edge, workspace)
-        for edge in sorted(
-            source.operational_edges,
-            key=lambda item: (item.type, item.source, item.target),
-        )
-    )
     return pages
 
 
@@ -107,7 +96,7 @@ def _directory_page_summaries(pages: list[WikiPage]) -> dict[str, str]:
     for page in pages:
         if _is_skill_source_page(page):
             continue
-        if page.page_type in {"skill", "workflow"}:
+        if page.page_type == "skill":
             summaries[page.entity_id] = _first_paragraph(page.text)
     return summaries
 
@@ -141,17 +130,3 @@ def _reset_wiki_output(workspace: Workspace) -> None:
     if workspace.wiki_dir.exists():
         shutil.rmtree(workspace.wiki_dir)
     workspace.wiki_dir.mkdir(parents=True)
-
-
-def _summary_records(
-    source: WikiSource,
-) -> dict[tuple[str, str], WikiSummaryRecord]:
-    summaries: dict[tuple[str, str], WikiSummaryRecord] = {}
-    for skill_id, skill in sorted(source.skills.items(), key=lambda item: item[1].name):
-        summaries[("skill", skill_id)] = summary_from_payload(
-            page_type="skill",
-            entity_id=skill_id,
-            content_hash=skill.content_hash,
-            payload=_skill_summary_payload(skill, source.contracts.get(skill_id)),
-        )
-    return summaries

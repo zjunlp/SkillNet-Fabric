@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-WikiPageType = Literal["skill", "workflow", "index"]
-NO_WORKFLOW_GUIDANCE = "No strong workflow guidance."
+WikiPageType = Literal["skill", "index"]
 
 
 @dataclass(slots=True)
@@ -38,29 +37,6 @@ class WikiPage:
 
 
 @dataclass(slots=True)
-class WikiSummaryRecord:
-    """Cached summary for one wiki entity."""
-
-    page_type: str
-    entity_id: str
-    content_hash: str
-    routing_summary: str
-    workflow_summary: str
-    summary: str
-
-    def __post_init__(self) -> None:
-        for field_name in (
-            "page_type",
-            "entity_id",
-            "content_hash",
-            "routing_summary",
-            "workflow_summary",
-            "summary",
-        ):
-            _required_string(getattr(self, field_name), label=field_name)
-
-
-@dataclass(slots=True)
 class WikiHealthReport:
     """Health report for a generated wiki."""
 
@@ -68,7 +44,7 @@ class WikiHealthReport:
     broken_links: list[str] = field(default_factory=list)
     orphan_skill_pages: list[str] = field(default_factory=list)
     skills_without_contract_sections: list[str] = field(default_factory=list)
-    skills_without_graph_links: list[str] = field(default_factory=list)
+    skills_without_related_links: list[str] = field(default_factory=list)
     raw_llm_output_leaks: list[str] = field(default_factory=list)
 
     @property
@@ -78,7 +54,7 @@ class WikiHealthReport:
             "broken_link_count": len(self.broken_links),
             "orphan_skill_page_count": len(self.orphan_skill_pages),
             "skill_without_contract_sections_count": len(self.skills_without_contract_sections),
-            "skill_without_graph_links_count": len(self.skills_without_graph_links),
+            "skill_without_related_links_count": len(self.skills_without_related_links),
             "raw_llm_output_leak_count": len(self.raw_llm_output_leaks),
         }
 
@@ -98,12 +74,6 @@ class WikiBuildResult:
             **self.health.summary,
             "workspace": str(self.workspace),
         }
-
-
-def _required_string(value: object, *, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value.strip()
 
 
 def _required_path(value: object, *, label: str) -> None:

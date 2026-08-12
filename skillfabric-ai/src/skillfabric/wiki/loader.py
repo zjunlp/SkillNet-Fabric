@@ -32,10 +32,6 @@ class WikiSource:
     contracts: dict[str, SkillContract]
     core_edges: list[Edge]
 
-    @property
-    def operational_edges(self) -> list[Edge]:
-        return [edge for edge in self.core_edges if edge.type in {"depend_on", "compose_with"}]
-
     def skill_core_links(self, skill_id: str) -> list[Edge]:
         return [
             edge for edge in self.core_edges if edge.source == skill_id or edge.target == skill_id

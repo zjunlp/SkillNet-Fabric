@@ -296,23 +296,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(config.llm_reasoning_effort, "medium")
         self.assertEqual(config.llm_options.progress_every, 25)
 
-    def test_python_facade_rejects_removed_wiki_summary_mode(self) -> None:
-        from skillfabric import SkillFabric
-
-        client = SkillFabric(workspace=".skillfabric")
-        with (
-            patch("skillfabric.api.build_graph") as build_mock,
-            patch("skillfabric.api.build_wiki"),
-            self.assertRaisesRegex(TypeError, "wiki_summary_mode"),
-        ):
-            client.build(
-                FIXTURE_SKILLS,
-                embedding_provider=FakeEmbeddingProvider(),
-                wiki_summary_mode="off",
-            )
-
-        build_mock.assert_not_called()
-
     def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric
 

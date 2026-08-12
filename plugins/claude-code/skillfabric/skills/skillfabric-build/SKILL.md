@@ -11,6 +11,8 @@ disable-model-invocation: true
 
 Compile native `SKILL.md` files into contracts, semantic relations, retrieval
 indexes, wiki pages, status, and non-secret diagnostics. Stop after the build.
+Repeated builds automatically reuse unchanged skill analysis and refresh only affected content;
+the command remains the same when skills are added, edited, or removed.
 
 ## Input Contract
 
@@ -57,5 +59,5 @@ artifact paths.
 
 ## Final Response
 
-Report workspace, build id, skill count, edge counts by relation, canonical
-artifact paths, and the next useful command.
+Report workspace, build id, whether the build was incremental, the added/modified/removed/reused
+skill counts, edge counts by relation, canonical artifact paths, and the next useful command.

@@ -61,6 +61,30 @@ def _print_build(console: Console, payload: dict[str, Any]) -> None:
             ("Wiki", f"{wiki['pages_written']} pages"),
         ),
     )
+    if payload.get("incremental"):
+        _field(
+            console,
+            "Changes",
+            (
+                f"+{payload['added_skill_count']} added | "
+                f"~{payload['modified_skill_count']} modified | "
+                f"-{payload['removed_skill_count']} removed | "
+                f"{payload['reused_skill_count']} reused"
+            ),
+        )
+    else:
+        _field(console, "Changes", "Initial build")
+    cache = payload.get("cache")
+    if isinstance(cache, dict):
+        _field(
+            console,
+            "Cache",
+            (
+                f"{cache.get('contracts_reused', 0)} contracts | "
+                f"{cache.get('relations_reused', 0)} relations | "
+                f"{cache.get('embeddings_reused', 0)} embeddings reused"
+            ),
+        )
     _heading(console, "Artifacts")
     _fields(
         console,
