@@ -39,12 +39,18 @@ Treat CLI JSON as canonical for configuration status.
 ## Workflow
 
 1. Prefer the Doctor State JSON injected by the slash command. If it is absent,
-   run `skillfabric doctor-state $ARGUMENTS`.
+   run `skillfabric doctor-state --json $ARGUMENTS`.
 2. Treat the returned JSON as the only status source.
-3. If `workspace_status.stage` is `not_built`, report "not built yet" and say
-   this is normal before the first build.
-4. If configuration is incomplete, report missing field names and the exact
-   terminal command: `skillfabric init --env-file <env_file>`.
+3. Consume exactly `api_configured`, `missing_configuration`, `workspace_ready`,
+   `build_id`, `skill_count`, and `next_action`.
+4. If `api_configured` is false, report the names in `missing_configuration`
+   and the exact terminal command: `skillfabric init --env-file <env_file>`.
+5. If `workspace_ready` is false and `build_id` is empty, report "not built
+   yet" and say this is normal before the first build. If `build_id` is
+   present, report that the workspace is not reusable and must be rebuilt.
+6. Use `next_action` to report the next command: `init` maps to
+   `skillfabric init`, `build` maps to `/skillfabric:build`, and `ready` maps
+   to `/skillfabric:prepare` or `/skillfabric:run`.
 
 ## Failure Handling
 
@@ -52,10 +58,9 @@ Treat CLI JSON as canonical for configuration status.
   and verify with `which skillfabric` plus `skillfabric --help`.
 - If config check returns non-JSON output, report that the check failed and
   include only non-secret error text.
-- If the workspace status file is missing, report that this is normal before
-  the first build and that `/skillfabric:build` is needed.
-- If the workspace status says `failed`, report the status path and the
-  non-secret error summary when present.
+- If any required state field is missing or has the wrong type, report a
+  plugin/CLI contract mismatch. Rerun the canonical doctor-state command
+  without inspecting workspace files directly.
 
 ## Final Response
 
@@ -73,5 +78,5 @@ SkillFabric ready.
 ```
 
 If incomplete, keep the same shape but replace the affected line with the
-missing field names or "Workspace: not built yet". Do not list every `present`,
-`sources`, or nested `workspace_status` key unless the user asks for details.
+missing field names or "Workspace: not built yet". Do not dump the raw JSON
+unless the user asks for details.

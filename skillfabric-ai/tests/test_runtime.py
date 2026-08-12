@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 import types
@@ -9,13 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from skillfabric.runtime.jobs import LLMJobOptions, run_llm_jobs
+from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import (
     LLMConfig,
     LLMRequestError,
     litellm_completion,
-    llm_usage_context,
-    llm_usage_transaction,
 )
 
 LLM_ENV_KEYS = (
@@ -47,6 +44,9 @@ def _cleared_llm_env(**overrides: str) -> dict[str, str]:
 
 
 class LLMConfigTests(unittest.TestCase):
+    def test_llm_jobs_are_quiet_by_default(self) -> None:
+        self.assertEqual(LLMJobOptions().progress_every, 0)
+
     def test_llm_config_rejects_invalid_runtime_values(self) -> None:
         invalid_overrides = [
             {"api_base": ""},
@@ -510,198 +510,6 @@ class LLMConfigTests(unittest.TestCase):
 
         self.assertIsNone(calls[0]["api_key"])
 
-    def test_litellm_completion_writes_usage_record_for_direct_call(self) -> None:
-        calls: list[dict[str, object]] = []
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**kwargs):
-            calls.append(kwargs)
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 9 if kwargs.get("messages") else 3
-        fake_litellm.cost_per_token = lambda **_kwargs: (0.001, 0.002)
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "usage.jsonl"
-                with llm_usage_context(log_path=usage_path):
-                    response = litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        config=LLMConfig(
-                            api_base="https://example.test/api",
-                            api_key="sk-test",
-                            model="openai/test-model",
-                            max_tokens=321,
-                            timeout=15.0,
-                        ),
-                        usage_operation="route",
-                    )
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        self.assertEqual(response["choices"][0]["message"]["content"], "ok")
-        self.assertEqual(calls[0]["max_retries"], 2)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["operation"], "route")
-        self.assertEqual(records[0]["status"], "completed")
-        self.assertGreater(records[0]["prompt_tokens"], 0)
-        self.assertGreater(records[0]["completion_tokens"], 0)
-
-    def test_litellm_completion_merges_context_and_call_usage_metadata(self) -> None:
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**_kwargs):
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 9 if kwargs.get("messages") else 3
-        fake_litellm.cost_per_token = lambda **_kwargs: (0.001, 0.002)
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "usage.jsonl"
-                with llm_usage_context(
-                    log_path=usage_path,
-                    metadata={"task_id": "task_a", "trace_id": "trace_a"},
-                ):
-                    litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        config=LLMConfig(
-                            api_base="https://example.test/api",
-                            api_key="sk-test",
-                            model="openai/test-model",
-                        ),
-                        usage_operation="route",
-                        usage_metadata={"skill_id": "skill:docx"},
-                    )
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        self.assertEqual(
-            records[0]["metadata"],
-            {"task_id": "task_a", "trace_id": "trace_a", "skill_id": "skill:docx"},
-        )
-
-    def test_nested_usage_transactions_require_an_outer_commit(self) -> None:
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**_kwargs):
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 9 if kwargs.get("messages") else 3
-        fake_litellm.cost_per_token = lambda **_kwargs: (0.001, 0.002)
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "usage.jsonl"
-                config = LLMConfig(
-                    api_base="https://example.test/api",
-                    api_key="sk-test",
-                    model="openai/test-model",
-                )
-                with llm_usage_context(log_path=usage_path):
-                    with llm_usage_transaction(), llm_usage_transaction() as inner:
-                        litellm_completion(
-                            messages=[{"role": "user", "content": "discarded"}],
-                            config=config,
-                        )
-                        inner.commit()
-                    with (
-                        llm_usage_transaction() as outer,
-                        llm_usage_transaction() as inner,
-                    ):
-                        litellm_completion(
-                            messages=[{"role": "user", "content": "accepted"}],
-                            config=config,
-                        )
-                        inner.commit()
-                        outer.commit()
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["status"], "completed")
-
-    def test_litellm_usage_context_propagates_through_llm_job_threads(self) -> None:
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**_kwargs):
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 9 if kwargs.get("messages") else 3
-        fake_litellm.cost_per_token = lambda **_kwargs: (0.001, 0.002)
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "threaded_usage.jsonl"
-                config = LLMConfig(
-                    api_base="https://example.test/api",
-                    api_key="sk-test",
-                    model="openai/test-model",
-                )
-
-                def worker(item: str) -> str:
-                    litellm_completion(
-                        messages=[{"role": "user", "content": item}],
-                        config=config,
-                        usage_operation="kg_build.interface_extraction",
-                    )
-                    return item
-
-                with llm_usage_context(
-                    log_path=usage_path,
-                    metadata={"experiment_run_id": "run_1"},
-                ):
-                    outcomes = run_llm_jobs(
-                        ["a", "b"],
-                        worker,
-                        options=LLMJobOptions(concurrency=2, progress_every=0),
-                    )
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        self.assertEqual([outcome.ok for outcome in outcomes], [True, True])
-        self.assertEqual(len(records), 2)
-        self.assertEqual(
-            {record["operation"] for record in records},
-            {"kg_build.interface_extraction"},
-        )
-        self.assertEqual(
-            {record["metadata"]["experiment_run_id"] for record in records},
-            {"run_1"},
-        )
-
     def test_litellm_completion_preserves_structured_provider_error_metadata(self) -> None:
         class ProviderUnavailableError(RuntimeError):
             status_code = 503
@@ -764,7 +572,6 @@ class LLMConfigTests(unittest.TestCase):
                 litellm_completion(
                     messages=[{"role": "user", "content": "Hello"}],
                     env_path=env_path,
-                    usage_operation="llm_smoke",
                 )
         finally:
             if original is None:
@@ -773,107 +580,3 @@ class LLMConfigTests(unittest.TestCase):
                 sys.modules["litellm"] = original
 
         self.assertEqual(calls[0]["max_tokens"], 32768)
-
-    def test_litellm_completion_records_usage_with_explicit_context(self) -> None:
-        calls: list[dict[str, object]] = []
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**kwargs):
-            calls.append(kwargs)
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 10 if kwargs.get("messages") else 2
-        fake_litellm.cost_per_token = lambda **_kwargs: (0.001, 0.002)
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "usage.jsonl"
-                env_path = Path(tmp) / ".env"
-                env_path.write_text(
-                    "\n".join(
-                        [
-                            "BASE_URL=https://example.test/api",
-                            "API_KEY=sk-test",
-                            "MODEL=openai/test-model",
-                        ]
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-                with llm_usage_context(log_path=usage_path):
-                    response = litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        env_path=env_path,
-                        usage_operation="custom_smoke",
-                    )
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        self.assertEqual(response["choices"][0]["message"]["content"], "ok")
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["operation"], "custom_smoke")
-
-    def test_litellm_completion_prices_gpt_5_4_mini_server_usage(self) -> None:
-        fake_litellm = types.SimpleNamespace()
-
-        def fake_completion(**_kwargs):
-            return {
-                "choices": [{"message": {"content": "OK"}}],
-                "usage": {
-                    "prompt_tokens": 5091,
-                    "completion_tokens": 5,
-                    "total_tokens": 5096,
-                    "prompt_tokens_details": {"cached_tokens": 4864},
-                },
-            }
-
-        fake_litellm.completion = fake_completion
-        fake_litellm.token_counter = lambda **kwargs: 10 if kwargs.get("messages") else 2
-        fake_litellm.cost_per_token = lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("unknown")
-        )
-        original = sys.modules.get("litellm")
-        sys.modules["litellm"] = fake_litellm
-        try:
-            with TemporaryDirectory() as tmp:
-                usage_path = Path(tmp) / "usage.jsonl"
-                env_path = Path(tmp) / ".env"
-                env_path.write_text(
-                    "\n".join(
-                        [
-                            "BASE_URL=https://example.test/api",
-                            "API_KEY=sk-test",
-                            "MODEL=openai/responses/gpt-5.4-mini",
-                        ]
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-                with llm_usage_context(log_path=usage_path):
-                    litellm_completion(
-                        messages=[{"role": "user", "content": "Hello"}],
-                        env_path=env_path,
-                        usage_operation="llm_smoke",
-                    )
-                records = [
-                    json.loads(line) for line in usage_path.read_text(encoding="utf-8").splitlines()
-                ]
-        finally:
-            if original is None:
-                sys.modules.pop("litellm", None)
-            else:
-                sys.modules["litellm"] = original
-
-        expected_cost = ((227 * 0.75) + (4864 * 0.075) + (5 * 4.50)) / 1_000_000
-        self.assertAlmostEqual(records[0]["cost_usd"], expected_cost, places=10)
-        self.assertEqual(records[0]["cached_prompt_tokens"], 4864)
-        self.assertEqual(records[0]["billable_prompt_tokens"], 227)
-        self.assertTrue(records[0]["pricing_known"])

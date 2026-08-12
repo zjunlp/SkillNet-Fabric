@@ -27,19 +27,6 @@ class StubRuntime:
     class ResultMessage:
         def __init__(self, structured_output: Any, **metrics: Any) -> None:
             self.structured_output = structured_output
-            self.duration_ms = metrics.get("duration_ms", 1)
-            self.total_cost_usd = metrics.get("total_cost_usd", 0.0)
-            self.usage = metrics.get(
-                "usage",
-                {
-                    "input_tokens": 10,
-                    "output_tokens": 5,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                },
-            )
-            self.model_usage = metrics.get("model_usage", {})
-            self.num_turns = metrics.get("num_turns", 1)
             self.is_error = metrics.get("is_error", False)
             self.subtype = metrics.get("subtype", "success")
             self.result = metrics.get("result", "")
@@ -86,7 +73,7 @@ def _query_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_backend_uses_the_canonical_schema_and_writes_route_artifacts(tmp_path) -> None:
+def test_backend_uses_the_canonical_schema_without_usage_artifacts(tmp_path) -> None:
     root = _query_root(tmp_path)
     runtime = StubRuntime(
         _empty_package(),
@@ -110,11 +97,7 @@ def test_backend_uses_the_canonical_schema_and_writes_route_artifacts(tmp_path) 
     assert package.coverage_gaps
     assert runtime.options.output_format["schema"] == skill_package_json_schema()
     assert json.loads((trace / "cc_explorer" / "skill_package.json").read_text())["coverage_gaps"]
-    usage = json.loads((trace / "cc_explorer" / "usage.json").read_text())
-    assert usage["input_tokens"] == 123
-    assert usage["output_tokens"] == 17
-    assert usage["cache_creation_input_tokens"] == 19
-    assert usage["cache_read_input_tokens"] == 23
+    assert not (trace / "cc_explorer" / "usage.json").exists()
 
 
 def test_backend_zero_timeout_waits_for_completion(tmp_path) -> None:
@@ -481,10 +464,6 @@ def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
             self.calls += 1
             explorer = trace_dir / "cc_explorer"
             explorer.mkdir(parents=True)
-            (explorer / "usage.json").write_text(
-                json.dumps({"input_tokens": self.calls, "output_tokens": 1}),
-                encoding="utf-8",
-            )
             if self.calls == 1:
                 raise RuntimeError("503 service temporarily unavailable")
             return SkillPackage.from_dict(_empty_package())
@@ -505,16 +484,18 @@ def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
     assert closure["winning_attempt"] == 2
     assert [item["status"] for item in closure["attempts"]] == ["failed", "completed"]
     assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
+    assert (
+        "cc_explorer/attempts/attempt-01/attempt.json" in closure["attempts"][0]["artifact_paths"]
+    )
     assert (trace / "cc_explorer" / "attempts" / "attempt-01" / "error.json").exists()
     assert (trace / "cc_explorer" / "attempts" / "attempt-02" / "skill_package.json").exists()
-    usage = json.loads((trace / "cc_explorer" / "usage.json").read_text())
-    assert usage["attempts"] == [
-        {"input_tokens": 1, "output_tokens": 1},
-        {"input_tokens": 2, "output_tokens": 1},
-    ]
+    assert "aggregate_usage" not in closure
+    assert not (trace / "cc_explorer" / "usage.json").exists()
+    for attempt in closure["attempts"]:
+        assert {"usage", "cost_usd", "unmetered_attempt"}.isdisjoint(attempt)
 
 
-def test_explorer_stops_after_an_unmetered_started_attempt(tmp_path) -> None:
+def test_explorer_retries_transient_failure_without_usage_artifact(tmp_path) -> None:
     root = _query_root(tmp_path)
 
     class Backend:
@@ -522,6 +503,8 @@ def test_explorer_stops_after_an_unmetered_started_attempt(tmp_path) -> None:
 
         def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
             self.calls += 1
+            if self.calls > 1:
+                return SkillPackage.from_dict(_empty_package())
             explorer = trace_dir / "cc_explorer"
             explorer.mkdir(parents=True)
             (explorer / "turn_state.json").write_text(
@@ -531,22 +514,23 @@ def test_explorer_stops_after_an_unmetered_started_attempt(tmp_path) -> None:
             raise RuntimeError("503 service temporarily unavailable")
 
     backend = Backend()
-    with pytest.raises(RuntimeError, match="503 service"):
-        explore_query_wiki(
-            WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
-            query="x",
-            query_wiki_root=root,
-            trace_dir=tmp_path / "trace",
-            backend=backend,
-        )
-    assert backend.calls == 1
+    run = explore_query_wiki(
+        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
+        query="x",
+        query_wiki_root=root,
+        trace_dir=tmp_path / "trace",
+        backend=backend,
+    )
+
+    assert run.validation.valid
+    assert backend.calls == 2
     closure = json.loads(
         (tmp_path / "trace" / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
     )
-    assert closure["status"] == "route_failed"
-    assert closure["attempts"][0]["unmetered_attempt"] is True
-    assert closure["attempts"][0]["failure_kind"] == "unmetered_attempt"
-    assert closure["attempts"][0]["retryable"] is False
+    assert closure["status"] == "completed"
+    assert len(closure["attempts"]) == 2
+    assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
+    assert closure["attempts"][0]["retryable"] is True
 
 
 def test_explorer_does_not_retry_runtime_or_authentication_mismatch(tmp_path) -> None:

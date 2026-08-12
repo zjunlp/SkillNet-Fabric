@@ -13,7 +13,7 @@ Report SkillFabric readiness from CLI state.
 Use this Doctor State JSON as canonical:
 
 ```json
-!`skillfabric doctor-state $ARGUMENTS`
+!`skillfabric doctor-state --json $ARGUMENTS`
 ```
 
 ## Inputs
@@ -26,7 +26,7 @@ Use this Doctor State JSON as canonical:
 1. Load and follow the `skillfabric-doctor` skill instructions.
 2. Read the Doctor State JSON.
 3. Report readiness from that JSON only.
-4. If JSON is missing or invalid, run `skillfabric doctor-state $ARGUMENTS`.
+4. If JSON is missing or invalid, run `skillfabric doctor-state --json $ARGUMENTS`.
 
 ## Boundaries
 

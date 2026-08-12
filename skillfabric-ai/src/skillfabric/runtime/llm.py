@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import math
 import multiprocessing as mp
 import os
@@ -12,14 +11,10 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
-
-from skillfabric.runtime.usage import LLMUsageRecord, LLMUsageTracker
 
 # Keep default offline test/build paths from making LiteLLM fetch pricing metadata.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
@@ -31,46 +26,6 @@ DEFAULT_MAX_TOKENS = 32768
 DEFAULT_TIMEOUT = 120
 DEFAULT_NETWORK_RETRIES = 2
 TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 502, 503, 504})
-LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class LLMUsageContext:
-    """Thread-local usage overrides for nested SkillFabric runs."""
-
-    log_path: Path | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-_USAGE_CONTEXT: ContextVar[LLMUsageContext | None] = ContextVar(
-    "skillfabric_llm_usage_context",
-    default=None,
-)
-_USAGE_BUFFER: ContextVar[list[tuple[Path, LLMUsageRecord]] | None] = ContextVar(
-    "skillfabric_llm_usage_buffer",
-    default=None,
-)
-
-
-@dataclass(slots=True)
-class LLMUsageTransaction:
-    """Finalize buffered usage after an LLM-backed operation is evaluated."""
-
-    records: list[tuple[Path, LLMUsageRecord]] = field(default_factory=list, repr=False)
-    committed: bool = False
-
-    def commit(self) -> None:
-        self.committed = True
-
-    def reject(self, error: BaseException) -> None:
-        """Persist billed calls while marking successful responses as locally rejected."""
-
-        message = f"{type(error).__name__}: {error}"
-        for _path, record in self.records:
-            if record.status == "completed":
-                record.status = "rejected"
-                record.error = message
-        self.committed = True
 
 
 class LLMRequestError(RuntimeError):
@@ -88,10 +43,6 @@ class LLMRequestError(RuntimeError):
         self.status_code = status_code
         self.error_type = error_type or type(self).__name__
         self.retryable = retryable
-
-
-def _current_usage_context() -> LLMUsageContext:
-    return _USAGE_CONTEXT.get() or LLMUsageContext()
 
 
 @dataclass(slots=True)
@@ -203,63 +154,6 @@ class LLMConfig:
         )
 
 
-@contextmanager
-def llm_usage_context(
-    *,
-    log_path: str | Path | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> Iterator[None]:
-    """Temporarily override usage tracking for the current thread/context."""
-
-    parent = _current_usage_context()
-    child = LLMUsageContext(
-        log_path=parent.log_path if log_path is None else Path(log_path).expanduser().resolve(),
-        metadata={**parent.metadata, **(metadata or {})},
-    )
-    token = _USAGE_CONTEXT.set(child)
-    try:
-        yield
-    finally:
-        _USAGE_CONTEXT.reset(token)
-
-
-@contextmanager
-def llm_usage_transaction() -> Iterator[LLMUsageTransaction]:
-    """Buffer usage records until the caller accepts or rejects the operation."""
-
-    parent = _USAGE_BUFFER.get()
-    buffer: list[tuple[Path, LLMUsageRecord]] = []
-    token = _USAGE_BUFFER.set(buffer)
-    transaction = LLMUsageTransaction(records=buffer)
-    try:
-        yield transaction
-    except BaseException:
-        _USAGE_BUFFER.reset(token)
-        if transaction.committed:
-            _commit_usage_records(parent, buffer)
-        raise
-    else:
-        _USAGE_BUFFER.reset(token)
-    if not transaction.committed:
-        return
-    _commit_usage_records(parent, buffer)
-
-
-def _commit_usage_records(
-    parent: list[tuple[Path, LLMUsageRecord]] | None,
-    records: list[tuple[Path, LLMUsageRecord]],
-) -> None:
-    if parent is not None:
-        parent.extend(records)
-        return
-    for path, record in records:
-        try:
-            LLMUsageTracker(log_path=path).append(record)
-        except Exception as exc:  # noqa: BLE001 - accounting must not break LLM jobs.
-            LOGGER.warning("usage_write_failed error_type=%s", type(exc).__name__)
-            continue
-
-
 def read_env_file(env_path: str | Path | None = ".env") -> dict[str, str]:
     """Read simple KEY=VALUE env files without mutating the process environment."""
 
@@ -275,8 +169,6 @@ def litellm_completion(
     env_path: str | Path | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
-    usage_operation: str | None = None,
-    usage_metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Call LiteLLM with project configuration and bounded network retries."""
@@ -318,28 +210,12 @@ def litellm_completion(
             call_kwargs["extra_body"] = extra_body
         else:
             call_kwargs["reasoning_effort"] = resolved.reasoning_effort
-    usage_context = _current_usage_context()
-    operation = usage_operation or "llm"
-    metadata = {**usage_context.metadata, **(usage_metadata or {})}
-    usage_log_path = usage_context.log_path
-    started = time.monotonic()
     try:
         if _should_use_process_timeout(resolved.timeout):
             response = _completion_with_process_timeout(call_kwargs, resolved.timeout)
         else:
             response = _direct_litellm_completion(call_kwargs, resolved.timeout)
     except Exception as exc:
-        _record_usage(
-            model=resolved_model,
-            messages=provider_messages,
-            response=None,
-            operation=operation,
-            started=started,
-            status="failed",
-            error=f"{type(exc).__name__}: {exc}",
-            metadata=metadata,
-            usage_log_path=usage_log_path,
-        )
         status_code = _exception_status_code(exc)
         error_type = exc.error_type if isinstance(exc, LLMRequestError) else type(exc).__name__
         retryable = (
@@ -353,17 +229,6 @@ def litellm_completion(
             error_type=error_type,
             retryable=retryable,
         ) from exc
-    _record_usage(
-        model=resolved_model,
-        messages=provider_messages,
-        response=response,
-        operation=operation,
-        started=started,
-        status="completed",
-        error=None,
-        metadata=metadata,
-        usage_log_path=usage_log_path,
-    )
     return response
 
 
@@ -489,39 +354,6 @@ def response_to_jsonable(response: Any) -> Any:
     except TypeError:
         return str(response)
     return response
-
-
-def _record_usage(
-    *,
-    model: str,
-    messages: list[dict[str, Any]],
-    response: Any,
-    operation: str,
-    started: float,
-    status: str,
-    error: str | None,
-    metadata: dict[str, Any] | None,
-    usage_log_path: Path | None = None,
-) -> None:
-    if usage_log_path is None:
-        return
-    try:
-        buffer = _USAGE_BUFFER.get()
-        tracker = LLMUsageTracker(log_path=None if buffer is not None else usage_log_path)
-        record = tracker.record_completion(
-            model=model,
-            messages=messages,
-            response=response,
-            operation=operation,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            status=status,
-            error=error,
-            metadata=metadata,
-        )
-        if buffer is not None:
-            buffer.append((usage_log_path, record))
-    except Exception:  # noqa: BLE001 - usage accounting must not break LLM calls.
-        return
 
 
 def _read_env_file(path: Path) -> dict[str, str]:

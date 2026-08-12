@@ -88,8 +88,6 @@ class LiteLLMRelationJudge:
         response = litellm_completion(
             messages=build_relation_judge_messages(pairs, skills, contracts),
             config=self.config,
-            usage_operation="graph.semantic_relation",
-            usage_metadata={"candidate_pairs": [list(pair.key) for pair in pairs]},
         )
         return parse_json_response(response)
 

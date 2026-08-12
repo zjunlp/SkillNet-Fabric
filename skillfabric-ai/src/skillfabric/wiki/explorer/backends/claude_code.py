@@ -144,7 +144,7 @@ class ClaudeCodeWikiExplorerBackend:
             },
         )
         try:
-            payload, usage = self._explore_with_sdk(
+            payload = self._explore_with_sdk(
                 system_prompt,
                 user_prompt,
                 query_wiki_root,
@@ -155,10 +155,6 @@ class ClaudeCodeWikiExplorerBackend:
             atomic_write_text(
                 cc_dir / "skill_package.json",
                 json.dumps(package.to_dict(), ensure_ascii=False, indent=2) + "\n",
-            )
-            atomic_write_text(
-                cc_dir / "usage.json",
-                json.dumps(usage, indent=2) + "\n",
             )
             _write_event(
                 cc_dir,
@@ -184,7 +180,7 @@ class ClaudeCodeWikiExplorerBackend:
         query_wiki_root: Path,
         cc_dir: Path,
         tool_budget: dict[str, int],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ) -> dict[str, Any]:
         runtime = self.sdk_runtime or _load_sdk_runtime()
         options = _build_claude_agent_options(
             runtime,
@@ -209,7 +205,7 @@ class ClaudeCodeWikiExplorerBackend:
             event_dir=cc_dir,
             timeout_seconds=self.execution_timeout_seconds,
         )
-        return _payload_from_result_message(result_message), _sdk_usage(result_message)
+        return _payload_from_result_message(result_message)
 
 
 def _build_claude_agent_options(
@@ -520,23 +516,6 @@ def _result_message_error_detail(result_message: Any) -> str:
         if text and text.lower() != "success":
             return _safe_error_text(text)
     return "Claude agent query failed"
-
-
-def _sdk_usage(message: Any) -> dict[str, Any]:
-    usage = getattr(message, "usage", None)
-    if not isinstance(usage, dict):
-        usage = {}
-    return {
-        "duration_ms": getattr(message, "duration_ms", 0) or 0,
-        "total_cost_usd": getattr(message, "total_cost_usd", 0.0) or 0.0,
-        "input_tokens": usage.get("input_tokens", 0) or 0,
-        "output_tokens": usage.get("output_tokens", 0) or 0,
-        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0) or 0,
-        "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0) or 0,
-        "num_turns": getattr(message, "num_turns", 0) or 0,
-        "is_error": bool(getattr(message, "is_error", False)),
-        "subtype": getattr(message, "subtype", "") or "",
-    }
 
 
 def _message_event(message: Any) -> dict[str, Any] | None:

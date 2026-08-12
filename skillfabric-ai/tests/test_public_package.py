@@ -25,6 +25,21 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
 
+    def test_public_runtime_omits_experiment_usage_interfaces(self) -> None:
+        from skillfabric import SkillFabric
+        from skillfabric.orchestrator.package import plan_execution_package
+        from skillfabric.runtime.llm import litellm_completion
+
+        signatures = (
+            inspect.signature(SkillFabric.plan),
+            inspect.signature(plan_execution_package),
+            inspect.signature(litellm_completion),
+        )
+        removed_parameters = {"usage_log_path", "usage_operation", "usage_metadata"}
+
+        for signature in signatures:
+            self.assertTrue(removed_parameters.isdisjoint(signature.parameters))
+
     def test_python_facade_exposes_and_forwards_explorer_backend(self) -> None:
         from skillfabric import SkillFabric
 
@@ -84,8 +99,20 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertEqual(
             dependencies,
-            {"httpx", "litellm", "numpy", "pyyaml"},
+            {"httpx", "litellm", "numpy", "pyyaml", "rich"},
         )
+
+    def test_all_extra_contains_only_optional_runtime_backends(self) -> None:
+        pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        extras = pyproject["project"]["optional-dependencies"]
+
+        self.assertEqual(extras["all"], [*extras["claude"], *extras["codex"]])
+        self.assertTrue({"build>=1.2", "pytest>=8.0", "ruff>=0.8"}.issubset(extras["dev"]))
+
+    def test_readme_does_not_document_removed_usage_accounting(self) -> None:
+        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("usage log", readme.casefold())
 
     def test_public_brand_and_package_identifiers_are_consistent(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -155,6 +182,43 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn("disable-model-invocation: true", skill_text)
             self.assertIn("$ARGUMENTS", skill_text)
 
+    def test_claude_code_plugin_requests_machine_readable_cli_output(self) -> None:
+        plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
+        plugin_text = "\n".join(
+            path.read_text(encoding="utf-8") for path in plugin_root.rglob("*.md")
+        )
+
+        for command in (
+            "skillfabric doctor-state --json",
+            "skillfabric run-state --json",
+            "skillfabric build --json",
+            "skillfabric plan --json",
+        ):
+            self.assertIn(command, plugin_text)
+        self.assertNotIn("--progress-json", plugin_text)
+
+    def test_claude_doctor_skill_uses_the_current_state_contract(self) -> None:
+        doctor = (
+            PUBLIC_ROOT
+            / "plugins"
+            / "claude-code"
+            / "skillfabric"
+            / "skills"
+            / "skillfabric-doctor"
+            / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for field in (
+            "api_configured",
+            "missing_configuration",
+            "workspace_ready",
+            "build_id",
+            "skill_count",
+            "next_action",
+        ):
+            self.assertIn(f"`{field}`", doctor)
+        self.assertNotIn("workspace_status", doctor)
+
     def test_root_readme_documents_claude_code_plugin(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
         for section in (
@@ -166,7 +230,7 @@ class PublicPackageTests(unittest.TestCase):
         for snippet in (
             "which skillfabric",
             "skillfabric --help",
-            "claude plugin validate --strict",
+            "claude plugin validate",
             "claude plugin list --json",
             "/skillfabric:doctor",
             "/skillfabric:prepare",
@@ -177,6 +241,7 @@ class PublicPackageTests(unittest.TestCase):
             "To uninstall",
         ):
             self.assertIn(snippet, readme)
+        self.assertNotIn("claude plugin validate --strict", readme)
 
     def test_public_docs_do_not_leak_local_paths(self) -> None:
         readme = PUBLIC_ROOT / "README.md"
@@ -340,27 +405,6 @@ class PublicPackageTests(unittest.TestCase):
             self.assertEqual(
                 planner.call_args.kwargs["package_root"],
                 (workspace / "runs" / "relative-package").resolve(),
-            )
-
-    def test_python_facade_forwards_explicit_planner_usage_log(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workspace = root / ".skillfabric"
-            build_fixture_workspace(workspace)
-            usage_log_path = root / "downstream-run" / "planner_usage.jsonl"
-
-            with patch("skillfabric.api.plan_execution_package") as planner:
-                SkillFabric(workspace=workspace).plan(
-                    "original task",
-                    route=_facade_route(),
-                    usage_log_path=usage_log_path,
-                )
-
-            self.assertEqual(
-                planner.call_args.kwargs["usage_log_path"],
-                usage_log_path.resolve(),
             )
 
     def test_python_facade_forwards_explicit_planner_runtime_identity(self) -> None:

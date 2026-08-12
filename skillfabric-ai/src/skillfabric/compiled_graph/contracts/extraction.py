@@ -63,8 +63,6 @@ class LiteLLMContractExtractor:
         response = litellm_completion(
             messages=build_contract_extraction_messages(skill),
             config=self.config,
-            usage_operation="graph.contract_extraction",
-            usage_metadata={"skill_id": skill.id},
         )
         return parse_json_response(response)
 

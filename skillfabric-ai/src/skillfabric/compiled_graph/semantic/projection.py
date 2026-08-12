@@ -55,8 +55,6 @@ class LiteLLMCycleAdjudicator:
         response = litellm_completion(
             messages=build_cycle_adjudication_messages(decisions, skills),
             config=self.config,
-            usage_operation="graph.dependency_cycle",
-            usage_metadata={"cycle_pair_count": len(decisions)},
         )
         payload = parse_json_response(response)
         if set(payload) != {"decisions"} or not isinstance(payload["decisions"], list):

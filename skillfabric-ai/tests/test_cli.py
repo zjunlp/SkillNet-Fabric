@@ -53,6 +53,36 @@ def test_public_cli_surface_exposes_core_commands() -> None:
     assert "Generate one execution prompt" in text
 
 
+def test_build_cli_defaults_to_a_human_summary(tmp_path) -> None:
+    workspace = SimpleNamespace(
+        root=tmp_path / ".skillfabric",
+        graph_dir=tmp_path / ".skillfabric" / "graph",
+        wiki_dir=tmp_path / ".skillfabric" / "wiki",
+        status_path=tmp_path / ".skillfabric" / "status.json",
+    )
+    result = SimpleNamespace(
+        workspace=workspace,
+        graph=SimpleNamespace(build_id="build-test", nodes=[None] * 7, edges=[None] * 12),
+        stats={"edge_counts": {"depend_on": 4, "similar_to": 8}},
+    )
+    output = io.StringIO()
+
+    with (
+        patch("skillfabric.cli._require_api_configuration"),
+        patch("skillfabric.cli.ApiEmbeddingProvider.from_env", return_value=object()),
+        patch("skillfabric.cli.build_graph", return_value=result),
+        patch("skillfabric.cli.build_wiki", return_value=SimpleNamespace(pages_written=19)),
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(["build", "--skill-root", "skills"])
+
+    text = output.getvalue()
+    assert "Build complete" in text
+    assert "7 skills" in text
+    assert "12 edges" in text
+    assert str(workspace.root) in text
+
+
 def test_route_cli_constructs_only_current_router_config_fields() -> None:
     output = io.StringIO()
 
@@ -72,6 +102,7 @@ def test_route_cli_constructs_only_current_router_config_fields() -> None:
                 "1",
                 "--trace-id",
                 "test-trace",
+                "--json",
             ]
         )
 
@@ -81,6 +112,24 @@ def test_route_cli_constructs_only_current_router_config_fields() -> None:
     assert config.max_depth == 1
     assert config.trace_id == "test-trace"
     assert json.loads(output.getvalue())["selected_skills"][0]["skill_id"] == "skill:test"
+
+
+def test_route_cli_defaults_to_a_human_summary() -> None:
+    output = io.StringIO()
+
+    with (
+        patch("skillfabric.cli.route_task", return_value=_route()),
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(["route", "test task"])
+
+    text = output.getvalue()
+    assert "Route complete" in text
+    assert "Selected skills" in text
+    assert "test" in text
+    assert "Handle the test task." in text
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(text)
 
 
 def test_route_cli_preserves_explicit_zero_budgets() -> None:
@@ -139,12 +188,42 @@ def test_plan_cli_calls_prompt_planner_once(tmp_path) -> None:
                 str(tmp_path / ".skillfabric"),
                 "--planner-context-max-tokens",
                 "5000",
+                "--json",
             ]
         )
 
     planner.assert_called_once()
     assert planner.call_args.kwargs["planner_context_max_tokens"] == 5000
     assert json.loads(output.getvalue())["estimated_prompt_tokens"] == 321
+
+
+def test_plan_cli_defaults_to_a_human_summary(tmp_path) -> None:
+    package_root = tmp_path / ".skillfabric" / "runs" / "plan" / "execution_package"
+    result = SimpleNamespace(
+        to_dict=lambda: {
+            "root": str(package_root),
+            "prompt_path": str(package_root / "execution_prompt.md"),
+            "planner_output_path": str(package_root / "planner_output.json"),
+            "planner_validation_path": str(package_root / "planner_validation.json"),
+            "estimated_prompt_tokens": 321,
+        }
+    )
+    output = io.StringIO()
+
+    with (
+        patch(
+            "skillfabric.cli._plan_route_context",
+            return_value=(_route(), "test task", package_root),
+        ),
+        patch("skillfabric.cli.plan_execution_package", return_value=result),
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(["plan", "test task", "--workspace", str(tmp_path / ".skillfabric")])
+
+    text = output.getvalue()
+    assert "Execution plan ready" in text
+    assert "321 tokens" in text
+    assert str(package_root / "execution_prompt.md") in text
 
 
 def test_plan_route_file_rejects_non_string_query_artifact(tmp_path) -> None:
@@ -188,6 +267,7 @@ def test_doctor_state_reports_readiness_without_configuration_values(tmp_path) -
         cli_main(
             [
                 "doctor-state",
+                "--json",
                 "--workspace",
                 str(workspace),
                 "--env-file",
@@ -224,6 +304,7 @@ def test_doctor_state_rejects_graph_from_a_different_build(tmp_path) -> None:
         cli_main(
             [
                 "doctor-state",
+                "--json",
                 "--workspace",
                 str(workspace),
                 "--env-file",
@@ -259,6 +340,7 @@ def test_doctor_state_rejects_noncanonical_ready_status(tmp_path) -> None:
         cli_main(
             [
                 "doctor-state",
+                "--json",
                 "--workspace",
                 str(workspace),
                 "--env-file",
@@ -291,10 +373,10 @@ def test_run_state_reuses_only_matching_prompt_package(tmp_path) -> None:
 
     reuse_output = io.StringIO()
     with contextlib.redirect_stdout(reuse_output):
-        cli_main(["run-state", "original task", "--workspace", str(workspace)])
+        cli_main(["run-state", "--json", "original task", "--workspace", str(workspace)])
     different_output = io.StringIO()
     with contextlib.redirect_stdout(different_output):
-        cli_main(["run-state", "different task", "--workspace", str(workspace)])
+        cli_main(["run-state", "--json", "different task", "--workspace", str(workspace)])
 
     reuse = json.loads(reuse_output.getvalue())
     different = json.loads(different_output.getvalue())
@@ -311,6 +393,6 @@ def test_run_state_ignores_incomplete_execution_package(tmp_path) -> None:
     output = io.StringIO()
 
     with contextlib.redirect_stdout(output):
-        cli_main(["run-state", "task", "--workspace", str(workspace)])
+        cli_main(["run-state", "--json", "task", "--workspace", str(workspace)])
 
     assert json.loads(output.getvalue())["action"] == "prepare_required"

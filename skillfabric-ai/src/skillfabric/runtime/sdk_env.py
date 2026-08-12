@@ -24,7 +24,7 @@ def build_codex_sdk_env(
     *,
     codex_home: str | Path,
 ) -> CodexSdkEnvironment:
-    """Resolve experiment-only Codex credentials without personal auth fallback."""
+    """Resolve explicit Codex credentials without consulting personal authentication state."""
 
     home = Path(codex_home).expanduser().resolve()
     if not home.is_dir():

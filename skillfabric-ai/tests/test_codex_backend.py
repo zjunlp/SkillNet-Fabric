@@ -464,7 +464,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             env_file = root / ".env"
             env_file.write_text(
                 "SKILLFABRIC_LLM_API_BASE=http://gateway.example/v1\n"
-                "SKILLFABRIC_LLM_API_KEY=sk-experiment-secret\n",
+                "SKILLFABRIC_LLM_API_KEY=sk-project-test\n",
                 encoding="utf-8",
             )
             with patch.dict(
@@ -485,10 +485,10 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(package.to_dict(), _package())
             config = runtime.configs[0].kwargs
             self.assertEqual(config["codex_bin"], str(root / "codex"))
-            self.assertEqual(config["env"]["OPENAI_API_KEY"], "sk-experiment-secret")
+            self.assertEqual(config["env"]["OPENAI_API_KEY"], "sk-project-test")
             self.assertEqual(config["env"]["CODEX_API_KEY"], "")
             self.assertNotIn("CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG", config["env"])
-            self.assertEqual(runtime.login_calls, ["sk-experiment-secret"])
+            self.assertEqual(runtime.login_calls, ["sk-project-test"])
             self.assertLess(
                 runtime.lifecycle.index("login"),
                 runtime.lifecycle.index("thread_start"),
@@ -565,24 +565,11 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(backend["tool_enforcement"], "event-audited-fail-closed")
             self.assertEqual(backend["command_budget"], 21)
             self.assertEqual(backend["execution_contract"], CODEX_EXECUTION_CONTRACT.to_dict())
-            usage = json.loads((artifacts / "usage.json").read_text(encoding="utf-8"))
-            self.assertEqual(
-                usage,
-                {
-                    "duration_ms": 25,
-                    "input_tokens": 20,
-                    "cache_read_input_tokens": 4,
-                    "output_tokens": 6,
-                    "reasoning_output_tokens": 3,
-                    "total_tokens": 26,
-                    "total_calls": 2,
-                    "num_turns": 1,
-                },
-            )
+            self.assertFalse((artifacts / "usage.json").exists())
             combined = "\n".join(
                 path.read_text(encoding="utf-8") for path in artifacts.iterdir() if path.is_file()
             )
-            self.assertNotIn("sk-experiment-secret", combined)
+            self.assertNotIn("sk-project-test", combined)
             self.assertNotIn("personal-token", combined)
             self.assertEqual(runtime.closes, 1)
 
@@ -593,6 +580,32 @@ class CodexWikiExplorerTests(unittest.TestCase):
             completed = next(event for event in events if event.get("method") == "turn/completed")
             self.assertEqual(completed["status"], "completed")
             self.assertEqual(completed["duration_ms"], 25)
+
+    def test_success_does_not_require_a_token_usage_event(self) -> None:
+        events = [
+            event for event in _success_events() if event.method != "thread/tokenUsage/updated"
+        ]
+        runtime = _Runtime(events)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wiki = root / "query_wiki"
+            wiki.mkdir()
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+
+            package = CodexWikiExplorerBackend(
+                env_file=env_file,
+                execution_timeout_seconds=60,
+                execution_contract=CODEX_EXECUTION_CONTRACT.to_dict(),
+                sdk_runtime=runtime,
+            ).explore(
+                query="find a skill",
+                query_wiki_root=wiki,
+                trace_dir=root / "trace",
+            )
+
+            self.assertEqual(package.to_dict(), _package())
+            self.assertFalse((root / "trace" / "cc_explorer" / "usage.json").exists())
 
     def test_failure_artifacts_include_app_server_metadata_and_redact_runtime_home(self) -> None:
         runtime = _Runtime(fail_thread_start=True)
