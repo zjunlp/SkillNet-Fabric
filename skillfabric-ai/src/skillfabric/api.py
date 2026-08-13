@@ -29,7 +29,7 @@ from skillfabric.router.routing import route_task
 from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.storage import Workspace
-from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
+from skillfabric.wiki.explorer.backends.base import ExplorerBackendName, WikiExplorerBackend
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig
 
@@ -90,6 +90,7 @@ class SkillFabric:
         query: str,
         *,
         explorer_backend: WikiExplorerBackend | None = None,
+        backend: ExplorerBackendName = "claude",
         sdk_runtime: Any = None,
         embedding_provider: EmbeddingProvider | None = None,
         env_file: str | Path | None = None,
@@ -99,15 +100,15 @@ class SkillFabric:
         explorer_model: str | None = None,
         explorer_reasoning_effort: str | None = None,
     ) -> RouteResult:
+        if explorer_backend is not None and backend != "claude":
+            raise TypeError("backend and explorer_backend cannot be used together")
         defaults = default_router_options()
         config = RouterConfig(
             workspace=self.workspace.root,
             query=query,
             env_file=self.env_file if env_file is None else env_file,
             max_selected_skills=(
-                defaults.max_selected_skills
-                if max_selected_skills is None
-                else max_selected_skills
+                defaults.max_selected_skills if max_selected_skills is None else max_selected_skills
             ),
             required_selected_skills=required_selected_skills,
             seed_limit=defaults.seed_limit,
@@ -116,6 +117,7 @@ class SkillFabric:
             trace_id=trace_id,
             explorer_model=explorer_model,
             explorer_reasoning_effort=explorer_reasoning_effort,
+            explorer_backend=backend,
             explorer_max_turns=defaults.explorer_max_turns,
             explorer_load_timeout_ms=defaults.explorer_load_timeout_ms,
             explorer_timeout_seconds=defaults.explorer_timeout_seconds,
@@ -144,6 +146,7 @@ class SkillFabric:
         llm_timeout_seconds: float | None = None,
         planner_context_max_tokens: int = DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
         explorer_backend: WikiExplorerBackend | None = None,
+        backend: ExplorerBackendName = "claude",
         sdk_runtime: Any = None,
         embedding_provider: EmbeddingProvider | None = None,
         max_selected_skills: int | None = None,
@@ -167,6 +170,7 @@ class SkillFabric:
             resolved_route = self.route(
                 resolved_query,
                 explorer_backend=explorer_backend,
+                backend=backend,
                 sdk_runtime=sdk_runtime,
                 embedding_provider=embedding_provider,
                 env_file=env_file,
@@ -185,6 +189,7 @@ class SkillFabric:
                 required_selected_skills,
                 explorer_model,
                 explorer_reasoning_effort,
+                backend if backend != "claude" else None,
             )
         ):
             raise TypeError("routing options require plan to perform routing")

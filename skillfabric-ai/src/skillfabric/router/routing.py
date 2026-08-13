@@ -27,6 +27,8 @@ def route_task(
 
     if sdk_runtime is not None and explorer_backend is not None:
         raise TypeError("sdk_runtime and explorer_backend cannot be used together")
+    if explorer_backend is not None and config.explorer_backend != "claude":
+        raise TypeError("explorer_backend and config.explorer_backend cannot be used together")
     if not isinstance(config.query, str) or not config.query.strip():
         raise ValueError("route query must be a non-empty string")
     workspace = Workspace(config.workspace)
@@ -56,6 +58,7 @@ def route_task(
             required_selected_skills=config.required_selected_skills,
             model=config.explorer_model,
             reasoning_effort=config.explorer_reasoning_effort,
+            backend=config.explorer_backend,
             max_turns=config.explorer_max_turns,
             load_timeout_ms=config.explorer_load_timeout_ms,
             execution_timeout_seconds=config.explorer_timeout_seconds,

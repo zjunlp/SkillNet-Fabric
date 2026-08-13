@@ -144,9 +144,7 @@ def extract_skill_contracts(
             f"contract extraction failed for {skill.id}: {error}"
         ) from error
     try:
-        checkpoint_cache.retain(
-            {_cache_key(skill, extractor.model_id) for skill in skills}
-        )
+        checkpoint_cache.retain({_cache_key(skill, extractor.model_id) for skill in skills})
         checkpoint_cache.compact()
     except CheckpointCacheError as exc:
         raise ContractExtractionError(f"failed to compact contract cache: {exc}") from exc

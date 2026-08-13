@@ -30,6 +30,7 @@ from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import read_env_file
 from skillfabric.storage import Workspace, atomic_write_text
+from skillfabric.wiki.explorer.backends.base import EXPLORER_BACKENDS
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
 from skillfabric.wiki.query_wiki import render_query_wiki_skill_card
@@ -177,6 +178,7 @@ def _add_route_tuning(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument("--max-selected-skills", type=int)
     parser.add_argument("--explorer-model")
+    parser.add_argument("--backend", choices=EXPLORER_BACKENDS, default="claude")
 
 
 def _help(
@@ -572,6 +574,7 @@ def _router_config(
         expanded_limit=defaults.expanded_limit,
         max_depth=defaults.max_depth,
         explorer_model=args.explorer_model,
+        explorer_backend=args.backend,
         explorer_max_turns=defaults.explorer_max_turns,
         explorer_load_timeout_ms=defaults.explorer_load_timeout_ms,
         explorer_timeout_seconds=defaults.explorer_timeout_seconds,

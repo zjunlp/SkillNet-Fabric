@@ -96,8 +96,8 @@ def test_backend_uses_the_canonical_schema_without_usage_artifacts(tmp_path) -> 
 
     assert package.coverage_gaps
     assert runtime.options.output_format["schema"] == skill_package_json_schema()
-    assert json.loads((trace / "cc_explorer" / "skill_package.json").read_text())["coverage_gaps"]
-    assert not (trace / "cc_explorer" / "usage.json").exists()
+    assert json.loads((trace / "explorer" / "skill_package.json").read_text())["coverage_gaps"]
+    assert not (trace / "explorer" / "usage.json").exists()
 
 
 def test_backend_zero_timeout_waits_for_completion(tmp_path) -> None:
@@ -148,7 +148,7 @@ def test_backend_default_tool_budget_scales_with_the_selection_limit(tmp_path) -
         max_selected_skills=12,
     ).explore(query="unsupported task", query_wiki_root=root, trace_dir=trace)
 
-    context = json.loads((trace / "cc_explorer" / "prompt_context.json").read_text())
+    context = json.loads((trace / "explorer" / "prompt_context.json").read_text())
     assert context["tool_budget"]["Read"] >= 26
     assert context["tool_budget"]["total"] >= context["tool_budget"]["Read"]
 
@@ -177,7 +177,7 @@ def test_backend_omits_thinking_token_system_events(tmp_path) -> None:
 
     events = [
         json.loads(line)
-        for line in (trace / "cc_explorer" / "agent_events.jsonl").read_text().splitlines()
+        for line in (trace / "explorer" / "agent_events.jsonl").read_text().splitlines()
     ]
     assert not any(event.get("subtype") == "thinking_tokens" for event in events)
     assert any(event.get("type") == "ResultMessage" for event in events)
@@ -238,7 +238,7 @@ def test_backend_preserves_safe_sdk_api_failure_diagnostics(tmp_path) -> None:
 
     events = [
         json.loads(line)
-        for line in (trace / "cc_explorer" / "agent_events.jsonl").read_text().splitlines()
+        for line in (trace / "explorer" / "agent_events.jsonl").read_text().splitlines()
     ]
     retry = next(event for event in events if event.get("subtype") == "api_retry")
     assert retry["diagnostics"] == {
@@ -258,7 +258,7 @@ def test_backend_preserves_safe_sdk_api_failure_diagnostics(tmp_path) -> None:
     ]
     post_result = next(event for event in events if event.get("event") == "sdk:post_result_error")
     assert post_result["error"] == "transport trailer obscured terminal result"
-    assert "sk-private-token" not in (trace / "cc_explorer" / "error.json").read_text()
+    assert "sk-private-token" not in (trace / "explorer" / "error.json").read_text()
 
 
 def test_backend_rejects_missing_structured_output_without_text_recovery(tmp_path) -> None:
@@ -272,7 +272,7 @@ def test_backend_rejects_missing_structured_output_without_text_recovery(tmp_pat
             trace_dir=trace,
         )
 
-    assert (trace / "cc_explorer" / "error.json").exists()
+    assert (trace / "explorer" / "error.json").exists()
 
 
 def test_permissions_enforce_read_root_and_count_each_allowed_tool_once(tmp_path) -> None:
@@ -447,7 +447,7 @@ def test_exact_count_validation_uses_the_existing_outer_recovery(tmp_path) -> No
         )
 
     assert backend.calls == 2
-    closure = json.loads((tmp_path / "trace" / "cc_explorer" / "closure.json").read_text())
+    closure = json.loads((tmp_path / "trace" / "explorer" / "closure.json").read_text())
     assert closure["status"] == "route_failed"
     assert len(closure["attempts"]) == 2
     assert all(item["failure_kind"] == "validation" for item in closure["attempts"])
@@ -462,7 +462,7 @@ def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
 
         def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
             self.calls += 1
-            explorer = trace_dir / "cc_explorer"
+            explorer = trace_dir / "explorer"
             explorer.mkdir(parents=True)
             if self.calls == 1:
                 raise RuntimeError("503 service temporarily unavailable")
@@ -478,19 +478,17 @@ def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
     )
 
     assert run.validation.valid
-    closure = json.loads((trace / "cc_explorer" / "closure.json").read_text())
+    closure = json.loads((trace / "explorer" / "closure.json").read_text())
     assert closure["status"] == "completed"
     assert closure["outcome"] == "completed_empty"
     assert closure["winning_attempt"] == 2
     assert [item["status"] for item in closure["attempts"]] == ["failed", "completed"]
     assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
-    assert (
-        "cc_explorer/attempts/attempt-01/attempt.json" in closure["attempts"][0]["artifact_paths"]
-    )
-    assert (trace / "cc_explorer" / "attempts" / "attempt-01" / "error.json").exists()
-    assert (trace / "cc_explorer" / "attempts" / "attempt-02" / "skill_package.json").exists()
+    assert "explorer/attempts/attempt-01/attempt.json" in closure["attempts"][0]["artifact_paths"]
+    assert (trace / "explorer" / "attempts" / "attempt-01" / "error.json").exists()
+    assert (trace / "explorer" / "attempts" / "attempt-02" / "skill_package.json").exists()
     assert "aggregate_usage" not in closure
-    assert not (trace / "cc_explorer" / "usage.json").exists()
+    assert not (trace / "explorer" / "usage.json").exists()
     for attempt in closure["attempts"]:
         assert {"usage", "cost_usd", "unmetered_attempt"}.isdisjoint(attempt)
 
@@ -505,7 +503,7 @@ def test_explorer_retries_transient_failure_without_usage_artifact(tmp_path) -> 
             self.calls += 1
             if self.calls > 1:
                 return SkillPackage.from_dict(_empty_package())
-            explorer = trace_dir / "cc_explorer"
+            explorer = trace_dir / "explorer"
             explorer.mkdir(parents=True)
             (explorer / "turn_state.json").write_text(
                 '{"schema_version":1,"turn_started":true}',
@@ -525,7 +523,7 @@ def test_explorer_retries_transient_failure_without_usage_artifact(tmp_path) -> 
     assert run.validation.valid
     assert backend.calls == 2
     closure = json.loads(
-        (tmp_path / "trace" / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+        (tmp_path / "trace" / "explorer" / "closure.json").read_text(encoding="utf-8")
     )
     assert closure["status"] == "completed"
     assert len(closure["attempts"]) == 2
@@ -555,7 +553,7 @@ def test_explorer_does_not_retry_runtime_or_authentication_mismatch(tmp_path) ->
 
     assert backend.calls == 1
     closure = json.loads(
-        (tmp_path / "trace" / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+        (tmp_path / "trace" / "explorer" / "closure.json").read_text(encoding="utf-8")
     )
     assert closure["attempts"][0]["retryable"] is False
     assert closure["attempts"][0]["failure_kind"] == "non_retryable_runtime"
@@ -567,7 +565,7 @@ def test_outer_attempt_closure_redacts_runtime_paths_and_secrets(tmp_path) -> No
 
     class Backend:
         def explore(self, *, query_wiki_root: Path, trace_dir: Path, **_kwargs: object):
-            explorer = trace_dir / "cc_explorer"
+            explorer = trace_dir / "explorer"
             explorer.mkdir(parents=True)
             raise RuntimeError(
                 f"config mismatch at {query_wiki_root} via {trace_dir}; "
@@ -588,10 +586,10 @@ def test_outer_attempt_closure_redacts_runtime_paths_and_secrets(tmp_path) -> No
             backend=Backend(),
         )
 
-    attempt_text = (trace / "cc_explorer" / "attempts" / "attempt-01" / "attempt.json").read_text(
+    attempt_text = (trace / "explorer" / "attempts" / "attempt-01" / "attempt.json").read_text(
         encoding="utf-8"
     )
-    closure_text = (trace / "cc_explorer" / "closure.json").read_text(encoding="utf-8")
+    closure_text = (trace / "explorer" / "closure.json").read_text(encoding="utf-8")
     for sensitive in (str(root), str(trace), str(env_file), "sk-private-token"):
         assert sensitive not in attempt_text
         assert sensitive not in closure_text
@@ -615,6 +613,23 @@ def test_explorer_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None
         )
 
 
+def test_explorer_rejects_named_and_explicit_backends(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            return SkillPackage.from_dict(_empty_package())
+
+    with pytest.raises(TypeError, match=r"backend.*config.backend"):
+        explore_query_wiki(
+            WikiExplorerConfig(backend="codex"),
+            query="find a skill",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+            backend=Backend(),
+        )
+
+
 def test_explorer_uses_an_explicit_falsey_backend(tmp_path) -> None:
     root = _query_root(tmp_path)
 
@@ -626,7 +641,7 @@ def test_explorer_uses_an_explicit_falsey_backend(tmp_path) -> None:
             return SkillPackage.from_dict(_empty_package())
 
     with patch(
-        "skillfabric.wiki.explorer.agent.ClaudeCodeWikiExplorerBackend",
+        "skillfabric.wiki.explorer.agent.create_explorer_backend",
         side_effect=AssertionError("explicit backend was ignored"),
     ):
         run = explore_query_wiki(
@@ -638,6 +653,29 @@ def test_explorer_uses_an_explicit_falsey_backend(tmp_path) -> None:
         )
 
     assert run.package.to_dict() == _empty_package()
+
+
+def test_explorer_selects_codex_backend_by_name(tmp_path) -> None:
+    root = _query_root(tmp_path)
+
+    class Backend:
+        def explore(self, **_kwargs: object) -> SkillPackage:
+            return SkillPackage.from_dict(_empty_package())
+
+    backend = Backend()
+    with patch(
+        "skillfabric.wiki.explorer.agent.create_explorer_backend",
+        return_value=backend,
+    ) as factory:
+        run = explore_query_wiki(
+            WikiExplorerConfig(backend="codex"),
+            query="find a skill",
+            query_wiki_root=root,
+            trace_dir=tmp_path / "trace",
+        )
+
+    assert run.package.to_dict() == _empty_package()
+    assert factory.call_args.args[0] == "codex"
 
 
 def test_non_retryable_failure_propagates_and_is_redacted_in_trace(tmp_path) -> None:
@@ -658,7 +696,7 @@ def test_non_retryable_failure_propagates_and_is_redacted_in_trace(tmp_path) -> 
             trace_dir=trace,
         )
 
-    error_text = (trace / "cc_explorer" / "error.json").read_text(encoding="utf-8")
+    error_text = (trace / "explorer" / "error.json").read_text(encoding="utf-8")
     assert "sk-secret-value" not in error_text
     assert "[redacted]" in error_text
 

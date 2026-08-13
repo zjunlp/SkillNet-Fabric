@@ -80,6 +80,11 @@ skillfabric route \
   "Summarize this repository and identify release risks" \
   --workspace .skillfabric \
   --env-file .env
+
+# Select the official Codex explorer instead of the default Claude explorer.
+skillfabric route \
+  "Summarize this repository and identify release risks" \
+  --backend codex
 ```
 
 The shortest routing workflow is `init`, `build`, then `route`. `route` returns the selected
@@ -218,8 +223,8 @@ print(package.prompt_path)
 Planning checks its estimated prompt size before calling the model. The planner
 context and recovery policy use stable runtime defaults.
 
-Routing uses the Claude explorer by default. An isolated Codex app-server backend can be injected
-through the same public API:
+Routing uses the Claude explorer by default. The public API and CLI also support the isolated
+official Codex app-server backend:
 
 ```bash
 python -m pip install "skillfabric-ai[codex]"
@@ -229,25 +234,19 @@ This extra installs the stable official `openai-codex` SDK and its matching Code
 
 ```python
 from skillfabric import SkillFabric
-from skillfabric.wiki.explorer.backends import CodexWikiExplorerBackend
 
 task = "extract KPIs from the supplied report"
-backend = CodexWikiExplorerBackend(
-    env_file=".env",
-    max_selected_skills=5,
-    model="your-codex-model",
-    reasoning_effort="medium",
-)
 route = SkillFabric(workspace=".skillfabric").route(
     task,
+    backend="codex",
     max_selected_skills=5,
-    explorer_backend=backend,
 )
 ```
 
 The backend creates a fresh ephemeral thread per attempt, exposes the query wiki read-only, and
 accepts results only when the event stream stays within its declared command policy. Shared
-explorer validation owns bounded recovery, so the backend does not add a nested retry loop.
+explorer validation owns bounded recovery, so the backend does not add a nested retry loop. Advanced
+users can still pass a configured `WikiExplorerBackend` instance through `explorer_backend=`.
 
 ---
 

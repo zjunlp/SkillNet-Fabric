@@ -191,10 +191,7 @@ def validate_candidate_pairs(
         ) from error
     try:
         checkpoint_cache.retain(
-            {
-                _cache_key(pair, skills_by_id, contracts, judge.model_id)
-                for pair in ordered_pairs
-            }
+            {_cache_key(pair, skills_by_id, contracts, judge.model_id) for pair in ordered_pairs}
         )
         checkpoint_cache.compact()
     except CheckpointCacheError as exc:

@@ -217,6 +217,19 @@ def test_route_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None:
         )
 
 
+def test_route_rejects_named_and_explicit_explorer_backends(tmp_path) -> None:
+    with pytest.raises(TypeError, match=r"explorer_backend.*config.explorer_backend"):
+        route_task(
+            RouterConfig(
+                workspace=tmp_path,
+                query="extract KPIs",
+                explorer_backend="codex",
+            ),
+            explorer_backend=object(),
+            embedding_provider=FakeEmbeddingProvider(),
+        )
+
+
 def test_graph_dependency_does_not_expand_explorer_selection(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
@@ -246,7 +259,7 @@ def test_explorer_failure_is_propagated_and_diagnostic_is_written(tmp_path) -> N
         )
 
     trace = workspace / "runs" / "sdk-failure"
-    assert (trace / "cc_explorer" / "error.json").exists()
+    assert (trace / "explorer" / "error.json").exists()
     assert not (trace / "route.json").exists()
 
 

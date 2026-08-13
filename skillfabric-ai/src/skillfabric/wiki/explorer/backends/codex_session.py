@@ -41,6 +41,7 @@ class CodexOperationalAccessError(RuntimeError):
     """The turn completed without proving that the query wiki was read successfully."""
 
     __skillfabric_recoverable_route_failure__ = True
+    __skillfabric_failure_kind__ = "operational_access"
 
 
 class CodexStructuredOutputError(ValueError):
@@ -60,7 +61,7 @@ def run_codex_attempt(
     user_prompt: str,
     query_wiki_root: Path,
     codex_home: Path,
-    cc_dir: Path,
+    explorer_dir: Path,
     command_budget: int,
     execution_timeout_seconds: float,
     thread_config: dict[str, Any],
@@ -132,12 +133,12 @@ def run_codex_attempt(
             sandbox=runtime.Sandbox.read_only,
         )
         _write_json(
-            cc_dir / "turn_state.json",
+            explorer_dir / "turn_state.json",
             {"schema_version": 1, "turn_started": True},
         )
         final_response = collect_codex_turn(
             turn,
-            cc_dir=cc_dir,
+            explorer_dir=explorer_dir,
             command_budget=command_budget,
             query_wiki_root=query_wiki_root,
         )
@@ -152,7 +153,7 @@ def run_codex_attempt(
         primary_error = exc
         if timed_out.is_set():
             _write_event(
-                cc_dir,
+                explorer_dir,
                 {"event": "sdk:timeout", "timeout_seconds": execution_timeout_seconds},
             )
             raise TimeoutError(
@@ -168,7 +169,7 @@ def run_codex_attempt(
             codex.close()
         except Exception as exc:
             _write_event(
-                cc_dir,
+                explorer_dir,
                 {
                     "event": "sdk:cleanup_error",
                     "error_type": type(exc).__name__,
@@ -182,7 +183,7 @@ def run_codex_attempt(
 def collect_codex_turn(
     turn: Any,
     *,
-    cc_dir: Path,
+    explorer_dir: Path,
     command_budget: int,
     query_wiki_root: Path,
 ) -> str:
@@ -216,7 +217,7 @@ def collect_codex_turn(
         if observed_violation and not policy_violation:
             policy_violation = observed_violation
             _write_event(
-                cc_dir,
+                explorer_dir,
                 {"event": "sdk:policy_violation", "activity": policy_violation},
             )
             _best_effort_interrupt(turn)
@@ -244,7 +245,7 @@ def collect_codex_turn(
         elif method == "turn/completed":
             completed_turn = getattr(payload, "turn", None)
         _write_event(
-            cc_dir,
+            explorer_dir,
             _event_summary(
                 method,
                 payload,
@@ -266,7 +267,7 @@ def collect_codex_turn(
         "evidence_categories": sorted(evidence_categories),
         "policy_violation": policy_violation or None,
     }
-    _write_json(cc_dir / "operational_access.json", operational_access)
+    _write_json(explorer_dir / "operational_access.json", operational_access)
     if budget_exceeded:
         raise RuntimeError(f"Codex query-wiki tool budget exceeded: exec_command<={command_budget}")
     if policy_violation:

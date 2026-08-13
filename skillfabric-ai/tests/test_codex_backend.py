@@ -259,7 +259,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
                 ).explore(query="find a skill", query_wiki_root=wiki, trace_dir=root / "trace")
 
             access = json.loads(
-                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
+                (root / "trace" / "explorer" / "operational_access.json").read_text()
             )
             self.assertFalse(access["evidence_access"])
 
@@ -388,7 +388,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
 
             self.assertEqual(package.to_dict(), _package())
             access = json.loads(
-                (root / "trace" / "cc_explorer" / "operational_access.json").read_text()
+                (root / "trace" / "explorer" / "operational_access.json").read_text()
             )
             self.assertIsNone(access["policy_violation"])
             self.assertTrue(access["index_read"])
@@ -551,14 +551,12 @@ class CodexWikiExplorerTests(unittest.TestCase):
             self.assertEqual(turn["sandbox"], "read-only")
 
             prompt_context = json.loads(
-                (trace / "cc_explorer" / "prompt_context.json").read_text(encoding="utf-8")
+                (trace / "explorer" / "prompt_context.json").read_text(encoding="utf-8")
             )
             self.assertEqual(prompt_context["allowed_tools"], ["exec_command"])
-            self.assertIn(
-                "exec_command<=21", (trace / "cc_explorer" / "prompt.system.md").read_text()
-            )
+            self.assertIn("exec_command<=21", (trace / "explorer" / "prompt.system.md").read_text())
 
-            artifacts = trace / "cc_explorer"
+            artifacts = trace / "explorer"
             backend = json.loads((artifacts / "backend.json").read_text(encoding="utf-8"))
             self.assertEqual(backend["backend"], "codex")
             self.assertEqual(backend["allowed_tools"], ["exec_command"])
@@ -605,7 +603,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
             )
 
             self.assertEqual(package.to_dict(), _package())
-            self.assertFalse((root / "trace" / "cc_explorer" / "usage.json").exists())
+            self.assertFalse((root / "trace" / "explorer" / "usage.json").exists())
 
     def test_failure_artifacts_include_app_server_metadata_and_redact_runtime_home(self) -> None:
         runtime = _Runtime(fail_thread_start=True)
@@ -629,7 +627,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     trace_dir=root / "trace",
                 )
 
-            artifacts = root / "trace" / "cc_explorer"
+            artifacts = root / "trace" / "explorer"
             backend_payload = json.loads((artifacts / "backend.json").read_text())
             self.assertEqual(backend_payload["app_server"]["version"], "0.144.4")
             error_text = (artifacts / "error.json").read_text()
@@ -670,7 +668,7 @@ class CodexWikiExplorerTests(unittest.TestCase):
 
             self.assertEqual(runtime.turns[0].interrupts, 1)
             error = json.loads(
-                (root / "trace" / "cc_explorer" / "error.json").read_text(encoding="utf-8")
+                (root / "trace" / "explorer" / "error.json").read_text(encoding="utf-8")
             )
             self.assertEqual(error["error_type"], "RuntimeError")
 
@@ -802,10 +800,10 @@ class CodexWikiExplorerTests(unittest.TestCase):
                     trace_dir=trace,
                 )
 
-            error = json.loads((trace / "cc_explorer" / "error.json").read_text())
+            error = json.loads((trace / "explorer" / "error.json").read_text())
             self.assertEqual(error["error_type"], "RuntimeError")
             events = [
                 json.loads(line)
-                for line in (trace / "cc_explorer" / "agent_events.jsonl").read_text().splitlines()
+                for line in (trace / "explorer" / "agent_events.jsonl").read_text().splitlines()
             ]
             self.assertEqual(events[-1]["event"], "backend:error")

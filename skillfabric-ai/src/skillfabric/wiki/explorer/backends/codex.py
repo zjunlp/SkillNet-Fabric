@@ -185,8 +185,8 @@ class CodexWikiExplorerBackend:
             raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
         if any(path.is_symlink() for path in query_wiki_root.rglob("*")):
             raise ValueError("query_wiki must not contain symlinks")
-        cc_dir = trace_dir / "cc_explorer"
-        cc_dir.mkdir(parents=True, exist_ok=True)
+        explorer_dir = trace_dir / "explorer"
+        explorer_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
         prompt_spec = build_codex_prompt_spec(
             query=query,
@@ -197,10 +197,10 @@ class CodexWikiExplorerBackend:
         )
         system_prompt = str(prompt_spec["system_prompt"])
         user_prompt = str(prompt_spec["user_prompt"])
-        atomic_write_text(cc_dir / "prompt.system.md", system_prompt)
-        atomic_write_text(cc_dir / "prompt.user.md", user_prompt)
+        atomic_write_text(explorer_dir / "prompt.system.md", system_prompt)
+        atomic_write_text(explorer_dir / "prompt.user.md", user_prompt)
         atomic_write_text(
-            cc_dir / "prompt_contract.json",
+            explorer_dir / "prompt_contract.json",
             json.dumps(
                 {
                     "prompt_id": prompt_spec["prompt_id"],
@@ -225,15 +225,15 @@ class CodexWikiExplorerBackend:
         if "required_selected_skills" in prompt_spec:
             prompt_context["required_selected_skills"] = prompt_spec["required_selected_skills"]
         atomic_write_text(
-            cc_dir / "prompt_context.json",
+            explorer_dir / "prompt_context.json",
             json.dumps(prompt_context, ensure_ascii=False, indent=2) + "\n",
         )
         atomic_write_text(
-            cc_dir / "prompt_spec.json",
+            explorer_dir / "prompt_spec.json",
             json.dumps(prompt_spec, ensure_ascii=False, indent=2) + "\n",
         )
         _write_json(
-            cc_dir / "backend.json",
+            explorer_dir / "backend.json",
             self._backend_payload(
                 runtime=None,
                 metadata=None,
@@ -241,7 +241,7 @@ class CodexWikiExplorerBackend:
             ),
         )
         _write_event(
-            cc_dir,
+            explorer_dir,
             {
                 "event": "backend:start",
                 "backend": "codex",
@@ -254,7 +254,7 @@ class CodexWikiExplorerBackend:
         try:
             runtime = self.sdk_runtime or _load_sdk_runtime()
             _write_json(
-                cc_dir / "backend.json",
+                explorer_dir / "backend.json",
                 self._backend_payload(
                     runtime=runtime,
                     metadata=None,
@@ -271,12 +271,12 @@ class CodexWikiExplorerBackend:
                     user_prompt=user_prompt,
                     query_wiki_root=query_wiki_root,
                     codex_home=Path(home),
-                    cc_dir=cc_dir,
+                    explorer_dir=explorer_dir,
                     command_budget=_command_budget(tool_budget),
                     prompt_id=str(prompt_spec["prompt_id"]),
                 )
             _write_json(
-                cc_dir / "backend.json",
+                explorer_dir / "backend.json",
                 self._backend_payload(
                     runtime,
                     metadata,
@@ -289,14 +289,15 @@ class CodexWikiExplorerBackend:
                 raise CodexStructuredOutputError(
                     "Codex agent returned an invalid structured skill package"
                 ) from exc
-            _validate_operational_result(package, cc_dir=cc_dir)
-            _write_json(cc_dir / "skill_package.json", package.to_dict())
+            _validate_operational_result(package, explorer_dir=explorer_dir)
+            _write_json(explorer_dir / "skill_package.json", package.to_dict())
             _write_event(
-                cc_dir,
+                explorer_dir,
                 {"event": "backend:finish", "selected_count": len(package.selected_skills)},
             )
             return package
         except Exception as exc:
+            _mark_retryability(exc)
             error = {
                 "error_type": type(exc).__name__,
                 "error": _safe_error_text(
@@ -308,8 +309,8 @@ class CodexWikiExplorerBackend:
                     ),
                 ),
             }
-            _write_json(cc_dir / "error.json", error)
-            _write_event(cc_dir, {"event": "backend:error", **error})
+            _write_json(explorer_dir / "error.json", error)
+            _write_event(explorer_dir, {"event": "backend:error", **error})
             with suppress(AttributeError, TypeError):
                 exc.__skillfabric_sanitized_error__ = error["error"]  # type: ignore[attr-defined]
             raise
@@ -323,7 +324,7 @@ class CodexWikiExplorerBackend:
         user_prompt: str,
         query_wiki_root: Path,
         codex_home: Path,
-        cc_dir: Path,
+        explorer_dir: Path,
         command_budget: int,
         prompt_id: str,
     ) -> tuple[dict[str, Any], dict[str, str]]:
@@ -337,7 +338,7 @@ class CodexWikiExplorerBackend:
             user_prompt=user_prompt,
             query_wiki_root=query_wiki_root,
             codex_home=codex_home,
-            cc_dir=cc_dir,
+            explorer_dir=explorer_dir,
             command_budget=command_budget,
             execution_timeout_seconds=self.execution_timeout_seconds,
             thread_config=_thread_config(
@@ -346,7 +347,7 @@ class CodexWikiExplorerBackend:
             ),
             output_schema=skill_package_json_schema(),
             metadata_callback=lambda metadata: _write_json(
-                cc_dir / "backend.json",
+                explorer_dir / "backend.json",
                 self._backend_payload(
                     runtime=runtime,
                     metadata=metadata,
@@ -430,8 +431,8 @@ def _command_budget(tool_budget: dict[str, int]) -> int:
     return min(tool_budget.get("exec_command", 0), tool_budget.get("total", 0))
 
 
-def _validate_operational_result(package: SkillPackage, *, cc_dir: Path) -> None:
-    access_path = cc_dir / "operational_access.json"
+def _validate_operational_result(package: SkillPackage, *, explorer_dir: Path) -> None:
+    access_path = explorer_dir / "operational_access.json"
     try:
         access = json.loads(access_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -482,6 +483,19 @@ def _safe_error_text(value: str, *, paths: tuple[Path, ...] = ()) -> str:
         paths=paths,
         path_replacement="[isolated-codex-home]",
     )
+
+
+def _mark_retryability(error: Exception) -> None:
+    """Translate the optional SDK retry classifier into the shared route contract."""
+
+    try:
+        from openai_codex import is_retryable_error
+
+        retryable = bool(is_retryable_error(error))
+    except Exception:  # noqa: BLE001 - classifier diagnostics must not mask the SDK failure.
+        return
+    with suppress(AttributeError, TypeError):
+        error.__skillfabric_retryable__ = retryable  # type: ignore[attr-defined]
 
 
 def _write_json(path: Path, payload: Any) -> None:

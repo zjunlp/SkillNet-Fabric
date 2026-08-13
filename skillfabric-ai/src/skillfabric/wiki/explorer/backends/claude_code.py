@@ -110,8 +110,8 @@ class ClaudeCodeWikiExplorerBackend:
         query_wiki_root = query_wiki_root.resolve()
         if not query_wiki_root.is_dir():
             raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
-        cc_dir = trace_dir / "cc_explorer"
-        cc_dir.mkdir(parents=True, exist_ok=True)
+        explorer_dir = trace_dir / "explorer"
+        explorer_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
         context = ExplorerPromptContext(
             query=query,
@@ -123,18 +123,18 @@ class ClaudeCodeWikiExplorerBackend:
         )
         system_prompt = render_system_prompt(context)
         user_prompt = render_user_prompt(context)
-        atomic_write_text(cc_dir / "prompt.system.md", system_prompt)
-        atomic_write_text(cc_dir / "prompt.user.md", user_prompt)
+        atomic_write_text(explorer_dir / "prompt.system.md", system_prompt)
+        atomic_write_text(explorer_dir / "prompt.user.md", user_prompt)
         atomic_write_text(
-            cc_dir / "prompt_contract.json",
+            explorer_dir / "prompt_contract.json",
             json.dumps({"prompt_id": EXPLORER_PROMPT_ID}, indent=2) + "\n",
         )
         atomic_write_text(
-            cc_dir / "prompt_context.json",
+            explorer_dir / "prompt_context.json",
             json.dumps(context.to_trace_context(), ensure_ascii=False, indent=2) + "\n",
         )
         _write_event(
-            cc_dir,
+            explorer_dir,
             {
                 "event": "backend:start",
                 "allowed_tools": ALLOWED_TOOLS,
@@ -148,16 +148,16 @@ class ClaudeCodeWikiExplorerBackend:
                 system_prompt,
                 user_prompt,
                 query_wiki_root,
-                cc_dir,
+                explorer_dir,
                 tool_budget,
             )
             package = SkillPackage.from_dict(payload)
             atomic_write_text(
-                cc_dir / "skill_package.json",
+                explorer_dir / "skill_package.json",
                 json.dumps(package.to_dict(), ensure_ascii=False, indent=2) + "\n",
             )
             _write_event(
-                cc_dir,
+                explorer_dir,
                 {"event": "backend:finish", "selected_count": len(package.selected_skills)},
             )
             return package
@@ -167,10 +167,10 @@ class ClaudeCodeWikiExplorerBackend:
                 "error": _safe_error_text(str(exc)),
             }
             atomic_write_text(
-                cc_dir / "error.json",
+                explorer_dir / "error.json",
                 json.dumps(error, ensure_ascii=False, indent=2) + "\n",
             )
-            _write_event(cc_dir, {"event": "backend:error", **error})
+            _write_event(explorer_dir, {"event": "backend:error", **error})
             raise
 
     def _explore_with_sdk(
@@ -178,7 +178,7 @@ class ClaudeCodeWikiExplorerBackend:
         system_prompt: str,
         user_prompt: str,
         query_wiki_root: Path,
-        cc_dir: Path,
+        explorer_dir: Path,
         tool_budget: dict[str, int],
     ) -> dict[str, Any]:
         runtime = self.sdk_runtime or _load_sdk_runtime()
@@ -193,7 +193,7 @@ class ClaudeCodeWikiExplorerBackend:
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
             ),
-            event_dir=cc_dir,
+            event_dir=explorer_dir,
             max_turns=self.max_turns,
             load_timeout_ms=self.load_timeout_ms,
             tool_budget=tool_budget,
@@ -202,7 +202,7 @@ class ClaudeCodeWikiExplorerBackend:
             runtime,
             prompt=user_prompt,
             options=options,
-            event_dir=cc_dir,
+            event_dir=explorer_dir,
             timeout_seconds=self.execution_timeout_seconds,
         )
         return _payload_from_result_message(result_message)

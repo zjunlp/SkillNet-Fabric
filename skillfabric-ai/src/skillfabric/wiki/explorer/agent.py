@@ -12,11 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.storage import atomic_write_text
-from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
-from skillfabric.wiki.explorer.backends.claude_code import (
-    ClaudeCodeSdkRuntime,
-    ClaudeCodeWikiExplorerBackend,
+from skillfabric.wiki.explorer.backends.base import (
+    ExplorerBackendName,
+    WikiExplorerBackend,
+    normalize_explorer_backend,
 )
+from skillfabric.wiki.explorer.backends.factory import create_explorer_backend
 from skillfabric.wiki.explorer.prompting import validate_required_selected_skills
 from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage
@@ -44,8 +45,10 @@ class WikiExplorerConfig:
     retry_delay_seconds: float = 1.0
     reasoning_effort: str | None = None
     required_selected_skills: int | None = None
+    backend: ExplorerBackendName = "claude"
 
     def __post_init__(self) -> None:
+        normalize_explorer_backend(self.backend)
         validate_required_selected_skills(
             self.required_selected_skills,
             max_selected_skills=self.max_selected_skills,
@@ -81,41 +84,44 @@ def explore_query_wiki(
     query: str,
     query_wiki_root: Path,
     trace_dir: Path,
-    sdk_runtime: ClaudeCodeSdkRuntime | None = None,
+    sdk_runtime: Any = None,
     backend: WikiExplorerBackend | None = None,
 ) -> WikiExplorerRun:
     """Retry exploration until the selected package passes validation."""
 
     if sdk_runtime is not None and backend is not None:
         raise TypeError("sdk_runtime and backend cannot be used together")
+    if backend is not None and config.backend != "claude":
+        raise TypeError("backend and config.backend cannot be used together")
     resolved_backend = (
         backend
         if backend is not None
-        else ClaudeCodeWikiExplorerBackend(
+        else create_explorer_backend(
+            config.backend,
             env_file=config.env_file,
             max_selected_skills=config.max_selected_skills,
             required_selected_skills=config.required_selected_skills,
             model=config.model,
             reasoning_effort=config.reasoning_effort,
-            sdk_runtime=sdk_runtime,
             max_turns=config.max_turns,
             load_timeout_ms=config.load_timeout_ms,
             execution_timeout_seconds=config.execution_timeout_seconds,
+            sdk_runtime=sdk_runtime,
         )
     )
     if not query_wiki_root.is_dir():
         raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
-    cc_dir = trace_dir / "cc_explorer"
-    attempts_root = trace_dir / ".cc_explorer_attempts"
-    if cc_dir.exists() or attempts_root.exists():
-        raise FileExistsError("explorer trace already contains Codex attempt artifacts")
+    explorer_dir = trace_dir / "explorer"
+    attempts_root = trace_dir / ".explorer_attempts"
+    if explorer_dir.exists() or attempts_root.exists():
+        raise FileExistsError("explorer trace already contains attempt artifacts")
     attempts_root.mkdir(parents=True, exist_ok=True)
     attempt_records: list[dict[str, Any]] = []
     winner: int | None = None
     terminal_error: Exception | None = None
     for attempt in range(1, config.max_attempts + 1):
         attempt_dir = attempts_root / f"attempt-{attempt:02d}"
-        attempt_trace = trace_dir / f".cc_explorer_run-{attempt:02d}"
+        attempt_trace = trace_dir / f".explorer_run-{attempt:02d}"
         attempt_trace.mkdir(parents=True, exist_ok=False)
         started = time.monotonic()
         package: SkillPackage | None = None
@@ -183,9 +189,9 @@ def explore_query_wiki(
     if winner is None:
         raise terminal_error
     winner_package = SkillPackage.from_dict(
-        _read_json(trace_dir / "cc_explorer" / "skill_package.json", label="skill package")
+        _read_json(trace_dir / "explorer" / "skill_package.json", label="skill package")
     )
-    winner_validation = _read_validation(trace_dir / "cc_explorer" / "validation.json")
+    winner_validation = _read_validation(trace_dir / "explorer" / "validation.json")
     return WikiExplorerRun(package=winner_package, validation=winner_validation)
 
 
@@ -200,7 +206,7 @@ def _archive_attempt(
     trace_root: Path,
     redaction_roots: tuple[Path, ...],
 ) -> None:
-    source = attempt_trace / "cc_explorer"
+    source = attempt_trace / "explorer"
     attempt_dir.parent.mkdir(parents=True, exist_ok=True)
     if attempt_dir.exists():
         raise FileExistsError(f"explorer attempt already exists: {attempt_dir.name}")
@@ -249,7 +255,7 @@ def _archive_attempt(
         "artifact_paths": sorted(
             [
                 *_artifact_paths(attempt_dir, trace_root),
-                str(Path("cc_explorer") / "attempts" / attempt_dir.name / "attempt.json"),
+                str(Path("explorer") / "attempts" / attempt_dir.name / "attempt.json"),
             ]
         ),
     }
@@ -266,12 +272,12 @@ def _publish_explorer_closure(
     attempt_records: list[dict[str, Any]],
     winner: int | None,
 ) -> None:
-    cc_dir = trace_dir / "cc_explorer"
-    attempts_root = trace_dir / ".cc_explorer_attempts"
-    if cc_dir.exists():
-        shutil.rmtree(cc_dir)
-    cc_dir.mkdir(parents=True, exist_ok=True)
-    published_attempts = cc_dir / "attempts"
+    explorer_dir = trace_dir / "explorer"
+    attempts_root = trace_dir / ".explorer_attempts"
+    if explorer_dir.exists():
+        shutil.rmtree(explorer_dir)
+    explorer_dir.mkdir(parents=True, exist_ok=True)
+    published_attempts = explorer_dir / "attempts"
     if attempts_root.exists():
         shutil.move(str(attempts_root), str(published_attempts))
     winner_dir = published_attempts / f"attempt-{winner:02d}" if winner else None
@@ -281,22 +287,22 @@ def _publish_explorer_closure(
             failure_dir = published_attempts / f"attempt-{last_attempt:02d}"
             error = failure_dir / "error.json"
             if error.exists():
-                shutil.copy2(error, cc_dir / "error.json")
+                shutil.copy2(error, explorer_dir / "error.json")
             validation = failure_dir / "validation.json"
             if validation.exists():
-                shutil.copy2(validation, cc_dir / "validation.json")
+                shutil.copy2(validation, explorer_dir / "validation.json")
     if winner_dir is not None and winner_dir.is_dir():
         for child in winner_dir.iterdir():
             if child.name in {"attempt.json", "validation.json", "error.json"}:
                 continue
-            destination = cc_dir / child.name
+            destination = explorer_dir / child.name
             if child.is_file():
                 shutil.copy2(child, destination)
             elif child.is_dir():
                 shutil.copytree(child, destination)
         validation = winner_dir / "validation.json"
         if validation.exists():
-            shutil.copy2(validation, cc_dir / "validation.json")
+            shutil.copy2(validation, explorer_dir / "validation.json")
     closure = {
         "schema_version": 1,
         "status": "completed" if winner is not None else "route_failed",
@@ -305,7 +311,7 @@ def _publish_explorer_closure(
         "attempts": attempt_records,
     }
     atomic_write_text(
-        cc_dir / "closure.json",
+        explorer_dir / "closure.json",
         json.dumps(closure, ensure_ascii=False, indent=2) + "\n",
     )
 
@@ -317,11 +323,13 @@ def _closure_outcome(winner_dir: Path) -> str:
         raise ValueError("winning skill package selected_skills must be a list")
     if selected:
         return "completed_nonempty"
-    backend = _optional_json(winner_dir / "backend.json")
-    if backend is not None and backend.get("backend") == "codex":
-        access = _optional_json(winner_dir / "operational_access.json")
-        if access is None or access.get("semantic_empty_valid") is not True:
-            raise ValueError("Codex empty closure requires validated semantic-empty evidence")
+    access = _optional_json(winner_dir / "operational_access.json")
+    if (
+        access is not None
+        and access.get("semantic_empty") is True
+        and access.get("semantic_empty_valid") is not True
+    ):
+        raise ValueError("empty explorer closure requires validated empty-selection evidence")
     return "completed_empty"
 
 
@@ -333,7 +341,7 @@ def _load_attempt_record(attempt_dir: Path, *, trace_root: Path) -> dict[str, An
 
 def _artifact_paths(root: Path, trace_root: Path) -> list[str]:
     del trace_root
-    published_root = Path("cc_explorer") / "attempts" / root.name
+    published_root = Path("explorer") / "attempts" / root.name
     return sorted(
         str(published_root / path.relative_to(root)) for path in root.rglob("*") if path.is_file()
     )
@@ -370,17 +378,10 @@ def _retryable_explorer_error(error: Exception) -> bool:
         return False
     if getattr(error, "__skillfabric_recoverable_route_failure__", False):
         return True
-    for attribute in ("retryable", "is_retryable"):
+    for attribute in ("retryable", "is_retryable", "__skillfabric_retryable__"):
         marker = getattr(error, attribute, None)
         if isinstance(marker, bool):
             return marker
-    try:
-        from openai_codex import is_retryable_error
-
-        if is_retryable_error(error):
-            return True
-    except (ImportError, TypeError):
-        pass
     if isinstance(error, TimeoutError):
         return True
     message = str(error).casefold()
@@ -419,8 +420,9 @@ def _retryable_explorer_error(error: Exception) -> bool:
 def _failure_kind(error: Exception) -> str:
     if isinstance(error, _RetryableExplorerValidationError):
         return "validation"
-    if type(error).__name__ == "CodexOperationalAccessError":
-        return "operational_access"
+    failure_kind = getattr(error, "__skillfabric_failure_kind__", None)
+    if isinstance(failure_kind, str) and failure_kind:
+        return failure_kind
     if isinstance(error, TimeoutError):
         return "timeout"
     if getattr(error, "__skillfabric_non_retryable__", False):

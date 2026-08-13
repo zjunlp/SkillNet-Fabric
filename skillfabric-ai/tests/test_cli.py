@@ -138,6 +138,19 @@ def test_route_cli_constructs_only_current_router_config_fields() -> None:
     assert json.loads(output.getvalue())["selected_skills"][0]["skill_id"] == "skill:test"
 
 
+def test_route_cli_selects_codex_explorer_backend() -> None:
+    output = io.StringIO()
+
+    with (
+        patch("skillfabric.cli.route_task", return_value=_route()) as route_mock,
+        contextlib.redirect_stdout(output),
+    ):
+        cli_main(["route", "test task", "--backend", "codex", "--json"])
+
+    config = route_mock.call_args.args[0]
+    assert config.explorer_backend == "codex"
+
+
 def test_route_cli_defaults_to_a_human_summary() -> None:
     output = io.StringIO()
 

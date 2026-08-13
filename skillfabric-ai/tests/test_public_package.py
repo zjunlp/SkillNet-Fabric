@@ -55,6 +55,30 @@ class PublicPackageTests(unittest.TestCase):
         self.assertEqual(result, _facade_route())
         self.assertIs(route.call_args.kwargs["explorer_backend"], backend)
 
+    def test_python_facade_forwards_named_explorer_backend(self) -> None:
+        from skillfabric import SkillFabric
+
+        with patch("skillfabric.api.route_task", return_value=_facade_route()) as route:
+            SkillFabric(workspace=".skillfabric").route("extract KPIs", backend="codex")
+
+        config = route.call_args.args[0]
+        self.assertEqual(config.explorer_backend, "codex")
+
+    def test_python_facade_rejects_named_and_explicit_explorer_backends(self) -> None:
+        from skillfabric import SkillFabric
+
+        with (
+            patch("skillfabric.api.route_task") as route,
+            self.assertRaisesRegex(TypeError, "backend and explorer_backend"),
+        ):
+            SkillFabric(workspace=".skillfabric").route(
+                "extract KPIs",
+                backend="codex",
+                explorer_backend=object(),
+            )
+
+        route.assert_not_called()
+
     def test_python_facade_forwards_optional_exact_selection_count(self) -> None:
         from skillfabric import SkillFabric
 

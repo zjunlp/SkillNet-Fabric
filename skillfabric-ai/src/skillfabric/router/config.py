@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillfabric.router.traces import validate_trace_id
+from skillfabric.wiki.explorer.backends.base import ExplorerBackendName, normalize_explorer_backend
 from skillfabric.wiki.explorer.prompting import validate_required_selected_skills
 
 RouterSdkRuntime = Any
@@ -31,8 +32,10 @@ class RouterConfig:
     explorer_retry_delay_seconds: float = 1.0
     explorer_reasoning_effort: str | None = None
     required_selected_skills: int | None = None
+    explorer_backend: ExplorerBackendName = "claude"
 
     def __post_init__(self) -> None:
+        normalize_explorer_backend(self.explorer_backend)
         if self.trace_id is not None:
             validate_trace_id(self.trace_id)
 
