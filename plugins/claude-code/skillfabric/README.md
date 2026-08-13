@@ -2,7 +2,7 @@
 
 SkillFabric helps Claude Code route tasks through a large local collection of native
 `SKILL.md` files. It compiles the collection into reusable graph and index artifacts,
-then lets Claude inspect a bounded Task Wiki before selecting the relevant skills.
+then lets Claude inspect a task specific Wiki before forming the final skill set.
 
 ## Commands
 

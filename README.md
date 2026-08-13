@@ -2,7 +2,7 @@
 
 # SkillFabric
 
-**Build a local skill library once, route each task through a focused Task Wiki, and hand the right Skills to your agent.**
+**Weaving Task Specific Wikis for Agentic Skill Routing**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -21,13 +21,13 @@ Agents should not receive an entire skill library for every task. Sending every 
 unnecessary context, makes related Skills hard to compare, and leaves the agent to infer useful
 handoffs from raw files.
 
-SkillFabric is a local routing layer for native `SKILL.md` libraries:
+SkillFabric is a task time routing layer for native `SKILL.md` libraries:
 
 - **Build once:** compile Skills into validated contracts, indexes, and a typed graph.
-- **Route per task:** combine lexical retrieval, embeddings, and graph evidence to materialize a
-  bounded Task Wiki.
-- **Select with an agent:** let Claude Code or Codex inspect that Task Wiki and return a strict set
-  of Skills with reasons and evidence.
+- **Route per task:** combine retrieval and graph relations to construct task relevant candidates
+  and supporting evidence, then materialize a task specific Wiki.
+- **Select with an agent:** let Claude Code or Codex inspect that Wiki and form the final Skill set
+  with reasons and evidence.
 - **Plan when needed:** optionally turn a validated route into one execution-ready prompt for a
   downstream agent.
 - **Stay local:** keep source files and generated artifacts in your workspace. SkillFabric does
@@ -39,9 +39,9 @@ The project is named **SkillFabric**. The installable package is `skillfabric-ai
 ### SkillNet and SkillFabric
 
 [SkillNet](https://github.com/zjunlp/SkillNet) is the broader supply chain for discovering,
-creating, evaluating, and downloading reusable Skills. SkillFabric is the local task-time layer:
+creating, evaluating, and downloading reusable Skills. SkillFabric is the local task time layer:
 place the Skills you want to use in a local directory, run `build` once, and let `route` prepare a
-focused Task Wiki for each task. The two projects can be used together without requiring a hosted
+task specific Wiki for each task. The two projects can be used together without requiring a hosted
 SkillFabric service.
 
 ---
@@ -155,7 +155,7 @@ skillfabric route --json "Analyze the dataset and prepare a presentation"
 | :-- | :-- | :-- |
 | Skill library | Compile local `SKILL.md` files | Reuse one validated library across tasks |
 | Skill graph | Build typed, source-grounded relations | Retrieve useful handoffs and alternatives |
-| Task routing | Materialize a bounded Task Wiki | Give an agent only task-relevant evidence |
+| Task routing | Materialize a task specific Wiki | Give an agent task relevant candidates and evidence |
 | Agent selection | Claude Code or Codex Explorer | Return a strict, inspectable Skill selection |
 | Planner handoff | Generate an execution prompt | Pass selected Skills to a downstream agent |
 | Integrations | Claude Code plugin and Python API | Use the same routing workflow from common runtimes |
@@ -164,15 +164,15 @@ skillfabric route --json "Analyze the dataset and prepare a presentation"
 
 ## How It Works
 
-SkillFabric separates stable library preparation from task-time selection:
+SkillFabric separates stable library preparation from task time selection:
 
 1. **Full Wiki:** a reusable, complete view of the local Skill library with deterministic Skill
    cards, complete sources, and rendered relation context.
-2. **Canonical graph and indexes:** machine-facing artifacts used for hybrid retrieval and bounded
-   graph expansion. They are not shown to the Explorer as an unrestricted global corpus.
-3. **Task Wiki:** a per-task evidence closure containing only the candidates, cards, sources, local
-   relations, and alternatives admitted for that task.
-4. **Explorer:** Claude Code or Codex reads only the Task Wiki and returns the final selection.
+2. **Canonical graph and indexes:** machine-facing artifacts used for hybrid retrieval and relation
+   expansion. They organize the global Skill ecosystem for localization at task time.
+3. **Task Wiki:** a view for each task containing retained candidates, cards, complete sources,
+   local relations, and the evidence used to admit them.
+4. **Explorer:** Claude Code or Codex reads the Task Wiki and forms the final Skill set.
 5. **Planner:** an optional downstream stage turns a validated route into an execution prompt. It
    does not execute the task.
 
@@ -290,13 +290,13 @@ The plugin calls the CLI with JSON output and never reads or prints `.env` value
 ### Claude Code Demo
 
 > A short screen recording of the real Claude Code workflow will be added here: installation,
-> `doctor`, incremental `build`, and task-time `route` over a local Skill library.
+> `doctor`, incremental `build`, and `route` over a local Skill library.
 
 <!-- Replace this block with the GitHub video asset URL after recording the demo. -->
 
 ### Codex
 
-Codex is an alternative route-time Explorer. The build pipeline is shared; only the agent that
+Codex is an alternative Explorer at route time. The build pipeline is shared; only the agent that
 inspects the Task Wiki changes:
 
 ```bash
@@ -331,46 +331,21 @@ the selected agent SDK. Keep `.env` files private and out of Git.
 
 ---
 
-## Workspace
-
-Generated state lives under the workspace passed to the CLI or Python API:
-
-```text
-.skillfabric/
-├── graph/                 # canonical graph and retrieval indexes
-├── wiki/                  # reusable Full Wiki
-├── runs/<trace-id>/       # Task Wiki and route or plan artifacts
-└── status.json
-```
-
-Do not edit generated artifacts by hand. Rebuild a workspace when canonical validation fails.
-
----
-
 ## Development
 
-Run the deterministic test and lint suite from `skillfabric-ai`:
+Run the deterministic test suite from the package directory:
 
 ```bash
-python -m pip install -e ".[dev,claude,codex]"
+cd skillfabric-ai
+python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check src tests
 python -m ruff format --check src tests
-python -m compileall -q src
 ```
 
-The published suite does not make real LLM, embedding, Claude, or Codex calls. Provider
-integrations should be validated separately with a disposable Skill library.
-
----
-
-## Roadmap
-
-- Publish the first stable `skillfabric-ai` release.
-- Add a recorded Claude Code walkthrough to this README.
-- Expand integration examples while keeping the normal CLI surface small.
-- Continue improving incremental builds and route diagnostics without exposing experiment-only
-  controls to routine users.
+The published suite does not make real LLM, embedding, Claude, or Codex calls. Install the
+`claude` or `codex` extra only when validating that backend separately with a disposable Skill
+library.
 
 ---
 
@@ -378,21 +353,6 @@ integrations should be validated separately with a disposable Skill library.
 
 Contributions are welcome. Keep pull requests focused, include tests for behavior changes, and
 avoid committing credentials, generated workspaces, raw provider logs, or experiment outputs.
-
----
-
-## Research
-
-SkillFabric accompanies our research on Wiki-based Skill Routing. This repository focuses on the
-usable open-source package; benchmark protocols, archived conditions, tables, and paper artifacts
-are maintained separately from the runtime release.
-
----
-
-## Citation
-
-Citation metadata for the accompanying paper, *SkillFabric: Weaving Task-Specific Wikis for
-Agentic Skill Routing*, will be added when the public author and publication details are finalized.
 
 ---
 
