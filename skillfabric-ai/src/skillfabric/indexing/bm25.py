@@ -12,7 +12,7 @@ from skillfabric.indexing.canonical import canonical_skill_text, contract_skill_
 from skillfabric.registry.models import SkillNode
 
 if TYPE_CHECKING:
-    from skillfabric.compiled_graph.contracts.models import SkillContract
+    from skillfabric.graph.contracts.models import SkillContract
 
 
 @dataclass(frozen=True, slots=True)

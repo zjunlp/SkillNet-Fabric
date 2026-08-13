@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
 from skillfabric.storage import Workspace, atomic_write_text

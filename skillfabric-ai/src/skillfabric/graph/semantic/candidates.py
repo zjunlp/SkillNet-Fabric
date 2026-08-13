@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.contracts.models import ContractField, SkillContract
-from skillfabric.compiled_graph.models import EvidenceRef
-from skillfabric.compiled_graph.semantic.models import (
+from skillfabric.graph.contracts.models import ContractField, SkillContract
+from skillfabric.graph.models import EvidenceRef
+from skillfabric.graph.semantic.models import (
     CandidateHit,
     CandidatePair,
     CandidateRetrievalResult,

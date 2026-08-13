@@ -10,24 +10,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.contracts.extraction import (
+from skillfabric.graph.contracts.extraction import (
     ContractExtractor,
     LiteLLMContractExtractor,
     extract_skill_contracts,
 )
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import GraphDocument
-from skillfabric.compiled_graph.semantic.candidates import (
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.models import GraphDocument
+from skillfabric.graph.semantic.candidates import (
     DEFAULT_CANDIDATE_TOP_K,
     retrieve_candidate_pairs,
 )
-from skillfabric.compiled_graph.semantic.models import RelationDecision
-from skillfabric.compiled_graph.semantic.projection import (
+from skillfabric.graph.semantic.models import RelationDecision
+from skillfabric.graph.semantic.projection import (
     CycleAdjudicator,
     LiteLLMCycleAdjudicator,
     project_relation_decisions,
 )
-from skillfabric.compiled_graph.semantic.validation import (
+from skillfabric.graph.semantic.validation import (
     LiteLLMRelationJudge,
     RelationJudge,
     validate_candidate_pairs,

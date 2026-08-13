@@ -6,13 +6,13 @@ from typing import Any
 
 import pytest
 
-import skillfabric.compiled_graph.contracts.extraction as extraction_module
-from skillfabric.compiled_graph.contracts.extraction import (
+import skillfabric.graph.contracts.extraction as extraction_module
+from skillfabric.graph.contracts.extraction import (
     ContractExtractionError,
     extract_skill_contracts,
 )
-from skillfabric.compiled_graph.contracts.models import ContractSchemaError, SkillContract
-from skillfabric.compiled_graph.contracts.prompts import (
+from skillfabric.graph.contracts.models import ContractSchemaError, SkillContract
+from skillfabric.graph.contracts.prompts import (
     CONTRACT_PROMPT_ID,
     build_contract_extraction_messages,
 )

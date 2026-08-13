@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from skillfabric.compiled_graph.contracts.models import ContractSchemaError, SkillContract
-from skillfabric.compiled_graph.contracts.prompts import (
+from skillfabric.graph.contracts.models import ContractSchemaError, SkillContract
+from skillfabric.graph.contracts.prompts import (
     CONTRACT_PROMPT_FINGERPRINT,
     CONTRACT_PROMPT_ID,
     build_contract_extraction_messages,

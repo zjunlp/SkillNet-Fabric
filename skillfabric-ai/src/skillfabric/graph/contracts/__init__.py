@@ -1,13 +1,13 @@
 """Strict skill contracts used by graph build and routing."""
 
-from skillfabric.compiled_graph.contracts.extraction import (
+from skillfabric.graph.contracts.extraction import (
     ContractExtractionError,
     ContractExtractionRecord,
     ContractExtractor,
     LiteLLMContractExtractor,
     extract_skill_contracts,
 )
-from skillfabric.compiled_graph.contracts.models import (
+from skillfabric.graph.contracts.models import (
     ContractField,
     ContractSchemaError,
     SkillContract,

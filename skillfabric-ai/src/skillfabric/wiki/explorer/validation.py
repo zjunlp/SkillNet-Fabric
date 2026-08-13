@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.models import Edge
 from skillfabric.router.models import (
     RouteNearMiss,
     RouterBundle,

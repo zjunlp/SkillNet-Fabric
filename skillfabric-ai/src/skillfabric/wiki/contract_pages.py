@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from skillfabric.compiled_graph.contracts.models import ContractField, SkillContract
-from skillfabric.compiled_graph.models import EvidenceRef
+from skillfabric.graph.contracts.models import ContractField, SkillContract
+from skillfabric.graph.models import EvidenceRef
 from skillfabric.registry.models import SkillNode
 
 

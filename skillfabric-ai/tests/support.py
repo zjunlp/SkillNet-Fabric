@@ -9,10 +9,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from skillfabric.compiled_graph.builder import BuildConfig, _BuildDependencies, build_graph
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import EvidenceRef
-from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
+from skillfabric.graph.builder import BuildConfig, _BuildDependencies, build_graph
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.models import EvidenceRef
+from skillfabric.graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.registry.models import SkillNode
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig

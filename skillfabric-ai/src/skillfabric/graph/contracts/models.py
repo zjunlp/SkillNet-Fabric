@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from skillfabric.compiled_graph.models import EvidenceRef
+from skillfabric.graph.models import EvidenceRef
 from skillfabric.registry.models import SkillNode
 
 _CONTRACT_KEYS = frozenset(

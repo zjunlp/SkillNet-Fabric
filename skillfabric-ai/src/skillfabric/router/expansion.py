@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import (
     ExpansionPath,

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import skillfabric.router.bundle as bundle_module
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.models import Edge
 from skillfabric.indexing.ranking import reciprocal_rank_fusion
 from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.expansion import ExpansionResult, expand_semantic_candidates

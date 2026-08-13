@@ -10,13 +10,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.builder import (
+from skillfabric.graph.builder import (
     BuildConfig,
     BuildResult,
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.models import GraphDocument
+from skillfabric.graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
 from skillfabric.orchestrator.package import (
     plan_execution_package,

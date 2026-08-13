@@ -8,12 +8,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
-from skillfabric.compiled_graph.models import Edge
-from skillfabric.compiled_graph.semantic.models import (
+from skillfabric.graph.models import Edge
+from skillfabric.graph.semantic.models import (
     GraphProjectionResult,
     RelationDecision,
 )
-from skillfabric.compiled_graph.semantic.prompts import build_cycle_adjudication_messages
+from skillfabric.graph.semantic.prompts import build_cycle_adjudication_messages
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.json_utils import parse_json_response
 from skillfabric.runtime.llm import LLMConfig, litellm_completion

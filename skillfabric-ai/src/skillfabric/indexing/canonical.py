@@ -6,7 +6,7 @@ import hashlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from skillfabric.compiled_graph.contracts.models import SkillContract
+    from skillfabric.graph.contracts.models import SkillContract
     from skillfabric.registry.models import SkillNode
 
 

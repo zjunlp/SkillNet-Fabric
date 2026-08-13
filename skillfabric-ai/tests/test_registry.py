@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from skillfabric.compiled_graph.models import Edge, GraphDocument
+from skillfabric.graph.models import Edge, GraphDocument
 from skillfabric.indexing.canonical import canonical_skill_text
 from skillfabric.registry.parser import parse_skill_file
 from skillfabric.registry.scanner import scan_skill_root

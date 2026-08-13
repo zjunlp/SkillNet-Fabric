@@ -7,12 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from skillfabric.compiled_graph.builder import (
+from skillfabric.graph.builder import (
     BuildConfig,
     _BuildDependencies,
     build_graph,
 )
-from skillfabric.compiled_graph.semantic.candidates import CandidateRetrievalError
+from skillfabric.graph.semantic.candidates import CandidateRetrievalError
 from skillfabric.indexing.embeddings import DEFAULT_EMBEDDING_MODEL_ID, ApiEmbeddingProvider
 from skillfabric.wiki.materializer import build_wiki
 from skillfabric.wiki.models import WikiBuildConfig

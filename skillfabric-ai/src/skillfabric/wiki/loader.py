@@ -8,8 +8,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import Edge, GraphDocument
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.models import Edge, GraphDocument
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 

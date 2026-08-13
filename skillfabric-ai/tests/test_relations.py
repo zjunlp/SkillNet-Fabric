@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-import skillfabric.compiled_graph.semantic.validation as validation_module
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.semantic.models import CandidateHit, CandidatePair
-from skillfabric.compiled_graph.semantic.prompts import (
+import skillfabric.graph.semantic.validation as validation_module
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.semantic.models import CandidateHit, CandidatePair
+from skillfabric.graph.semantic.prompts import (
     RELATION_PROMPT_ID,
     build_relation_judge_messages,
 )
-from skillfabric.compiled_graph.semantic.validation import (
+from skillfabric.graph.semantic.validation import (
     RelationValidationError,
     validate_candidate_pairs,
 )

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.models import Edge
 
 
 @dataclass(frozen=True, slots=True)

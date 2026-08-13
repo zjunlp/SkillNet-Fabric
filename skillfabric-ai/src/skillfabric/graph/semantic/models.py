@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from skillfabric.compiled_graph.models import Edge, EvidenceRef
+from skillfabric.graph.models import Edge, EvidenceRef
 
 CandidateChannel = Literal["handoff", "explicit_reference", "similarity", "lexical"]
 EmbeddingKind = Literal["skill", "requires", "produces"]

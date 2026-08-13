@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.semantic.models import CandidatePair, RelationDecision
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.semantic.models import CandidatePair, RelationDecision
 from skillfabric.registry.models import SkillNode
 from skillfabric.runtime.prompting import (
     UNTRUSTED_JSON_SERIALIZATION,

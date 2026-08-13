@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillfabric.compiled_graph.builder import (
+from skillfabric.graph.builder import (
     BuildConfig,
     BuildResult,
     _BuildDependencies,

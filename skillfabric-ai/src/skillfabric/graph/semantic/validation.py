@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from skillfabric.compiled_graph.contracts.models import SkillContract
-from skillfabric.compiled_graph.models import EvidenceRef
-from skillfabric.compiled_graph.semantic.models import (
+from skillfabric.graph.contracts.models import SkillContract
+from skillfabric.graph.models import EvidenceRef
+from skillfabric.graph.semantic.models import (
     CandidatePair,
     RelationDecision,
 )
-from skillfabric.compiled_graph.semantic.prompts import (
+from skillfabric.graph.semantic.prompts import (
     RELATION_POLICY_FINGERPRINT,
     RELATION_PROMPT_ID,
     build_relation_judge_messages,

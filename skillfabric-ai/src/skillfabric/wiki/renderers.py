@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from skillfabric.compiled_graph.contracts.models import ContractField, SkillContract
-from skillfabric.compiled_graph.models import Edge
+from skillfabric.graph.contracts.models import ContractField, SkillContract
+from skillfabric.graph.models import Edge
 from skillfabric.registry.models import SkillNode
 from skillfabric.storage import Workspace
 from skillfabric.wiki.contract_pages import render_skill_source_page
