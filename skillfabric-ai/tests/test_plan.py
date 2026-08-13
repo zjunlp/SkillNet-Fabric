@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import skillfabric.orchestrator.package as package_module
-from skillfabric.orchestrator.package import (
+import skillfabric.planner.package as package_module
+from skillfabric.planner.package import (
     PLANNER_PROMPT_ID,
     plan_execution_package,
     planner_output_json_schema,

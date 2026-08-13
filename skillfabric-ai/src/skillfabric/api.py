@@ -18,7 +18,7 @@ from skillfabric.indexing.embeddings import (
     EmbeddingProvider,
     default_embedding_provider,
 )
-from skillfabric.orchestrator.package import (
+from skillfabric.planner.package import (
     DEFAULT_PLANNER_CONTEXT_MAX_TOKENS,
     ExecutionPackageResult,
     plan_execution_package,

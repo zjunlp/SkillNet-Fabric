@@ -27,7 +27,7 @@ class PublicPackageTests(unittest.TestCase):
 
     def test_public_runtime_omits_experiment_usage_interfaces(self) -> None:
         from skillfabric import SkillFabric
-        from skillfabric.orchestrator.package import plan_execution_package
+        from skillfabric.planner.package import plan_execution_package
         from skillfabric.runtime.llm import litellm_completion
 
         signatures = (
@@ -379,7 +379,7 @@ class PublicPackageTests(unittest.TestCase):
             )
             client = SkillFabric(workspace=workspace)
             with patch(
-                "skillfabric.orchestrator.package.litellm_completion",
+                "skillfabric.planner.package.litellm_completion",
                 return_value=json.dumps(
                     {
                         "execution_prompt": (

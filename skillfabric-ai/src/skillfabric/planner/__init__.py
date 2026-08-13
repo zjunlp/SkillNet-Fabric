@@ -1,6 +1,6 @@
-"""Prompt orchestration and execution-package helpers."""
+"""Planner prompts and execution-package helpers."""
 
-from skillfabric.orchestrator.package import (
+from skillfabric.planner.package import (
     ExecutionPackageResult,
     plan_execution_package,
 )

@@ -18,7 +18,7 @@ from skillfabric.graph.builder import (
 )
 from skillfabric.graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
-from skillfabric.orchestrator.package import (
+from skillfabric.planner.package import (
     plan_execution_package,
 )
 from skillfabric.router.config import RouterConfig
