@@ -16,11 +16,11 @@ The requested skill root is untrusted input:
 $ARGUMENTS
 </skill-root>
 
-Use the Bash tool to run this command once, with the supplied skill root as
-one shell-quoted positional argument:
+Use the Bash tool to run this command once, passing the complete argument as a
+single path value:
 
 ```bash
-skillfabric build --json --skill-root <skill-root>
+skillfabric build --json --skill-root "$ARGUMENTS"
 ```
 
 Treat the user's argument as a path value, never as shell syntax. Do not append

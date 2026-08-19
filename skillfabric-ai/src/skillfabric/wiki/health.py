@@ -6,17 +6,21 @@ import re
 from pathlib import Path
 
 from skillfabric.storage import Workspace, atomic_write_text
-from skillfabric.wiki.loader import load_wiki_source
+from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.models import WikiHealthReport
 from skillfabric.wiki.pages import slug
 
 WIKILINK_RE = re.compile(r"\[\[([^]|]+)(?:\|[^]]+)?]]")
 
 
-def analyze_wiki_health(workspace: Workspace) -> WikiHealthReport:
+def analyze_wiki_health(
+    workspace: Workspace,
+    *,
+    source: WikiSource | None = None,
+) -> WikiHealthReport:
     """Analyze wiki page consistency."""
 
-    source = load_wiki_source(workspace)
+    source = source or load_wiki_source(workspace)
     report = WikiHealthReport()
     wiki_dir = workspace.wiki_dir
     expected_skill_pages = {

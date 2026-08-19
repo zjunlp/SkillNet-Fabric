@@ -1,4 +1,4 @@
-"""Explorer-only routing over bounded query wikis."""
+"""Explorer-only routing over task Wikis."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from skillfabric.router.config import RouterConfig, RouterSdkRuntime
 from skillfabric.router.models import RouteResult
 from skillfabric.router.traces import _create_trace_dir, _new_trace_id
 from skillfabric.storage import Workspace, atomic_write_text
-from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
+from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_task_wiki
 from skillfabric.wiki.explorer.backends.base import WikiExplorerBackend
 from skillfabric.wiki.explorer.validation import route_from_skill_package
-from skillfabric.wiki.query_wiki import materialize_query_wiki
+from skillfabric.wiki.task_wiki import materialize_task_wiki
 
 
 def route_task(
@@ -50,8 +50,8 @@ def route_task(
         ),
         embedding_provider=embedding_provider,
     )
-    query_wiki = materialize_query_wiki(workspace, bundle, trace_dir=trace_dir)
-    explorer_run = explore_query_wiki(
+    task_wiki = materialize_task_wiki(workspace, bundle, trace_dir=trace_dir)
+    explorer_run = explore_task_wiki(
         WikiExplorerConfig(
             env_file=config.env_file,
             max_selected_skills=config.max_selected_skills,
@@ -66,7 +66,7 @@ def route_task(
             retry_delay_seconds=config.explorer_retry_delay_seconds,
         ),
         query=config.query,
-        query_wiki_root=query_wiki.root,
+        task_wiki_root=task_wiki.root,
         trace_dir=trace_dir,
         sdk_runtime=sdk_runtime,
         backend=explorer_backend,

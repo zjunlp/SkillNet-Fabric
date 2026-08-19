@@ -1,4 +1,4 @@
-"""OpenAI Codex SDK backend for strict query-wiki exploration."""
+"""OpenAI Codex SDK backend for strict task-wiki exploration."""
 
 from __future__ import annotations
 
@@ -33,11 +33,11 @@ CODEX_ALLOWED_TOOLS = ("exec_command",)
 CODEX_EXECUTION_GUIDANCE = """
 <codex_execution_guidance>
 - Begin with `index.md`, then use non-interactive `exec_command` reads and searches.
-- Keep paths relative to the supplied query-wiki root; inspect cards, sources, and
+- Keep paths relative to the supplied task-wiki root; inspect cards, sources, and
   `semantic_edges.jsonl` only when they are needed as routing evidence.
 - Use only `cat`, `head`, `tail`, `ls`, `pwd`, `rg`, `stat`, and `wc`; do not use
   `write_stdin`, interactive shells, redirects, file edits, network tools, or background jobs.
-- A successful route must be grounded in files actually read from this query wiki. If a command
+- A successful route must be grounded in files actually read from this task Wiki. If a command
   fails, simplify the next read instead of returning a coverage gap without inspecting the wiki.
 </codex_execution_guidance>
 """.strip()
@@ -46,7 +46,7 @@ CODEX_EXECUTION_GUIDANCE = """
 def build_codex_prompt_spec(
     *,
     query: str,
-    query_wiki_root: str | Path,
+    task_wiki_root: str | Path,
     max_selected_skills: int,
     required_selected_skills: int | None = None,
     tool_budget: dict[str, int] | None = None,
@@ -55,7 +55,7 @@ def build_codex_prompt_spec(
 
     context = ExplorerPromptContext(
         query=query,
-        query_wiki_root=query_wiki_root,
+        task_wiki_root=task_wiki_root,
         max_selected_skills=max_selected_skills,
         required_selected_skills=required_selected_skills,
         allowed_tools=CODEX_ALLOWED_TOOLS,
@@ -66,7 +66,7 @@ def build_codex_prompt_spec(
     )
     payload = {
         "prompt_id": EXPLORER_PROMPT_ID,
-        "query_wiki_root": context.query_wiki_root,
+        "task_wiki_root": context.task_wiki_root,
         "max_selected_skills": context.max_selected_skills,
         "allowed_tools": list(context.allowed_tools),
         "tool_budget": dict(context.tool_budget or {}),
@@ -82,7 +82,7 @@ def build_codex_prompt_spec(
 
 @dataclass(frozen=True, slots=True)
 class CodexExecutionContract:
-    """Capabilities enforced by the Codex query-wiki backend."""
+    """Capabilities enforced by the Codex task-wiki backend."""
 
     schema_version: int = 1
     approval_policy: str = "never"
@@ -172,25 +172,25 @@ class CodexWikiExplorerBackend:
         self,
         *,
         query: str,
-        query_wiki_root: Path,
+        task_wiki_root: Path,
         trace_dir: Path,
     ) -> SkillPackage:
         """Return one schema-valid SkillPackage or propagate the failure."""
 
-        query_wiki_root = Path(query_wiki_root)
-        if query_wiki_root.is_symlink():
-            raise ValueError("query_wiki root must not be a symlink")
-        query_wiki_root = query_wiki_root.resolve()
-        if not query_wiki_root.is_dir():
-            raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
-        if any(path.is_symlink() for path in query_wiki_root.rglob("*")):
-            raise ValueError("query_wiki must not contain symlinks")
+        task_wiki_root = Path(task_wiki_root)
+        if task_wiki_root.is_symlink():
+            raise ValueError("task_wiki root must not be a symlink")
+        task_wiki_root = task_wiki_root.resolve()
+        if not task_wiki_root.is_dir():
+            raise FileNotFoundError(f"task_wiki root does not exist: {task_wiki_root}")
+        if any(path.is_symlink() for path in task_wiki_root.rglob("*")):
+            raise ValueError("task_wiki must not contain symlinks")
         explorer_dir = trace_dir / "explorer"
         explorer_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
         prompt_spec = build_codex_prompt_spec(
             query=query,
-            query_wiki_root=query_wiki_root,
+            task_wiki_root=task_wiki_root,
             max_selected_skills=self.max_selected_skills,
             required_selected_skills=self.required_selected_skills,
             tool_budget=tool_budget,
@@ -215,7 +215,7 @@ class CodexWikiExplorerBackend:
             key: prompt_spec[key]
             for key in (
                 "prompt_id",
-                "query_wiki_root",
+                "task_wiki_root",
                 "max_selected_skills",
                 "allowed_tools",
                 "tool_budget",
@@ -269,7 +269,7 @@ class CodexWikiExplorerBackend:
                     settings=settings,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
-                    query_wiki_root=query_wiki_root,
+                    task_wiki_root=task_wiki_root,
                     codex_home=Path(home),
                     explorer_dir=explorer_dir,
                     command_budget=_command_budget(tool_budget),
@@ -303,7 +303,7 @@ class CodexWikiExplorerBackend:
                 "error": _safe_error_text(
                     str(exc),
                     paths=(
-                        query_wiki_root,
+                        task_wiki_root,
                         Path(self.env_file).expanduser().resolve(),
                         *(() if codex_home is None else (codex_home,)),
                     ),
@@ -322,7 +322,7 @@ class CodexWikiExplorerBackend:
         settings: CodexSdkEnvironment,
         system_prompt: str,
         user_prompt: str,
-        query_wiki_root: Path,
+        task_wiki_root: Path,
         codex_home: Path,
         explorer_dir: Path,
         command_budget: int,
@@ -336,7 +336,7 @@ class CodexWikiExplorerBackend:
             reasoning_effort=self.reasoning_effort,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            query_wiki_root=query_wiki_root,
+            task_wiki_root=task_wiki_root,
             codex_home=codex_home,
             explorer_dir=explorer_dir,
             command_budget=command_budget,
@@ -437,11 +437,11 @@ def _validate_operational_result(package: SkillPackage, *, explorer_dir: Path) -
         access = json.loads(access_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise CodexOperationalAccessError(
-            "Codex query-wiki explorer did not publish valid operational access evidence"
+            "Codex task-wiki explorer did not publish valid operational access evidence"
         ) from exc
     if not isinstance(access, dict) or access.get("evidence_access") is not True:
         raise CodexOperationalAccessError(
-            "Codex query-wiki explorer did not prove successful Wiki evidence access"
+            "Codex task-wiki explorer did not prove successful Wiki evidence access"
         )
     semantic_empty = not package.selected_skills
     access["semantic_empty"] = semantic_empty
@@ -515,7 +515,7 @@ def _load_sdk_runtime() -> Any:
         from openai_codex.types import ReasoningEffort
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
-            "openai-codex is required for the Codex query-wiki backend; "
+            "openai-codex is required for the Codex task-wiki backend; "
             "install skillfabric-ai[codex]"
         ) from exc
 

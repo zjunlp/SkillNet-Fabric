@@ -1,4 +1,4 @@
-"""Bounded graph expansion over validated semantic relations."""
+"""Graph expansion over validated semantic relations."""
 
 from __future__ import annotations
 

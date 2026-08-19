@@ -39,11 +39,14 @@ from skillfabric.registry.scanner import scan_and_parse
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import LLMConfig
 from skillfabric.storage import Workspace
+from skillfabric.wiki.loader import WikiSource
+from skillfabric.wiki.materializer import materialize_full_wiki
+from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
 
 
 @dataclass(slots=True)
 class BuildConfig:
-    """Public configuration for one semantic graph build."""
+    """Public configuration for one SkillFabric workspace build."""
 
     skill_root: str | Path
     workspace: str | Path = ".skillfabric"
@@ -66,19 +69,20 @@ class _BuildDependencies:
 
 @dataclass(slots=True)
 class BuildResult:
-    """Result of a complete graph build."""
+    """Result of a complete graph and Full Wiki build."""
 
     graph: GraphDocument
+    wiki: WikiBuildResult
     workspace: Workspace
     stats: dict[str, Any] = field(default_factory=dict)
 
 
-def build_graph(
+def build_workspace(
     config: BuildConfig,
     *,
     dependencies: _BuildDependencies | None = None,
 ) -> BuildResult:
-    """Compile skills into one evidence-grounded semantic graph."""
+    """Compile skills into one ready, evidence-grounded workspace."""
 
     deps = dependencies or _BuildDependencies()
     workspace = Workspace(config.workspace)
@@ -214,12 +218,21 @@ def build_graph(
                 edges=list(projection.edges),
             )
             workspace.write_json(workspace.graph_dir / "graph.json", graph.to_dict())
-            _write_ready_status(
-                workspace,
-                graph=graph,
+            stage = "wiki"
+            _write_running_status(workspace, build_id, stage=stage)
+            wiki = materialize_full_wiki(
+                WikiBuildConfig(workspace=workspace.root),
+                source=WikiSource(
+                    build_id=build_id,
+                    skills={skill.id: skill for skill in skills},
+                    contracts=contracts,
+                    core_edges=graph.edges,
+                ),
             )
+            _write_ready_status(workspace, graph=graph)
             return BuildResult(
                 graph=graph,
+                wiki=wiki,
                 workspace=workspace,
                 stats=stats,
             )

@@ -11,7 +11,7 @@ from skillfabric.graph.builder import (
     BuildConfig,
     BuildResult,
     _BuildDependencies,
-    build_graph,
+    build_workspace,
 )
 from skillfabric.indexing.embeddings import (
     ApiEmbeddingProvider,
@@ -30,8 +30,6 @@ from skillfabric.runtime.defaults import default_router_options
 from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.storage import Workspace
 from skillfabric.wiki.explorer.backends.base import ExplorerBackendName, WikiExplorerBackend
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig
 
 
 @dataclass(slots=True)
@@ -71,7 +69,7 @@ class SkillFabric:
             llm_reasoning_effort,
             name="llm_reasoning_effort",
         )
-        result = build_graph(
+        return build_workspace(
             BuildConfig(
                 skill_root=skill_root,
                 workspace=self.workspace.root,
@@ -82,8 +80,6 @@ class SkillFabric:
             ),
             dependencies=_BuildDependencies(embedding_provider=provider),
         )
-        build_wiki(WikiBuildConfig(workspace=self.workspace.root))
-        return result
 
     def route(
         self,

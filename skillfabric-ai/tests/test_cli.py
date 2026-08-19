@@ -46,7 +46,7 @@ def test_public_cli_surface_exposes_core_commands() -> None:
         "build",
         "route",
         "plan",
-        "query-wiki",
+        "task-wiki",
         "doctor-state",
         "run-state",
     }
@@ -87,6 +87,7 @@ def test_build_cli_defaults_to_a_human_summary(tmp_path) -> None:
     result = SimpleNamespace(
         workspace=workspace,
         graph=SimpleNamespace(build_id="build-test", nodes=[None] * 7, edges=[None] * 12),
+        wiki=SimpleNamespace(pages_written=19),
         stats={"edge_counts": {"depend_on": 4, "similar_to": 8}},
     )
     output = io.StringIO()
@@ -94,8 +95,7 @@ def test_build_cli_defaults_to_a_human_summary(tmp_path) -> None:
     with (
         patch("skillfabric.cli._require_api_configuration"),
         patch("skillfabric.cli.ApiEmbeddingProvider.from_env", return_value=object()),
-        patch("skillfabric.cli.build_graph", return_value=result),
-        patch("skillfabric.cli.build_wiki", return_value=SimpleNamespace(pages_written=19)),
+        patch("skillfabric.cli.build_workspace", return_value=result),
         contextlib.redirect_stdout(output),
     ):
         cli_main(["build", "--skill-root", "skills"])
@@ -220,6 +220,7 @@ def test_build_cli_forwards_only_explicit_progress_setting(tmp_path) -> None:
     result = SimpleNamespace(
         workspace=workspace,
         graph=SimpleNamespace(build_id="build-test", nodes=[], edges=[]),
+        wiki=SimpleNamespace(pages_written=0),
         stats={},
     )
     output = io.StringIO()
@@ -228,8 +229,7 @@ def test_build_cli_forwards_only_explicit_progress_setting(tmp_path) -> None:
         patch("skillfabric.cli._require_api_configuration"),
         patch("skillfabric.cli.ApiEmbeddingProvider.from_env", return_value=object()),
         patch("skillfabric.cli.LLMJobOptions.from_env", return_value=object()) as options,
-        patch("skillfabric.cli.build_graph", return_value=result),
-        patch("skillfabric.cli.build_wiki", return_value=SimpleNamespace(pages_written=0)),
+        patch("skillfabric.cli.build_workspace", return_value=result),
         contextlib.redirect_stdout(output),
     ):
         cli_main(["build", "--skill-root", "skills", "--llm-progress-every", "25", "--json"])

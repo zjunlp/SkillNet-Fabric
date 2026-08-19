@@ -18,7 +18,7 @@ class CheckpointCacheError(RuntimeError):
 
 
 class JsonObjectCheckpointCache:
-    """Persist JSON object entries in bounded shards before final compaction."""
+    """Persist JSON object entries in shards before final compaction."""
 
     def __init__(self, path: str | Path | None, *, interval: int) -> None:
         if isinstance(interval, bool) or not isinstance(interval, int) or interval < 1:

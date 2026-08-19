@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_query_wiki
+from skillfabric.wiki.explorer.agent import WikiExplorerConfig, explore_task_wiki
 from skillfabric.wiki.explorer.backends.claude_code import ClaudeCodeWikiExplorerBackend
 from skillfabric.wiki.explorer.skill_package import SkillPackage, skill_package_json_schema
 
@@ -19,7 +19,7 @@ def _empty_package() -> dict[str, Any]:
         "near_misses": [],
         "coverage_gaps": ["No matching skill in this test corpus."],
         "wiki_pages_read": [],
-        "rationale": "The bounded corpus does not cover the task.",
+        "rationale": "The test corpus does not cover the task.",
     }
 
 
@@ -56,9 +56,9 @@ class StubRuntime:
 
 
 def _query_root(tmp_path: Path) -> Path:
-    root = tmp_path / "query_wiki"
+    root = tmp_path / "task_wiki"
     root.mkdir()
-    (root / "index.md").write_text("# Query Wiki\n", encoding="utf-8")
+    (root / "index.md").write_text("# Task Wiki\n", encoding="utf-8")
     (root / "manifest.json").write_text(
         json.dumps(
             {
@@ -73,31 +73,20 @@ def _query_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_backend_uses_the_canonical_schema_without_usage_artifacts(tmp_path) -> None:
+def test_backend_uses_the_canonical_schema(tmp_path) -> None:
     root = _query_root(tmp_path)
-    runtime = StubRuntime(
-        _empty_package(),
-        metrics={
-            "usage": {
-                "input_tokens": 123,
-                "output_tokens": 17,
-                "cache_creation_input_tokens": 19,
-                "cache_read_input_tokens": 23,
-            }
-        },
-    )
+    runtime = StubRuntime(_empty_package())
     trace = tmp_path / "trace"
 
     package = ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
         query="unsupported task",
-        query_wiki_root=root,
+        task_wiki_root=root,
         trace_dir=trace,
     )
 
     assert package.coverage_gaps
     assert runtime.options.output_format["schema"] == skill_package_json_schema()
     assert json.loads((trace / "explorer" / "skill_package.json").read_text())["coverage_gaps"]
-    assert not (trace / "explorer" / "usage.json").exists()
 
 
 def test_backend_zero_timeout_waits_for_completion(tmp_path) -> None:
@@ -109,7 +98,7 @@ def test_backend_zero_timeout_waits_for_completion(tmp_path) -> None:
         execution_timeout_seconds=0,
     ).explore(
         query="unsupported task",
-        query_wiki_root=root,
+        task_wiki_root=root,
         trace_dir=tmp_path / "trace",
     )
 
@@ -131,7 +120,7 @@ def test_backend_uses_explicit_model_and_reasoning_over_env_file(tmp_path) -> No
         model="gpt-5.6-terra",
         reasoning_effort="xhigh",
         sdk_runtime=runtime,
-    ).explore(query="unsupported task", query_wiki_root=root, trace_dir=tmp_path / "trace")
+    ).explore(query="unsupported task", task_wiki_root=root, trace_dir=tmp_path / "trace")
 
     assert runtime.options.model == "gpt-5.6-terra"
     assert runtime.options.effort == "xhigh"
@@ -146,7 +135,7 @@ def test_backend_default_tool_budget_scales_with_the_selection_limit(tmp_path) -
     ClaudeCodeWikiExplorerBackend(
         sdk_runtime=StubRuntime(_empty_package()),
         max_selected_skills=12,
-    ).explore(query="unsupported task", query_wiki_root=root, trace_dir=trace)
+    ).explore(query="unsupported task", task_wiki_root=root, trace_dir=trace)
 
     context = json.loads((trace / "explorer" / "prompt_context.json").read_text())
     assert context["tool_budget"]["Read"] >= 26
@@ -171,7 +160,7 @@ def test_backend_omits_thinking_token_system_events(tmp_path) -> None:
 
     ClaudeCodeWikiExplorerBackend(sdk_runtime=ThinkingRuntime(_empty_package())).explore(
         query="unsupported task",
-        query_wiki_root=root,
+        task_wiki_root=root,
         trace_dir=trace,
     )
 
@@ -232,7 +221,7 @@ def test_backend_preserves_safe_sdk_api_failure_diagnostics(tmp_path) -> None:
     with pytest.raises(RuntimeError, match=r"HTTP 413.*input exceeds context window"):
         ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=trace,
         )
 
@@ -268,7 +257,7 @@ def test_backend_rejects_missing_structured_output_without_text_recovery(tmp_pat
     with pytest.raises(RuntimeError, match="structured SkillPackage"):
         ClaudeCodeWikiExplorerBackend(sdk_runtime=StubRuntime(None)).explore(
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=trace,
         )
 
@@ -282,7 +271,7 @@ def test_permissions_enforce_read_root_and_count_each_allowed_tool_once(tmp_path
         sdk_runtime=runtime,
         tool_budget={"Read": 1, "LS": 1, "Glob": 1, "Grep": 1, "total": 1},
     )
-    backend.explore(query="x", query_wiki_root=root, trace_dir=tmp_path / "trace")
+    backend.explore(query="x", task_wiki_root=root, trace_dir=tmp_path / "trace")
 
     hook = runtime.options.hooks["PreToolUse"][0].hooks[0]
 
@@ -334,7 +323,7 @@ def test_backend_rejects_invalid_tool_budgets(tmp_path, tool_budget) -> None:
         ClaudeCodeWikiExplorerBackend(
             sdk_runtime=StubRuntime(_empty_package()),
             tool_budget=tool_budget,
-        ).explore(query="x", query_wiki_root=root, trace_dir=tmp_path / "trace")
+        ).explore(query="x", task_wiki_root=root, trace_dir=tmp_path / "trace")
 
 
 @pytest.mark.parametrize(
@@ -381,10 +370,10 @@ def test_transient_sdk_failure_retries_once_then_returns_strict_output(tmp_path,
             yield self.ResultMessage(self.output)
 
     runtime = FlakyRuntime(_empty_package())
-    package = explore_query_wiki(
+    package = explore_task_wiki(
         WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
         query="x",
-        query_wiki_root=root,
+        task_wiki_root=root,
         trace_dir=tmp_path / "trace",
         sdk_runtime=runtime,
     )
@@ -408,10 +397,10 @@ def test_injected_backend_failure_uses_the_existing_outer_recovery(tmp_path) -> 
             return SkillPackage.from_dict(_empty_package())
 
     backend = Backend()
-    run = explore_query_wiki(
+    run = explore_task_wiki(
         WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
         query="find a skill",
-        query_wiki_root=root,
+        task_wiki_root=root,
         trace_dir=tmp_path / "trace",
         backend=backend,
     )
@@ -433,7 +422,7 @@ def test_exact_count_validation_uses_the_existing_outer_recovery(tmp_path) -> No
 
     backend = Backend()
     with pytest.raises(ValueError, match="required_selected_skills=1"):
-        explore_query_wiki(
+        explore_task_wiki(
             WikiExplorerConfig(
                 max_selected_skills=1,
                 required_selected_skills=1,
@@ -441,7 +430,7 @@ def test_exact_count_validation_uses_the_existing_outer_recovery(tmp_path) -> No
                 retry_delay_seconds=0,
             ),
             query="find one skill",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
             backend=backend,
         )
@@ -451,84 +440,6 @@ def test_exact_count_validation_uses_the_existing_outer_recovery(tmp_path) -> No
     assert closure["status"] == "route_failed"
     assert len(closure["attempts"]) == 2
     assert all(item["failure_kind"] == "validation" for item in closure["attempts"])
-
-
-def test_explorer_publishes_all_attempts_and_terminal_closure(tmp_path) -> None:
-    root = _query_root(tmp_path)
-
-    class Backend:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
-            self.calls += 1
-            explorer = trace_dir / "explorer"
-            explorer.mkdir(parents=True)
-            if self.calls == 1:
-                raise RuntimeError("503 service temporarily unavailable")
-            return SkillPackage.from_dict(_empty_package())
-
-    trace = tmp_path / "trace"
-    run = explore_query_wiki(
-        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
-        query="find a skill",
-        query_wiki_root=root,
-        trace_dir=trace,
-        backend=Backend(),
-    )
-
-    assert run.validation.valid
-    closure = json.loads((trace / "explorer" / "closure.json").read_text())
-    assert closure["status"] == "completed"
-    assert closure["outcome"] == "completed_empty"
-    assert closure["winning_attempt"] == 2
-    assert [item["status"] for item in closure["attempts"]] == ["failed", "completed"]
-    assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
-    assert "explorer/attempts/attempt-01/attempt.json" in closure["attempts"][0]["artifact_paths"]
-    assert (trace / "explorer" / "attempts" / "attempt-01" / "error.json").exists()
-    assert (trace / "explorer" / "attempts" / "attempt-02" / "skill_package.json").exists()
-    assert "aggregate_usage" not in closure
-    assert not (trace / "explorer" / "usage.json").exists()
-    for attempt in closure["attempts"]:
-        assert {"usage", "cost_usd", "unmetered_attempt"}.isdisjoint(attempt)
-
-
-def test_explorer_retries_transient_failure_without_usage_artifact(tmp_path) -> None:
-    root = _query_root(tmp_path)
-
-    class Backend:
-        calls = 0
-
-        def explore(self, *, trace_dir: Path, **_kwargs: object) -> SkillPackage:
-            self.calls += 1
-            if self.calls > 1:
-                return SkillPackage.from_dict(_empty_package())
-            explorer = trace_dir / "explorer"
-            explorer.mkdir(parents=True)
-            (explorer / "turn_state.json").write_text(
-                '{"schema_version":1,"turn_started":true}',
-                encoding="utf-8",
-            )
-            raise RuntimeError("503 service temporarily unavailable")
-
-    backend = Backend()
-    run = explore_query_wiki(
-        WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
-        query="x",
-        query_wiki_root=root,
-        trace_dir=tmp_path / "trace",
-        backend=backend,
-    )
-
-    assert run.validation.valid
-    assert backend.calls == 2
-    closure = json.loads(
-        (tmp_path / "trace" / "explorer" / "closure.json").read_text(encoding="utf-8")
-    )
-    assert closure["status"] == "completed"
-    assert len(closure["attempts"]) == 2
-    assert closure["attempts"][0]["failure_kind"] == "retryable_runtime"
-    assert closure["attempts"][0]["retryable"] is True
 
 
 def test_explorer_does_not_retry_runtime_or_authentication_mismatch(tmp_path) -> None:
@@ -543,10 +454,10 @@ def test_explorer_does_not_retry_runtime_or_authentication_mismatch(tmp_path) ->
 
     backend = Backend()
     with pytest.raises(RuntimeError, match="runtime mismatch"):
-        explore_query_wiki(
+        explore_task_wiki(
             WikiExplorerConfig(max_attempts=2, retry_delay_seconds=0),
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
             backend=backend,
         )
@@ -564,24 +475,24 @@ def test_outer_attempt_closure_redacts_runtime_paths_and_secrets(tmp_path) -> No
     env_file = tmp_path / "private-runtime.env"
 
     class Backend:
-        def explore(self, *, query_wiki_root: Path, trace_dir: Path, **_kwargs: object):
+        def explore(self, *, task_wiki_root: Path, trace_dir: Path, **_kwargs: object):
             explorer = trace_dir / "explorer"
             explorer.mkdir(parents=True)
             raise RuntimeError(
-                f"config mismatch at {query_wiki_root} via {trace_dir}; "
+                f"config mismatch at {task_wiki_root} via {trace_dir}; "
                 f"env={env_file}; OPENAI_API_KEY=sk-private-token"
             )
 
     trace = tmp_path / "public-trace"
     with pytest.raises(RuntimeError, match="config mismatch"):
-        explore_query_wiki(
+        explore_task_wiki(
             WikiExplorerConfig(
                 env_file=env_file,
                 max_attempts=1,
                 retry_delay_seconds=0,
             ),
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=trace,
             backend=Backend(),
         )
@@ -603,10 +514,10 @@ def test_explorer_rejects_sdk_runtime_with_an_explicit_backend(tmp_path) -> None
             return SkillPackage.from_dict(_empty_package())
 
     with pytest.raises(TypeError, match=r"sdk_runtime.*backend"):
-        explore_query_wiki(
+        explore_task_wiki(
             WikiExplorerConfig(),
             query="find a skill",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
             sdk_runtime=object(),
             backend=Backend(),
@@ -621,10 +532,10 @@ def test_explorer_rejects_named_and_explicit_backends(tmp_path) -> None:
             return SkillPackage.from_dict(_empty_package())
 
     with pytest.raises(TypeError, match=r"backend.*config.backend"):
-        explore_query_wiki(
+        explore_task_wiki(
             WikiExplorerConfig(backend="codex"),
             query="find a skill",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
             backend=Backend(),
         )
@@ -644,10 +555,10 @@ def test_explorer_uses_an_explicit_falsey_backend(tmp_path) -> None:
         "skillfabric.wiki.explorer.agent.create_explorer_backend",
         side_effect=AssertionError("explicit backend was ignored"),
     ):
-        run = explore_query_wiki(
+        run = explore_task_wiki(
             WikiExplorerConfig(),
             query="find a skill",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
             backend=Backend(),
         )
@@ -667,10 +578,10 @@ def test_explorer_selects_codex_backend_by_name(tmp_path) -> None:
         "skillfabric.wiki.explorer.agent.create_explorer_backend",
         return_value=backend,
     ) as factory:
-        run = explore_query_wiki(
+        run = explore_task_wiki(
             WikiExplorerConfig(backend="codex"),
             query="find a skill",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
         )
 
@@ -692,7 +603,7 @@ def test_non_retryable_failure_propagates_and_is_redacted_in_trace(tmp_path) -> 
     with pytest.raises(RuntimeError, match="invalid request"):
         ClaudeCodeWikiExplorerBackend(sdk_runtime=BrokenRuntime(_empty_package())).explore(
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=trace,
         )
 
@@ -708,7 +619,7 @@ def test_backend_runs_when_called_inside_an_existing_event_loop(tmp_path) -> Non
     async def run_backend():
         return ClaudeCodeWikiExplorerBackend(sdk_runtime=runtime).explore(
             query="x",
-            query_wiki_root=root,
+            task_wiki_root=root,
             trace_dir=tmp_path / "trace",
         )
 

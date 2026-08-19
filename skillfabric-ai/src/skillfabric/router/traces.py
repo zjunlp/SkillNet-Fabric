@@ -20,7 +20,7 @@ def _new_trace_id(query: str) -> str:
 
 
 def validate_trace_id(trace_id: str) -> str:
-    """Validate a trace id as one bounded ASCII path component."""
+    """Validate a trace id as one ASCII path component."""
 
     if not isinstance(trace_id, str) or _TRACE_ID_PATTERN.fullmatch(trace_id) is None:
         raise ValueError(

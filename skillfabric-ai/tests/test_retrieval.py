@@ -34,7 +34,7 @@ def _seed(skill_id: str, rank: int = 1) -> RouterSkillCandidate:
     )
 
 
-def test_router_bundle_config_has_only_bounded_expansion_controls() -> None:
+def test_router_bundle_config_has_only_candidate_budget_controls() -> None:
     config = RouterBundleConfig()
 
     assert config.seed_limit == 24
@@ -73,7 +73,7 @@ def test_reciprocal_rank_fusion_uses_channel_order_only() -> None:
     assert fused[0].score == pytest.approx((1 / 62) + (1 / 61))
 
 
-def test_bounded_expansion_keeps_every_seed_even_with_score_gap() -> None:
+def test_candidate_budget_keeps_every_seed_even_with_score_gap() -> None:
     skills = {
         skill.id: skill
         for skill in (
@@ -239,7 +239,7 @@ def test_similarity_competes_with_other_relations_for_the_shared_limit() -> None
     assert result.alternatives == ()
 
 
-def test_similarity_can_introduce_a_bounded_candidate_and_internal_metadata() -> None:
+def test_similarity_can_introduce_a_candidate_with_internal_metadata() -> None:
     skills = {
         skill.id: skill
         for skill in (

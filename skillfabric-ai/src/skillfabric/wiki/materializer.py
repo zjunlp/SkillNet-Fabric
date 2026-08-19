@@ -9,7 +9,7 @@ import shutil
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.health import analyze_wiki_health, write_wiki_health_report
 from skillfabric.wiki.indexer import render_index
-from skillfabric.wiki.loader import WikiSource, load_wiki_source
+from skillfabric.wiki.loader import WikiSource
 from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult, WikiPage
 from skillfabric.wiki.pages import slug
 from skillfabric.wiki.renderers import (
@@ -19,12 +19,15 @@ from skillfabric.wiki.renderers import (
 )
 
 
-def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
-    """Build wiki markdown pages from an existing compiled graph."""
+def materialize_full_wiki(
+    config: WikiBuildConfig,
+    *,
+    source: WikiSource,
+) -> WikiBuildResult:
+    """Materialize the Full Wiki from one validated graph snapshot."""
 
     workspace = Workspace(config.workspace)
     workspace.ensure()
-    source = load_wiki_source(workspace)
     pages = _entity_pages(source, config, workspace)
     page_summaries = _directory_page_summaries(pages)
     pages.extend(_directory_pages(source, page_summaries, workspace))
@@ -32,8 +35,10 @@ def build_wiki(config: WikiBuildConfig) -> WikiBuildResult:
     for page in pages:
         atomic_write_text(page.path, page.text)
     _write_manifest(workspace, source, pages)
-    health = analyze_wiki_health(workspace)
+    health = analyze_wiki_health(workspace, source=source)
     write_wiki_health_report(workspace, health)
+    if any(health.summary.values()):
+        raise ValueError(f"Full Wiki health check failed: {health.summary}")
     return WikiBuildResult(
         pages_written=len(pages),
         health=health,

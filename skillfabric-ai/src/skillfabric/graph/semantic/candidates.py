@@ -72,7 +72,7 @@ def retrieve_candidate_pairs(
     binary_store_path: str | Path | None = None,
     candidate_top_k: int = DEFAULT_CANDIDATE_TOP_K,
 ) -> CandidateRetrievalResult:
-    """Retrieve bounded review candidates without assigning graph semantics."""
+    """Retrieve review candidates without assigning graph semantics."""
 
     _validate_top_k(candidate_top_k, name="candidate_top_k")
     ordered_skills = sorted(skills, key=lambda skill: skill.id)

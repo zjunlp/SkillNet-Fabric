@@ -1,4 +1,4 @@
-"""Construct the configured query-wiki explorer backend."""
+"""Construct the configured Task Wiki Explorer backend."""
 
 from __future__ import annotations
 

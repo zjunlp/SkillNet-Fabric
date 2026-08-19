@@ -1,4 +1,4 @@
-"""Project a bounded Task Wiki from the stable Full Wiki."""
+"""Project a task specific Wiki from the stable Full Wiki."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from skillfabric.registry.models import SkillNode
 from skillfabric.router.models import RouterAlternative, RouterBundle, RouterSkillCandidate
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.contract_pages import render_contract_card
-from skillfabric.wiki.explorer.prompting import render_query_wiki_explorer_md
+from skillfabric.wiki.explorer.prompting import render_task_wiki_explorer_md
 from skillfabric.wiki.loader import WikiSource, load_wiki_source
 from skillfabric.wiki.pages import slug
 
@@ -22,17 +22,17 @@ _INDEX_ALTERNATIVE_LIMIT = 96
 
 
 @dataclass(frozen=True, slots=True)
-class QueryWikiBuildResult:
+class TaskWikiBuildResult:
     root: Path
 
 
-def materialize_query_wiki(
+def materialize_task_wiki(
     workspace: Workspace | str | Path,
     bundle: RouterBundle,
     *,
     trace_dir: Path,
     wiki_source: WikiSource | None = None,
-) -> QueryWikiBuildResult:
+) -> TaskWikiBuildResult:
     """Create a self-contained task evidence closure for one route."""
 
     workspace = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
@@ -42,9 +42,9 @@ def materialize_query_wiki(
         source = wiki_source
     else:
         raise TypeError("wiki_source must be a WikiSource")
-    query_root = trace_dir / "query_wiki"
-    if query_root.exists():
-        raise FileExistsError(f"query_wiki already exists: {query_root}")
+    task_root = trace_dir / "task_wiki"
+    if task_root.exists():
+        raise FileExistsError(f"task_wiki already exists: {task_root}")
     full_manifest = _load_full_manifest(workspace, source)
 
     candidates = {candidate.skill_id: candidate for candidate in bundle.selected_skills}
@@ -65,9 +65,9 @@ def materialize_query_wiki(
     if missing:
         raise ValueError(f"router bundle references unknown skills: {', '.join(missing)}")
 
-    cards_dir = query_root / "skills" / "cards"
-    sources_dir = query_root / "skills" / "sources"
-    edges_dir = query_root / "edges"
+    cards_dir = task_root / "skills" / "cards"
+    sources_dir = task_root / "skills" / "sources"
+    edges_dir = task_root / "edges"
     for directory in (cards_dir, sources_dir, edges_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -81,8 +81,8 @@ def materialize_query_wiki(
         source_path = f"skills/sources/{slug(skill_id)}.md"
         card = _render_skill_card(skill, contract, candidate=candidate, alternative=alternative)
         source_page = _read_full_source_page(workspace, full_manifest, skill_id)
-        atomic_write_text(query_root / card_path, card)
-        atomic_write_text(query_root / source_path, source_page)
+        atomic_write_text(task_root / card_path, card)
+        atomic_write_text(task_root / source_path, source_page)
         skills_manifest.append(
             _manifest_skill(
                 skill,
@@ -95,7 +95,7 @@ def materialize_query_wiki(
 
     semantic_edges_path = "edges/semantic_edges.jsonl"
     edge_rows = [_query_edge(edge) for edge in bundle.graph_edges]
-    _write_jsonl(query_root / semantic_edges_path, edge_rows)
+    _write_jsonl(task_root / semantic_edges_path, edge_rows)
     manifest = {
         "query": bundle.query,
         "skills": skills_manifest,
@@ -103,11 +103,11 @@ def materialize_query_wiki(
         "alternatives": [item.to_dict() for item in bundle.alternatives],
     }
     atomic_write_text(
-        query_root / "manifest.json",
+        task_root / "manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
     )
     atomic_write_text(
-        query_root / "source.json",
+        task_root / "source.json",
         json.dumps(
             {
                 "build_id": source.build_id,
@@ -121,15 +121,15 @@ def materialize_query_wiki(
         + "\n",
     )
     index = _render_index(manifest)
-    atomic_write_text(query_root / "index.md", index)
-    atomic_write_text(query_root / "EXPLORER.md", render_query_wiki_explorer_md())
-    return QueryWikiBuildResult(root=query_root)
+    atomic_write_text(task_root / "index.md", index)
+    atomic_write_text(task_root / "EXPLORER.md", render_task_wiki_explorer_md())
+    return TaskWikiBuildResult(root=task_root)
 
 
-def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> str:
-    """Return one manifest-listed card without exposing files outside query_wiki."""
+def render_task_wiki_skill_card(task_wiki_root: str | Path, skill_id: str) -> str:
+    """Return one manifest-listed card without exposing files outside task_wiki."""
 
-    root = Path(query_wiki_root).resolve()
+    root = Path(task_wiki_root).resolve()
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     row = next(
@@ -141,12 +141,12 @@ def render_query_wiki_skill_card(query_wiki_root: str | Path, skill_id: str) -> 
         None,
     )
     if row is None:
-        raise KeyError(f"skill not found in query_wiki manifest: {skill_id}")
+        raise KeyError(f"skill not found in task_wiki manifest: {skill_id}")
     if not row.get("selectable"):
-        raise ValueError(f"skill is not selectable in query_wiki: {skill_id}")
+        raise ValueError(f"skill is not selectable in task_wiki: {skill_id}")
     card_path = _resolve_inside(root, str(row.get("card_path", "")))
     if not card_path.is_file():
-        raise FileNotFoundError(f"query_wiki skill card is missing: {card_path}")
+        raise FileNotFoundError(f"task_wiki skill card is missing: {card_path}")
     return card_path.read_text(encoding="utf-8")
 
 
@@ -206,13 +206,13 @@ def _render_skill_card(
 
 def _query_edge(edge: Edge) -> dict[str, Any]:
     if edge.type not in {"depend_on", "compose_with", "similar_to"}:
-        raise ValueError(f"query_wiki received unsupported semantic edge: {edge.type}")
+        raise ValueError(f"task_wiki received unsupported semantic edge: {edge.type}")
     return edge.to_dict()
 
 
 def _render_index(manifest: dict[str, Any]) -> str:
     lines = [
-        "# Query Wiki",
+        "# Task Wiki",
         "",
         "Read this file first. It is a compact directory; inspect cards, sources, or semantic "
         "edges only when a routing decision needs more evidence.",
@@ -275,12 +275,12 @@ def _mapping(values: dict[str, int]) -> str:
 def _resolve_inside(root: Path, relative_path: str) -> Path:
     root = root.resolve()
     if not relative_path or Path(relative_path).is_absolute():
-        raise ValueError(f"query_wiki path must be relative: {relative_path}")
+        raise ValueError(f"task_wiki path must be relative: {relative_path}")
     candidate = (root / relative_path).resolve()
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise ValueError(f"query_wiki path escapes read root: {relative_path}") from exc
+        raise ValueError(f"task_wiki path escapes read root: {relative_path}") from exc
     return candidate
 
 
@@ -354,7 +354,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 __all__ = [
-    "QueryWikiBuildResult",
-    "materialize_query_wiki",
-    "render_query_wiki_skill_card",
+    "TaskWikiBuildResult",
+    "materialize_task_wiki",
+    "render_task_wiki_skill_card",
 ]

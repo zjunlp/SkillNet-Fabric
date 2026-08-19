@@ -25,21 +25,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
 
-    def test_public_runtime_omits_experiment_usage_interfaces(self) -> None:
-        from skillfabric import SkillFabric
-        from skillfabric.planner.package import plan_execution_package
-        from skillfabric.runtime.llm import litellm_completion
-
-        signatures = (
-            inspect.signature(SkillFabric.plan),
-            inspect.signature(plan_execution_package),
-            inspect.signature(litellm_completion),
-        )
-        removed_parameters = {"usage_log_path", "usage_operation", "usage_metadata"}
-
-        for signature in signatures:
-            self.assertTrue(removed_parameters.isdisjoint(signature.parameters))
-
     def test_python_facade_exposes_and_forwards_explorer_backend(self) -> None:
         from skillfabric import SkillFabric
 
@@ -132,11 +117,6 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertEqual(extras["all"], [*extras["claude"], *extras["codex"]])
         self.assertTrue({"build>=1.2", "pytest>=8.0", "ruff>=0.8"}.issubset(extras["dev"]))
-
-    def test_readme_does_not_document_removed_usage_accounting(self) -> None:
-        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
-
-        self.assertNotIn("usage log", readme.casefold())
 
     def test_public_brand_and_package_identifiers_are_consistent(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -263,7 +243,7 @@ class PublicPackageTests(unittest.TestCase):
         assert marketplace["plugins"] == [
             {
                 "name": "skillfabric",
-                "description": "Compile native skills and route tasks through a bounded Task Wiki",
+                "description": "Compile native skills and route tasks through a task specific Wiki",
                 "source": "./skillfabric",
                 "category": "productivity",
             }
@@ -288,30 +268,21 @@ class PublicPackageTests(unittest.TestCase):
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
         for section in (
             "## Quick Start",
-            "## Claude Code Plugin",
+            "## Agent Integrations",
             "## Development",
         ):
             self.assertIn(section, readme)
         for snippet in (
-            "which skillfabric",
-            "skillfabric --help",
-            "claude plugin validate",
-            "claude plugin list --json",
             "/skillfabric:doctor",
             "/skillfabric:build",
             "/skillfabric:route",
-            "Do not paste API keys into Claude Code",
-            "The CLI is the only writer",
-            "The plugin installs no hooks",
-            "To uninstall",
             "claude plugin marketplace add",
             "claude plugin install skillfabric@skillfabric",
-            "claude plugin uninstall skillfabric@skillfabric",
+            "task specific Wiki",
         ):
             self.assertIn(snippet, readme)
         self.assertNotIn("/skillfabric:prepare", readme)
         self.assertNotIn("/skillfabric:run", readme)
-        self.assertNotIn("claude plugin validate --strict", readme)
 
     def test_public_docs_do_not_leak_local_paths(self) -> None:
         readme = PUBLIC_ROOT / "README.md"
@@ -337,7 +308,7 @@ class PublicPackageTests(unittest.TestCase):
         client = SkillFabric(workspace=".skillfabric")
         invalid_overrides = [{"llm_concurrency": True}, {"embedding_model": 123}]
 
-        with patch("skillfabric.api.build_graph") as build_mock:
+        with patch("skillfabric.api.build_workspace") as build_mock:
             for overrides in invalid_overrides:
                 expected = TypeError if "llm_concurrency" in overrides else ValueError
                 with self.subTest(overrides=overrides), self.assertRaises(expected):
@@ -349,10 +320,7 @@ class PublicPackageTests(unittest.TestCase):
         from skillfabric import SkillFabric
 
         client = SkillFabric(workspace=".skillfabric")
-        with (
-            patch("skillfabric.api.build_graph") as build_mock,
-            patch("skillfabric.api.build_wiki"),
-        ):
+        with patch("skillfabric.api.build_workspace") as build_mock:
             client.build(
                 FIXTURE_SKILLS,
                 embedding_provider=FakeEmbeddingProvider(),

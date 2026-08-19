@@ -1,4 +1,4 @@
-"""Token counting for bounded LLM contexts."""
+"""Token counting for LLM contexts."""
 
 from __future__ import annotations
 

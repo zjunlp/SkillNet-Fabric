@@ -31,7 +31,7 @@ def contract_skill_text(
     """Build the canonical retrieval document for a validated contract."""
 
     sections = _contract_sections(skill, contract)
-    source = _bounded_source(skill.raw_text, source_char_limit)
+    source = _truncate_source(skill.raw_text, source_char_limit)
     if source:
         sections.append(f"Source:\n{source}")
     return "\n".join(sections).strip()
@@ -68,7 +68,7 @@ def _contract_fields_text(fields) -> str:
     )
 
 
-def _bounded_source(text: str, limit: int) -> str:
+def _truncate_source(text: str, limit: int) -> str:
     if limit <= 0 or len(text) <= limit:
         return text.strip()
     head = limit * 2 // 3

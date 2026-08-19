@@ -7,9 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/zjunlp/SkillNet-Fabric?style=social)](https://github.com/zjunlp/SkillNet-Fabric)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](https://github.com/zjunlp/SkillNet-Fabric)
+[![Website](https://img.shields.io/badge/Website-skillnet.openkg.cn-0078D4.svg)](http://skillnet.openkg.cn/)
 
-[Quick Start](#quick-start) · [Python SDK](#python-sdk) · [CLI](#cli) · [Agent Integrations](#agent-integrations)
+[Website](http://skillnet.openkg.cn/) · [Quick Start](#quick-start) · [Python SDK](#python-sdk) · [CLI](#cli) · [Agent Integrations](#agent-integrations)
 
 </div>
 
@@ -242,7 +242,7 @@ The CLI ships with `skillfabric-ai`:
 | `build` | Compile graph, indexes, and Full Wiki | `skillfabric build --skill-root ./skills` |
 | `route` | Select Skills through a Task Wiki | `skillfabric route "your task"` |
 | `plan` | Generate one validated execution prompt | `skillfabric plan "your task"` |
-| `query-wiki card` | Inspect one Task Wiki card | `skillfabric query-wiki card <wiki> <skill-id>` |
+| `task-wiki card` | Inspect one Task Wiki card | `skillfabric task-wiki card <wiki> <skill-id>` |
 | `doctor-state` | Report configuration and workspace readiness | `skillfabric doctor-state --json` |
 | `run-state` | Find the latest finalized plan artifact | `skillfabric run-state --json` |
 

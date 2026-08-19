@@ -9,13 +9,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from skillfabric.graph.builder import BuildConfig, _BuildDependencies, build_graph
+from skillfabric.graph.builder import BuildConfig, _BuildDependencies, build_workspace
 from skillfabric.graph.contracts.models import SkillContract
 from skillfabric.graph.models import EvidenceRef
 from skillfabric.graph.semantic.models import CandidateHit, CandidatePair
 from skillfabric.registry.models import SkillNode
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig
 
 
 class FakeEmbeddingProvider:
@@ -333,7 +331,7 @@ def none_payload(*, pair_index: int = 0, confidence: float = 0.99) -> dict[str, 
 def _ensure_fixture_workspace() -> None:
     if _WORKSPACE_CACHE.exists():
         return
-    build_graph(
+    build_workspace(
         BuildConfig(skill_root=FIXTURE_SKILLS, workspace=_WORKSPACE_CACHE),
         dependencies=_BuildDependencies(
             contract_extractor=FixtureContractExtractor(),
@@ -342,7 +340,6 @@ def _ensure_fixture_workspace() -> None:
             build_id="test-build",
         ),
     )
-    build_wiki(WikiBuildConfig(workspace=_WORKSPACE_CACHE))
 
 
 def _field(skill: SkillNode, name: str, text: str) -> dict[str, Any]:

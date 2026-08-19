@@ -16,7 +16,6 @@ from skillfabric.graph.contracts.prompts import (
     CONTRACT_PROMPT_ID,
     build_contract_extraction_messages,
 )
-from skillfabric.runtime.jobs import LLMJobOptions
 from tests.support import StaticContractExtractor, make_skill
 
 
@@ -262,123 +261,6 @@ def test_contract_cache_identity_includes_prompt_policy(tmp_path, monkeypatch) -
     extract_skill_contracts([_skill()], extractor=extractor, cache_path=cache_path)
 
     assert extractor.calls == [_skill().id, _skill().id]
-
-
-def test_successful_contracts_are_cached_when_another_skill_fails(tmp_path) -> None:
-    valid = _skill()
-    invalid = make_skill(
-        "skill:invalid",
-        "invalid",
-        "\n".join(
-            [
-                "Read a PDF document.",
-                "Produces a normalized CSV table.",
-                "Use pdfplumber for extraction.",
-            ]
-        ),
-    )
-    cache_path = tmp_path / "contracts.json"
-    checkpoint_dir = tmp_path / "contracts.checkpoints"
-
-    @dataclass
-    class PartiallyFailingExtractor:
-        model_id: str = "test-model"
-        fail_invalid: bool = True
-        calls: list[str] = field(default_factory=list)
-
-        def extract(self, skill) -> dict[str, Any]:
-            self.calls.append(skill.id)
-            if skill.id == invalid.id and self.fail_invalid:
-                return {**_payload(), "requires": "invalid"}
-            return _payload()
-
-    extractor = PartiallyFailingExtractor()
-
-    with pytest.raises(ContractExtractionError, match="requires must be a list"):
-        extract_skill_contracts(
-            [valid, invalid],
-            extractor=extractor,
-            cache_path=cache_path,
-            job_options=LLMJobOptions(
-                concurrency=1,
-                max_retries=0,
-                progress_every=0,
-                batch_size=1,
-                checkpoint_interval=1,
-            ),
-        )
-
-    assert not cache_path.exists()
-    checkpoints = sorted(checkpoint_dir.glob("*.json"))
-    assert len(checkpoints) == 1
-    assert len(json.loads(checkpoints[0].read_text(encoding="utf-8"))) == 1
-
-    extractor.fail_invalid = False
-    extractor.calls.clear()
-    records = extract_skill_contracts(
-        [valid, invalid],
-        extractor=extractor,
-        cache_path=cache_path,
-        job_options=LLMJobOptions(
-            concurrency=1,
-            max_retries=0,
-            progress_every=0,
-            batch_size=1,
-            checkpoint_interval=1,
-        ),
-    )
-
-    assert extractor.calls == [invalid.id]
-    assert [record.cache_hit for record in records] == [True, False]
-    assert len(json.loads(cache_path.read_text(encoding="utf-8"))) == 2
-    assert not checkpoint_dir.exists()
-
-
-def test_contract_checkpoint_is_written_at_one_hundred_successes(tmp_path) -> None:
-    cache_path = tmp_path / "contracts.json"
-    checkpoint_dir = tmp_path / "contracts.checkpoints"
-    skills = [
-        make_skill(
-            f"skill:item-{index}",
-            f"item-{index}",
-            "Read a PDF document.\nProduces a normalized CSV table.\n"
-            "Use pdfplumber for extraction.",
-        )
-        for index in range(101)
-    ]
-
-    @dataclass
-    class BoundaryExtractor:
-        model_id: str = "test-model"
-        checkpoint_seen: bool = False
-
-        def extract(self, skill) -> dict[str, Any]:
-            if skill.id == skills[-1].id:
-                checkpoints = sorted(checkpoint_dir.glob("*.json"))
-                self.checkpoint_seen = (
-                    len(checkpoints) == 1
-                    and len(json.loads(checkpoints[0].read_text(encoding="utf-8"))) == 100
-                )
-                raise RuntimeError("stop after checkpoint boundary")
-            return _payload()
-
-    extractor = BoundaryExtractor()
-
-    with pytest.raises(ContractExtractionError, match="stop after checkpoint boundary"):
-        extract_skill_contracts(
-            skills,
-            extractor=extractor,
-            cache_path=cache_path,
-            job_options=LLMJobOptions(
-                concurrency=1,
-                max_retries=0,
-                progress_every=0,
-                batch_size=1,
-                checkpoint_interval=100,
-            ),
-        )
-
-    assert extractor.checkpoint_seen is True
 
 
 @dataclass

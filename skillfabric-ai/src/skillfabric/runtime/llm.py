@@ -171,7 +171,7 @@ def litellm_completion(
     max_tokens: int | None = None,
     **kwargs: Any,
 ) -> Any:
-    """Call LiteLLM with project configuration and bounded network retries."""
+    """Call LiteLLM with project configuration and network retries."""
 
     resolved = config or LLMConfig.from_env(env_path=env_path)
     resolved_model = resolved.model if model is None else _require_string(model, name="model")

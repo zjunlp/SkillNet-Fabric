@@ -38,7 +38,7 @@ CODEX_READ_COMMANDS = frozenset(
 
 
 class CodexOperationalAccessError(RuntimeError):
-    """The turn completed without proving that the query wiki was read successfully."""
+    """The turn completed without proving that the task Wiki was read successfully."""
 
     __skillfabric_recoverable_route_failure__ = True
     __skillfabric_failure_kind__ = "operational_access"
@@ -59,7 +59,7 @@ def run_codex_attempt(
     reasoning_effort: str,
     system_prompt: str,
     user_prompt: str,
-    query_wiki_root: Path,
+    task_wiki_root: Path,
     codex_home: Path,
     explorer_dir: Path,
     command_budget: int,
@@ -118,7 +118,7 @@ def run_codex_attempt(
         thread = codex.thread_start(
             approval_mode=runtime.ApprovalMode.deny_all,
             config=thread_config,
-            cwd=str(query_wiki_root),
+            cwd=str(task_wiki_root),
             developer_instructions=system_prompt,
             ephemeral=True,
             model=model,
@@ -126,7 +126,7 @@ def run_codex_attempt(
         )
         turn = thread.turn(
             user_prompt,
-            cwd=str(query_wiki_root),
+            cwd=str(task_wiki_root),
             effort=runtime.ReasoningEffort(reasoning_effort),
             model=model,
             output_schema=output_schema,
@@ -140,7 +140,7 @@ def run_codex_attempt(
             turn,
             explorer_dir=explorer_dir,
             command_budget=command_budget,
-            query_wiki_root=query_wiki_root,
+            task_wiki_root=task_wiki_root,
         )
         payload = _strict_json_object(final_response)
         with state_lock:
@@ -157,7 +157,7 @@ def run_codex_attempt(
                 {"event": "sdk:timeout", "timeout_seconds": execution_timeout_seconds},
             )
             raise TimeoutError(
-                f"Codex query-wiki explorer exceeded {execution_timeout_seconds:g} seconds"
+                f"Codex task-wiki explorer exceeded {execution_timeout_seconds:g} seconds"
             ) from exc
         raise
     finally:
@@ -173,7 +173,7 @@ def run_codex_attempt(
                 {
                     "event": "sdk:cleanup_error",
                     "error_type": type(exc).__name__,
-                    "error": _safe_error_text(str(exc), paths=(codex_home, query_wiki_root)),
+                    "error": _safe_error_text(str(exc), paths=(codex_home, task_wiki_root)),
                 },
             )
             if operation_succeeded and primary_error is None:
@@ -185,11 +185,11 @@ def collect_codex_turn(
     *,
     explorer_dir: Path,
     command_budget: int,
-    query_wiki_root: Path,
+    task_wiki_root: Path,
 ) -> str:
     command_count = 0
     successful_read_commands = 0
-    query_wiki_commands = 0
+    task_wiki_commands = 0
     index_read = False
     candidate_lookup = False
     evidence_categories: set[str] = set()
@@ -212,7 +212,7 @@ def collect_codex_turn(
             elif item_type not in CODEX_ALLOWED_ITEM_TYPES:
                 observed_violation = item_type
         if item_type == "commandExecution":
-            audit = _command_audit(item, query_wiki_root=query_wiki_root)
+            audit = _command_audit(item, task_wiki_root=task_wiki_root)
             observed_violation = observed_violation or str(audit["policy_violation"])
         if observed_violation and not policy_violation:
             policy_violation = observed_violation
@@ -227,9 +227,9 @@ def collect_codex_turn(
                 budget_exceeded = True
                 _best_effort_interrupt(turn)
         elif method == "item/completed" and item_type == "commandExecution":
-            audit = _command_audit(item, query_wiki_root=query_wiki_root)
-            if audit["cwd_within_query_wiki"]:
-                query_wiki_commands += 1
+            audit = _command_audit(item, task_wiki_root=task_wiki_root)
+            if audit["cwd_within_task_wiki"]:
+                task_wiki_commands += 1
             if audit["successful_read"]:
                 successful_read_commands += 1
                 evidence_categories.update(audit["evidence_categories"])
@@ -251,7 +251,7 @@ def collect_codex_turn(
                 payload,
                 item,
                 command_count,
-                query_wiki_root=query_wiki_root,
+                task_wiki_root=task_wiki_root,
             ),
         )
 
@@ -259,7 +259,7 @@ def collect_codex_turn(
     operational_access = {
         "schema_version": 1,
         "command_count": command_count,
-        "query_wiki_commands": query_wiki_commands,
+        "task_wiki_commands": task_wiki_commands,
         "successful_read_commands": successful_read_commands,
         "evidence_access": evidence_access,
         "index_read": index_read,
@@ -269,10 +269,10 @@ def collect_codex_turn(
     }
     _write_json(explorer_dir / "operational_access.json", operational_access)
     if budget_exceeded:
-        raise RuntimeError(f"Codex query-wiki tool budget exceeded: exec_command<={command_budget}")
+        raise RuntimeError(f"Codex task-wiki tool budget exceeded: exec_command<={command_budget}")
     if policy_violation:
         error = RuntimeError(
-            f"Codex query-wiki observed disallowed Codex tool activity: {policy_violation}"
+            f"Codex task-wiki observed disallowed Codex tool activity: {policy_violation}"
         )
         error.__skillfabric_non_retryable__ = True  # type: ignore[attr-defined]
         raise error
@@ -283,14 +283,14 @@ def collect_codex_turn(
         error = getattr(completed_turn, "error", None)
         detail = str(getattr(error, "message", "") or status or "unknown status")
         raise RuntimeError(
-            f"Codex agent turn failed: {_safe_error_text(detail, paths=(query_wiki_root,))}"
+            f"Codex agent turn failed: {_safe_error_text(detail, paths=(task_wiki_root,))}"
         )
     response = final_response or fallback_response
     if not response.strip():
         raise RuntimeError("Codex agent did not return a structured SkillPackage")
     if not evidence_access:
         error = CodexOperationalAccessError(
-            "Codex query-wiki explorer completed without successful Wiki evidence access"
+            "Codex task-wiki explorer completed without successful Wiki evidence access"
         )
         error.operational_access = operational_access  # type: ignore[attr-defined]
         raise error
@@ -303,7 +303,7 @@ def _event_summary(
     item: Any,
     command_count: int,
     *,
-    query_wiki_root: Path,
+    task_wiki_root: Path,
 ) -> dict[str, Any]:
     event: dict[str, Any] = {"event": "sdk:event", "method": method}
     item_type = str(getattr(item, "type", "") or "")
@@ -314,11 +314,11 @@ def _event_summary(
         status = _enum_value(getattr(item, "status", None))
         if status:
             event["status"] = status
-        audit = _command_audit(item, query_wiki_root=query_wiki_root)
+        audit = _command_audit(item, task_wiki_root=task_wiki_root)
         event.update(
             {
                 "command_category": audit["category"],
-                "cwd_within_query_wiki": audit["cwd_within_query_wiki"],
+                "cwd_within_task_wiki": audit["cwd_within_task_wiki"],
                 "successful_read": audit["successful_read"],
                 "candidate_lookup": audit["candidate_lookup"],
                 "evidence_categories": audit["evidence_categories"],
@@ -340,10 +340,10 @@ def _event_summary(
     return event
 
 
-def _command_audit(item: Any, *, query_wiki_root: Path) -> dict[str, Any]:
+def _command_audit(item: Any, *, task_wiki_root: Path) -> dict[str, Any]:
     """Summarize a command without persisting its command text or output."""
 
-    root = query_wiki_root.resolve()
+    root = task_wiki_root.resolve()
     cwd_value = getattr(item, "cwd", None)
     cwd = root if cwd_value in (None, "") else _resolve_audit_path(cwd_value, root)
     try:
@@ -369,19 +369,19 @@ def _command_audit(item: Any, *, query_wiki_root: Path) -> dict[str, Any]:
     policy_violation = _command_policy_violation(
         command,
         action_types=action_types,
-        paths_within_query_wiki=paths_within,
+        paths_within_task_wiki=paths_within,
     )
     successful = status == "completed" and exit_code == 0
-    query_wiki_activity = cwd_within and paths_within and not policy_violation
+    task_wiki_activity = cwd_within and paths_within and not policy_violation
     return {
         "category": category,
-        "cwd_within_query_wiki": cwd_within,
+        "cwd_within_task_wiki": cwd_within,
         "successful_read": (
-            successful and query_wiki_activity and category in {"read", "list", "search"}
+            successful and task_wiki_activity and category in {"read", "list", "search"}
         ),
         "candidate_lookup": (
             successful
-            and query_wiki_activity
+            and task_wiki_activity
             and (category == "search" or bool({"card", "source", "relation"} & evidence_categories))
         ),
         "evidence_categories": sorted(evidence_categories),
@@ -448,10 +448,10 @@ def _command_policy_violation(
     command: str,
     *,
     action_types: set[str],
-    paths_within_query_wiki: bool,
+    paths_within_task_wiki: bool,
 ) -> str:
-    if not paths_within_query_wiki:
-        return "outside_query_wiki"
+    if not paths_within_task_wiki:
+        return "outside_task_wiki"
     allowed_actions = {"read", "listfiles", "list_files", "search", "unknown", ""}
     if action_types - allowed_actions:
         return "write_attempt"
@@ -470,8 +470,8 @@ def _command_policy_violation(
         return "unsupported_command"
     if _uses_unsafe_read_option(commands, tokens):
         return "write_attempt"
-    if _command_escapes_query_wiki(tokens):
-        return "outside_query_wiki"
+    if _command_escapes_task_wiki(tokens):
+        return "outside_task_wiki"
     if "&" in tokens:
         return "background_job"
     return ""
@@ -490,7 +490,7 @@ def _uses_unsafe_read_option(commands: set[str], tokens: list[str]) -> bool:
     )
 
 
-def _command_escapes_query_wiki(tokens: list[str]) -> bool:
+def _command_escapes_task_wiki(tokens: list[str]) -> bool:
     expect_command = True
     for token in tokens:
         if token in {";", "&&", "||", "|", "&"}:

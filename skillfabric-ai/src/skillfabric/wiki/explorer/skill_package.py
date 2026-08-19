@@ -16,7 +16,7 @@ class SkillPackageEvidence:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SkillPackageEvidence:
         _require_keys(payload, {"path"}, "selected skill evidence")
-        return cls(path=_query_wiki_path(payload["path"], "evidence path"))
+        return cls(path=_task_wiki_path(payload["path"], "evidence path"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +106,7 @@ class SkillPackage:
             ),
             coverage_gaps=tuple(_string(item, "coverage gap") for item in payload["coverage_gaps"]),
             wiki_pages_read=tuple(
-                _query_wiki_path(item, "wiki page path") for item in payload["wiki_pages_read"]
+                _task_wiki_path(item, "wiki page path") for item in payload["wiki_pages_read"]
             ),
             rationale=_string(payload["rationale"], "rationale"),
         )
@@ -175,10 +175,10 @@ def _string(value: Any, label: str) -> str:
     return value.strip()
 
 
-def _query_wiki_path(value: Any, label: str) -> str:
-    path = _string(value, label).removeprefix("./").removeprefix("query_wiki/")
+def _task_wiki_path(value: Any, label: str) -> str:
+    path = _string(value, label).removeprefix("./").removeprefix("task_wiki/")
     if not path:
-        raise ValueError(f"{label} must identify a file inside query_wiki")
+        raise ValueError(f"{label} must identify a file inside task_wiki")
     return path
 
 

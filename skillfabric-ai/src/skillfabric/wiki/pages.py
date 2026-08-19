@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import yaml
+
 
 def slug(value: str) -> str:
     """Return a stable markdown file slug."""
@@ -33,14 +35,12 @@ def bullet_list(values: list[str], *, empty: str = "- None") -> str:
 
 
 def frontmatter(fields: dict[str, object]) -> str:
-    """Render simple YAML frontmatter."""
+    """Render YAML frontmatter without allowing content to alter its structure."""
 
-    lines = ["---"]
-    for key, value in fields.items():
-        if isinstance(value, list):
-            rendered = ", ".join(str(item) for item in value)
-            lines.append(f"{key}: [{rendered}]")
-        else:
-            lines.append(f"{key}: {value}")
-    lines.append("---")
-    return "\n".join(lines)
+    document = yaml.safe_dump(
+        fields,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    ).rstrip()
+    return f"---\n{document}\n---"

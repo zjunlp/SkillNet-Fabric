@@ -1,4 +1,4 @@
-"""Orchestrate one strict query-wiki exploration run."""
+"""Orchestrate one strict task-wiki exploration run."""
 
 from __future__ import annotations
 
@@ -78,11 +78,11 @@ class WikiExplorerRun:
     validation: SkillPackageValidationResult
 
 
-def explore_query_wiki(
+def explore_task_wiki(
     config: WikiExplorerConfig,
     *,
     query: str,
-    query_wiki_root: Path,
+    task_wiki_root: Path,
     trace_dir: Path,
     sdk_runtime: Any = None,
     backend: WikiExplorerBackend | None = None,
@@ -109,8 +109,8 @@ def explore_query_wiki(
             sdk_runtime=sdk_runtime,
         )
     )
-    if not query_wiki_root.is_dir():
-        raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
+    if not task_wiki_root.is_dir():
+        raise FileNotFoundError(f"task_wiki root does not exist: {task_wiki_root}")
     explorer_dir = trace_dir / "explorer"
     attempts_root = trace_dir / ".explorer_attempts"
     if explorer_dir.exists() or attempts_root.exists():
@@ -129,12 +129,12 @@ def explore_query_wiki(
         try:
             package = resolved_backend.explore(
                 query=query,
-                query_wiki_root=query_wiki_root,
+                task_wiki_root=task_wiki_root,
                 trace_dir=attempt_trace,
             )
             validation = validate_skill_package(
                 package,
-                query_wiki_root,
+                task_wiki_root,
                 max_selected_skills=config.max_selected_skills,
                 required_selected_skills=config.required_selected_skills,
             )
@@ -145,7 +145,7 @@ def explore_query_wiki(
                 terminal_error = _RetryableExplorerValidationError(
                     "; ".join(validation.errors) or "invalid SkillPackage"
                 )
-        except Exception as exc:  # noqa: BLE001 - one bounded route retry policy.
+        except Exception as exc:  # noqa: BLE001 - one route retry policy.
             terminal_error = exc
         finally:
             _archive_attempt(
@@ -157,7 +157,7 @@ def explore_query_wiki(
                 started=started,
                 trace_root=trace_dir,
                 redaction_roots=(
-                    query_wiki_root.resolve(),
+                    task_wiki_root.resolve(),
                     trace_dir.resolve(),
                     Path(config.env_file).expanduser().resolve(),
                 ),
@@ -394,7 +394,7 @@ def _retryable_explorer_error(error: Exception) -> bool:
             "login failed",
             "permission denied",
             "policy violation",
-            "outside_query_wiki",
+            "outside_task_wiki",
             "write_attempt",
             "runtime mismatch",
             "config mismatch",
@@ -448,4 +448,4 @@ def _sanitized_exception(error: Exception, *, paths: tuple[Path, ...]) -> str:
     return _safe_error(value, paths=paths)
 
 
-__all__ = ["WikiExplorerConfig", "WikiExplorerRun", "explore_query_wiki"]
+__all__ = ["WikiExplorerConfig", "WikiExplorerRun", "explore_task_wiki"]

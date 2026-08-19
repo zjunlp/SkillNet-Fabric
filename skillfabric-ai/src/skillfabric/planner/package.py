@@ -228,7 +228,7 @@ def _planner_messages(
 ) -> list[dict[str, str]]:
     system = f"""<prompt_contract id={json.dumps(PLANNER_PROMPT_ID)}>
 <role>
-You are SkillFabric's execution planner. Produce one compact, task-specific execution prompt for a
+You are SkillFabric's execution planner. Produce one compact, task specific execution prompt for a
 single capable executor session. Make the handoff outcome-first. It appears immediately after the
 original task. Plan for the quality of the final deliverables, not for the appearance of following
 a procedure. Do not execute the task.
@@ -291,7 +291,7 @@ Write a concise, directly executable handoff for one capable executor.
 - Lead with the target artifact or outcome and its exact output contract.
 - Give one primary execution path, normally as three to six ordered steps.
 - Preserve decisive task constraints and Skill-informed methods without retelling the task.
-- Close with short, task-specific final checks or a definition of done.
+- Close with short, task specific final checks or a definition of done.
 
 Use the structure that best fits the task; headings and numbered steps are optional. Write normally
 150-350 words, shorter for simple tasks and up to 500 words only for genuinely complex,

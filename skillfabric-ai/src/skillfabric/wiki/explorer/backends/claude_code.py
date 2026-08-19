@@ -1,4 +1,4 @@
-"""Claude Agent SDK backend for strict query-wiki exploration."""
+"""Claude Agent SDK backend for strict task-wiki exploration."""
 
 from __future__ import annotations
 
@@ -102,20 +102,20 @@ class ClaudeCodeWikiExplorerBackend:
         self,
         *,
         query: str,
-        query_wiki_root: Path,
+        task_wiki_root: Path,
         trace_dir: Path,
     ) -> SkillPackage:
         """Return one schema-valid SkillPackage or propagate the failure."""
 
-        query_wiki_root = query_wiki_root.resolve()
-        if not query_wiki_root.is_dir():
-            raise FileNotFoundError(f"query_wiki root does not exist: {query_wiki_root}")
+        task_wiki_root = task_wiki_root.resolve()
+        if not task_wiki_root.is_dir():
+            raise FileNotFoundError(f"task_wiki root does not exist: {task_wiki_root}")
         explorer_dir = trace_dir / "explorer"
         explorer_dir.mkdir(parents=True, exist_ok=True)
         tool_budget = dict(self.tool_budget or {})
         context = ExplorerPromptContext(
             query=query,
-            query_wiki_root=query_wiki_root,
+            task_wiki_root=task_wiki_root,
             max_selected_skills=self.max_selected_skills,
             required_selected_skills=self.required_selected_skills,
             allowed_tools=ALLOWED_TOOLS,
@@ -138,7 +138,7 @@ class ClaudeCodeWikiExplorerBackend:
             {
                 "event": "backend:start",
                 "allowed_tools": ALLOWED_TOOLS,
-                "read_root": str(query_wiki_root),
+                "read_root": str(task_wiki_root),
                 "prompt_id": EXPLORER_PROMPT_ID,
                 "tool_budget": tool_budget,
             },
@@ -147,7 +147,7 @@ class ClaudeCodeWikiExplorerBackend:
             payload = self._explore_with_sdk(
                 system_prompt,
                 user_prompt,
-                query_wiki_root,
+                task_wiki_root,
                 explorer_dir,
                 tool_budget,
             )
@@ -177,7 +177,7 @@ class ClaudeCodeWikiExplorerBackend:
         self,
         system_prompt: str,
         user_prompt: str,
-        query_wiki_root: Path,
+        task_wiki_root: Path,
         explorer_dir: Path,
         tool_budget: dict[str, int],
     ) -> dict[str, Any]:
@@ -185,9 +185,9 @@ class ClaudeCodeWikiExplorerBackend:
         options = _build_claude_agent_options(
             runtime,
             system_prompt=system_prompt,
-            cwd=query_wiki_root,
+            cwd=task_wiki_root,
             model=self.model,
-            read_roots=[query_wiki_root],
+            read_roots=[task_wiki_root],
             env=_sdk_env(
                 self.env_file,
                 model=self.model,
@@ -238,7 +238,7 @@ def _build_claude_agent_options(
         if path_key is None:
             return _hook_permission(
                 "deny",
-                f"{tool_name} is not allowed for query_wiki exploration.",
+                f"{tool_name} is not allowed for task_wiki exploration.",
             )
         raw_path = tool_input.get(path_key)
         candidate = cwd_path if raw_path is None else Path(str(raw_path))
@@ -246,7 +246,7 @@ def _build_claude_agent_options(
         if not any(candidate.is_relative_to(root) for root in resolved_roots):
             return _hook_permission(
                 "deny",
-                f"{tool_name} path is outside the query_wiki read root.",
+                f"{tool_name} path is outside the task_wiki read root.",
             )
         budget_error = _consume_tool_budget(tool_name, tool_counts, tool_budget)
         if budget_error:
@@ -315,9 +315,9 @@ def _consume_tool_budget(
     total_limit = tool_budget.get("total", 0)
     tool_limit = tool_budget.get(tool_name, 0)
     if tool_counts["total"] >= total_limit:
-        return f"query_wiki tool budget exceeded: total<={total_limit}"
+        return f"task_wiki tool budget exceeded: total<={total_limit}"
     if tool_counts[tool_name] >= tool_limit:
-        return f"query_wiki tool budget exceeded: {tool_name}<={tool_limit}"
+        return f"task_wiki tool budget exceeded: {tool_name}<={tool_limit}"
     tool_counts[tool_name] += 1
     tool_counts["total"] += 1
     return None
@@ -414,7 +414,7 @@ def _run_sdk_query_sync(
     thread.join(None if timeout == 0 else timeout + 1.0)
     if thread.is_alive():
         _write_event(event_dir, {"event": "sdk:timeout", "timeout_seconds": timeout})
-        raise TimeoutError(f"Claude query-wiki explorer exceeded {timeout:g} seconds")
+        raise TimeoutError(f"Claude task-wiki explorer exceeded {timeout:g} seconds")
     if errors:
         raise errors[0]
     return result["message"]
@@ -443,7 +443,7 @@ async def _run_sdk_query_with_timeout(
     except TimeoutError as exc:
         _write_event(event_dir, {"event": "sdk:timeout", "timeout_seconds": timeout_seconds})
         raise TimeoutError(
-            f"Claude query-wiki explorer exceeded {timeout_seconds:g} seconds"
+            f"Claude task-wiki explorer exceeded {timeout_seconds:g} seconds"
         ) from exc
 
 
@@ -581,7 +581,7 @@ def _load_sdk_runtime() -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, query
         from claude_agent_sdk.types import ResultMessage
     except ModuleNotFoundError as exc:
-        raise RuntimeError("claude-agent-sdk is required for query-wiki routing") from exc
+        raise RuntimeError("claude-agent-sdk is required for task-wiki routing") from exc
 
     class Runtime:
         pass

@@ -1,4 +1,4 @@
-"""Protocol for query-wiki explorer backends."""
+"""Protocol for Task Wiki Explorer backends."""
 
 from __future__ import annotations
 
@@ -21,16 +21,16 @@ def normalize_explorer_backend(value: str) -> ExplorerBackendName:
 
 
 class WikiExplorerBackend(Protocol):
-    """Route-time explorer backend over a materialized query_wiki directory."""
+    """Task time Explorer backend over a materialized task_wiki directory."""
 
     def explore(
         self,
         *,
         query: str,
-        query_wiki_root: Path,
+        task_wiki_root: Path,
         trace_dir: Path,
     ) -> SkillPackage:
-        """Read query_wiki and return a proposed SkillPackage."""
+        """Read task_wiki and return a proposed SkillPackage."""
 
 
 __all__ = [

@@ -1,4 +1,4 @@
-"""Shared contract-grounded pages for bounded routing and planning packages."""
+"""Shared contract-grounded pages for routing and planning packages."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _untrusted_source_block(skill: SkillNode) -> str:
 
 
 def render_skill_source_page(skill: SkillNode, *, card_path: str) -> str:
-    """Render the stable Full Wiki source page shared by route-time projections."""
+    """Render the stable Full Wiki source page shared by routing projections."""
 
     return (
         "\n\n".join(

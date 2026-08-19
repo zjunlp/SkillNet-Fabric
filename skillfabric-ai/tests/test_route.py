@@ -124,7 +124,7 @@ def test_invalid_explorer_skill_fails_without_ranked_fallback(tmp_path) -> None:
     output["selected_skills"][0]["skill_id"] = "skill:not-real"
     runtime = StubSdkRuntime(output)
 
-    with pytest.raises(ValueError, match="not in query_wiki manifest"):
+    with pytest.raises(ValueError, match="not in task_wiki manifest"):
         route_task(
             RouterConfig(workspace=workspace, query="extract KPIs", trace_id="invalid-skill"),
             sdk_runtime=runtime,
@@ -134,7 +134,7 @@ def test_invalid_explorer_skill_fails_without_ranked_fallback(tmp_path) -> None:
     assert not (workspace / "runs" / "invalid-skill" / "route.json").exists()
 
 
-def test_route_retries_invalid_skill_package_on_the_same_query_wiki(tmp_path) -> None:
+def test_route_retries_invalid_skill_package_on_the_same_task_wiki(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)
     invalid = _package()
@@ -202,8 +202,8 @@ def test_route_uses_an_explicit_explorer_backend(tmp_path) -> None:
     ]
     assert len(backend.calls) == 1
     assert backend.calls[0]["query"] == "extract KPIs"
-    assert backend.calls[0]["query_wiki_root"] == (
-        workspace / "runs" / "explicit-explorer-backend" / "query_wiki"
+    assert backend.calls[0]["task_wiki_root"] == (
+        workspace / "runs" / "explicit-explorer-backend" / "task_wiki"
     )
 
 
@@ -271,7 +271,7 @@ def test_empty_selection_with_coverage_gap_is_a_valid_result(tmp_path) -> None:
         "near_misses": [],
         "coverage_gaps": ["No skill can perform the requested database migration."],
         "wiki_pages_read": [],
-        "rationale": "The bounded skill corpus does not cover the task.",
+        "rationale": "The test skill corpus does not cover the task.",
     }
 
     result = route_task(

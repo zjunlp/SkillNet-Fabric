@@ -1,4 +1,4 @@
-"""Fail-closed validation of explorer output against a query wiki."""
+"""Fail-closed validation of explorer output against a task Wiki."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class SkillPackageValidationResult:
 
 def validate_skill_package(
     package: SkillPackage,
-    query_wiki_root: Path,
+    task_wiki_root: Path,
     *,
     max_selected_skills: int = 8,
     required_selected_skills: int | None = None,
@@ -44,7 +44,7 @@ def validate_skill_package(
         required_selected_skills,
         max_selected_skills=max_selected_skills,
     )
-    root = query_wiki_root.resolve()
+    root = task_wiki_root.resolve()
     manifest = _load_manifest(root)
     manifest_skills = {str(item["skill_id"]): item for item in manifest["skills"]}
     errors: list[str] = []
@@ -75,7 +75,7 @@ def validate_skill_package(
     for selected in package.selected_skills:
         row = manifest_skills.get(selected.skill_id)
         if row is None:
-            errors.append(f"selected skill not in query_wiki manifest: {selected.skill_id}")
+            errors.append(f"selected skill not in task_wiki manifest: {selected.skill_id}")
         elif not row.get("selectable", False):
             errors.append(f"selected skill is not selectable: {selected.skill_id}")
         if not selected.evidence:
@@ -103,7 +103,7 @@ def validate_skill_package(
             errors.append(f"near_misses contains duplicate skill id: {near_miss.skill_id}")
         near_miss_ids.add(near_miss.skill_id)
         if near_miss.skill_id not in manifest_skills:
-            errors.append(f"near miss not in query_wiki manifest: {near_miss.skill_id}")
+            errors.append(f"near miss not in task_wiki manifest: {near_miss.skill_id}")
         if near_miss.skill_id in selected_set:
             errors.append(f"near miss is also selected: {near_miss.skill_id}")
 
@@ -176,9 +176,9 @@ def _load_manifest(root: Path) -> dict[str, Any]:
         "alternatives",
     }
     if not isinstance(payload, dict) or set(payload) != expected:
-        raise ValueError("query_wiki manifest must use the canonical fields")
+        raise ValueError("task_wiki manifest must use the canonical fields")
     if not isinstance(payload["skills"], list):
-        raise ValueError("query_wiki manifest skills must be a list")
+        raise ValueError("task_wiki manifest skills must be a list")
     expected_skill_keys = {
         "skill_id",
         "name",
@@ -193,22 +193,22 @@ def _load_manifest(root: Path) -> dict[str, Any]:
     seen_skill_ids: set[str] = set()
     for index, item in enumerate(payload["skills"]):
         if not isinstance(item, dict) or set(item) != expected_skill_keys:
-            raise ValueError(f"query_wiki manifest skills[{index}] has invalid fields")
+            raise ValueError(f"task_wiki manifest skills[{index}] has invalid fields")
         skill_id = item["skill_id"]
         if not isinstance(skill_id, str) or not skill_id.strip():
-            raise ValueError(f"query_wiki manifest skills[{index}] has invalid skill_id")
+            raise ValueError(f"task_wiki manifest skills[{index}] has invalid skill_id")
         if skill_id in seen_skill_ids:
-            raise ValueError(f"query_wiki manifest contains duplicate skill id: {skill_id}")
+            raise ValueError(f"task_wiki manifest contains duplicate skill id: {skill_id}")
         seen_skill_ids.add(skill_id)
         if not isinstance(item["selectable"], bool):
-            raise ValueError(f"query_wiki manifest skills[{index}] selectable must be boolean")
+            raise ValueError(f"task_wiki manifest skills[{index}] selectable must be boolean")
         if item["origin"] not in {"seed", "semantic_expansion"}:
-            raise ValueError(f"query_wiki manifest skills[{index}] has invalid origin")
+            raise ValueError(f"task_wiki manifest skills[{index}] has invalid origin")
         for field_name in ("card_path", "source_path"):
             value = item[field_name]
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(
-                    f"query_wiki manifest skills[{index}] {field_name} must be non-empty"
+                    f"task_wiki manifest skills[{index}] {field_name} must be non-empty"
                 )
     return payload
 
@@ -216,12 +216,12 @@ def _load_manifest(root: Path) -> dict[str, Any]:
 def _path_error(root: Path, relative_path: str, *, label: str) -> str | None:
     path = Path(relative_path)
     if not relative_path or path.is_absolute():
-        return f"{label} must be a non-empty relative query_wiki path: {relative_path}"
+        return f"{label} must be a non-empty relative task_wiki path: {relative_path}"
     candidate = (root / path).resolve()
     try:
         candidate.relative_to(root)
     except ValueError:
-        return f"{label} escapes query_wiki: {relative_path}"
+        return f"{label} escapes task_wiki: {relative_path}"
     if not candidate.is_file():
         return f"{label} is missing: {relative_path}"
     return None

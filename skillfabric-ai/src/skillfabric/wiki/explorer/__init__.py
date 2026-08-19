@@ -1,1 +1,1 @@
-"""Query-wiki exploration adapters."""
+"""Task Wiki exploration adapters."""

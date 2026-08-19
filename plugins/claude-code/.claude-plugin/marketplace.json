@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "skillfabric",
-      "description": "Compile native skills and route tasks through a bounded Task Wiki",
+      "description": "Compile native skills and route tasks through a task specific Wiki",
       "source": "./skillfabric",
       "category": "productivity"
     }

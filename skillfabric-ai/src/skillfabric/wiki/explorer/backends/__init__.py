@@ -1,4 +1,4 @@
-"""Route-time query-wiki explorer backends."""
+"""Task time Task Wiki Explorer backends."""
 
 from skillfabric.wiki.explorer.backends.base import (
     EXPLORER_BACKENDS,

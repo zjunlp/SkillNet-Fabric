@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,6 +86,8 @@ def _load_wiki_source_uncached(workspace: Workspace) -> WikiSource:
     skills: dict[str, SkillNode] = {}
     for row in _read_jsonl(registry_path):
         skill = SkillNode.from_dict(row)
+        if hashlib.sha256(skill.raw_text.encode("utf-8")).hexdigest() != skill.content_hash:
+            raise ValueError(f"registry source hash differs for {skill.id}; rebuild the workspace")
         if skill.id in skills:
             raise ValueError(f"registry contains duplicate skill id: {skill.id}")
         skills[skill.id] = skill

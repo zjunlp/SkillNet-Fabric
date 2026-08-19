@@ -1,4 +1,4 @@
-"""Build bounded query-local evidence bundles for the explorer."""
+"""Build task specific evidence bundles for the Explorer."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def build_router_bundle(
     *,
     embedding_provider: EmbeddingProvider | None = None,
 ) -> RouterBundle:
-    """Retrieve seeds and add bounded semantic graph context."""
+    """Retrieve seeds and add semantic graph context for the Task Wiki."""
 
     workspace = Workspace(config.workspace)
     source = load_wiki_source(workspace)

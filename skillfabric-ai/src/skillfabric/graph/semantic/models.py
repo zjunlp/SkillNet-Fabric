@@ -96,7 +96,7 @@ class EmbeddingRecord:
 
 @dataclass(frozen=True, slots=True)
 class CandidateRetrievalResult:
-    """Bounded candidate pairs plus reusable embedding records."""
+    """Candidate pairs plus reusable embedding records."""
 
     pairs: tuple[CandidatePair, ...]
     metrics: dict[str, int | float | str]

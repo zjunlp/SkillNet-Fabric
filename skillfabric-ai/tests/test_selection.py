@@ -9,7 +9,7 @@ from skillfabric.router.bundle import RouterBundleConfig, build_router_bundle
 from skillfabric.router.models import RouterAlternative, RouterBundle
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import route_from_skill_package, validate_skill_package
-from skillfabric.wiki.query_wiki import materialize_query_wiki
+from skillfabric.wiki.task_wiki import materialize_task_wiki
 from tests.support import FakeEmbeddingProvider, build_fixture_workspace
 
 
@@ -52,16 +52,16 @@ def _query_context(tmp_path):
         ),
         embedding_provider=FakeEmbeddingProvider(),
     )
-    query_wiki = materialize_query_wiki(
+    task_wiki = materialize_task_wiki(
         workspace_path,
         bundle,
         trace_dir=workspace_path / "runs" / "package-test",
     )
-    return bundle, query_wiki
+    return bundle, task_wiki
 
 
-def _minimal_query_wiki(tmp_path, *, skill_count: int = 3):
-    root = tmp_path / "query-wiki"
+def _minimal_task_wiki(tmp_path, *, skill_count: int = 3):
+    root = tmp_path / "task-wiki"
     rows = []
     for index in range(skill_count):
         skill_id = f"skill:skill-{index}"
@@ -127,7 +127,7 @@ def test_exact_selected_skill_count_is_enforced(
     selected_count: int,
     expected_valid: bool,
 ) -> None:
-    root, rows = _minimal_query_wiki(tmp_path)
+    root, rows = _minimal_task_wiki(tmp_path)
 
     validation = validate_skill_package(
         _counted_package(rows, selected_count),
@@ -150,7 +150,7 @@ def test_task_wiki_reuses_full_wiki_source_pages(tmp_path) -> None:
         RouterBundleConfig(workspace=workspace, query="extract KPIs"),
         embedding_provider=FakeEmbeddingProvider(),
     )
-    query_wiki = materialize_query_wiki(
+    task_wiki = materialize_task_wiki(
         workspace,
         bundle,
         trace_dir=workspace / "runs" / "projection-test",
@@ -159,10 +159,10 @@ def test_task_wiki_reuses_full_wiki_source_pages(tmp_path) -> None:
     full_source = (workspace / "wiki" / "skills" / "sources" / "pdf-table-parser.md").read_text(
         encoding="utf-8"
     )
-    task_source = (query_wiki.root / "skills" / "sources" / "pdf-table-parser.md").read_text(
+    task_source = (task_wiki.root / "skills" / "sources" / "pdf-table-parser.md").read_text(
         encoding="utf-8"
     )
-    metadata = json.loads((query_wiki.root / "source.json").read_text(encoding="utf-8"))
+    metadata = json.loads((task_wiki.root / "source.json").read_text(encoding="utf-8"))
 
     assert task_source == full_source
     assert metadata["build_id"] == "test-build"
@@ -182,7 +182,7 @@ def test_task_wiki_rejects_stale_full_wiki(tmp_path) -> None:
     )
 
     with pytest.raises(ValueError, match="different builds"):
-        materialize_query_wiki(
+        materialize_task_wiki(
             workspace,
             bundle,
             trace_dir=workspace / "runs" / "stale-wiki",
@@ -199,7 +199,7 @@ def test_task_wiki_supports_default_relative_workspace(tmp_path, monkeypatch) ->
         embedding_provider=FakeEmbeddingProvider(),
     )
 
-    result = materialize_query_wiki(
+    result = materialize_task_wiki(
         relative_workspace,
         bundle,
         trace_dir=workspace / "runs" / "relative-workspace",
@@ -210,10 +210,10 @@ def test_task_wiki_supports_default_relative_workspace(tmp_path, monkeypatch) ->
 
 
 def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> None:
-    bundle, query_wiki = _query_context(tmp_path)
+    bundle, task_wiki = _query_context(tmp_path)
     package = _package()
 
-    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+    validation = validate_skill_package(package, task_wiki.root, max_selected_skills=8)
     route = route_from_skill_package(package, bundle)
 
     assert validation.valid, validation.errors
@@ -229,8 +229,8 @@ def test_valid_package_projects_graph_relations_as_route_evidence(tmp_path) -> N
     assert relation.confidence == pytest.approx(0.94)
 
 
-@pytest.mark.parametrize("prefix", ["query_wiki/", "./", "./query_wiki/"])
-def test_skill_package_normalizes_query_wiki_relative_paths(prefix: str) -> None:
+@pytest.mark.parametrize("prefix", ["task_wiki/", "./", "./task_wiki/"])
+def test_skill_package_normalizes_task_wiki_relative_paths(prefix: str) -> None:
     payload = _package().to_dict()
     canonical_path = "skills/cards/pdf-table-parser.md"
     payload["selected_skills"][0]["evidence"] = [{"path": f"{prefix}{canonical_path}"}]
@@ -243,7 +243,7 @@ def test_skill_package_normalizes_query_wiki_relative_paths(prefix: str) -> None
 
 
 def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
-    bundle, query_wiki = _query_context(tmp_path)
+    bundle, task_wiki = _query_context(tmp_path)
     package = _package(
         selected_skills=[
             {
@@ -255,16 +255,16 @@ def test_external_skill_and_path_traversal_are_errors(tmp_path) -> None:
         wiki_pages_read=["../outside.md"],
     )
 
-    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+    validation = validate_skill_package(package, task_wiki.root, max_selected_skills=8)
 
     assert not validation.valid
-    assert any("not in query_wiki manifest" in error for error in validation.errors)
-    assert any("escapes query_wiki" in error for error in validation.errors)
+    assert any("not in task_wiki manifest" in error for error in validation.errors)
+    assert any("escapes task_wiki" in error for error in validation.errors)
     with pytest.raises(ValueError, match="not a selectable bundle candidate"):
         route_from_skill_package(package, bundle)
 
 
-def test_alternative_only_skill_cannot_bypass_bounded_candidates() -> None:
+def test_alternative_only_skill_cannot_bypass_candidate_budget() -> None:
     bundle = RouterBundle(
         query="Use a near substitute.",
         selected_skills=(),
@@ -295,7 +295,7 @@ def test_alternative_only_skill_cannot_bypass_bounded_candidates() -> None:
 
 
 def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
+    _, task_wiki = _query_context(tmp_path)
     selected = _package().to_dict()["selected_skills"]
     selected[0]["evidence"] = [{"path": "skills/cards/financial-kpi-extractor.md"}]
 
@@ -309,7 +309,7 @@ def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
                 "edges/semantic_edges.jsonl",
             ],
         ),
-        query_wiki.root,
+        task_wiki.root,
         max_selected_skills=8,
     )
 
@@ -318,7 +318,7 @@ def test_selected_skill_must_cite_its_own_card_or_source(tmp_path) -> None:
 
 
 def test_selected_skill_may_also_cite_shared_comparison_context(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
+    _, task_wiki = _query_context(tmp_path)
     selected = _package().to_dict()["selected_skills"]
     selected[0]["evidence"] = [
         {"path": "index.md"},
@@ -335,7 +335,7 @@ def test_selected_skill_may_also_cite_shared_comparison_context(tmp_path) -> Non
                 "edges/semantic_edges.jsonl",
             ],
         ),
-        query_wiki.root,
+        task_wiki.root,
         max_selected_skills=8,
     )
 
@@ -343,36 +343,36 @@ def test_selected_skill_may_also_cite_shared_comparison_context(tmp_path) -> Non
 
 
 def test_manifest_rejects_duplicate_skill_rows(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
-    manifest_path = query_wiki.root / "manifest.json"
+    _, task_wiki = _query_context(tmp_path)
+    manifest_path = task_wiki.root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["skills"].append(dict(manifest["skills"][0]))
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ValueError, match="duplicate skill id"):
-        validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
+        validate_skill_package(_package(), task_wiki.root, max_selected_skills=8)
 
 
 def test_manifest_rejects_alternative_only_candidate_rows(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
-    manifest_path = query_wiki.root / "manifest.json"
+    _, task_wiki = _query_context(tmp_path)
+    manifest_path = task_wiki.root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["skills"][0]["origin"] = "similar_alternative"
     manifest["skills"][0]["route"] = None
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ValueError, match="invalid origin"):
-        validate_skill_package(_package(), query_wiki.root, max_selected_skills=8)
+        validate_skill_package(_package(), task_wiki.root, max_selected_skills=8)
 
 
 def test_selected_dependent_does_not_force_compiled_prerequisite(tmp_path) -> None:
-    bundle, query_wiki = _query_context(tmp_path)
+    bundle, task_wiki = _query_context(tmp_path)
     package = _package(
         selected_skills=[_package().to_dict()["selected_skills"][1]],
         wiki_pages_read=["skills/cards/financial-kpi-extractor.md"],
     )
 
-    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+    validation = validate_skill_package(package, task_wiki.root, max_selected_skills=8)
     route = route_from_skill_package(package, bundle)
 
     assert validation.valid, validation.errors
@@ -381,14 +381,14 @@ def test_selected_dependent_does_not_force_compiled_prerequisite(tmp_path) -> No
 
 
 def test_empty_selection_requires_an_explicit_coverage_gap(tmp_path) -> None:
-    _, query_wiki = _query_context(tmp_path)
+    _, task_wiki = _query_context(tmp_path)
     package = _package(
         selected_skills=[],
         wiki_pages_read=[],
         coverage_gaps=[],
     )
 
-    validation = validate_skill_package(package, query_wiki.root, max_selected_skills=8)
+    validation = validate_skill_package(package, task_wiki.root, max_selected_skills=8)
 
     assert not validation.valid
     assert any("coverage gap" in error for error in validation.errors)

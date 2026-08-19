@@ -76,7 +76,7 @@ def build_relation_judge_messages(
     skills: dict[str, SkillNode],
     contracts: dict[str, SkillContract],
 ) -> list[dict[str, str]]:
-    """Build one grounded request for a bounded set of candidate pairs."""
+    """Build one grounded request for a set of candidate pairs."""
 
     if not pairs:
         raise ValueError("relation request must contain at least one candidate pair")

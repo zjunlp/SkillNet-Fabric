@@ -216,7 +216,7 @@ class RouterAlternative:
 
 @dataclass(frozen=True, slots=True)
 class RouterBundle:
-    """Bounded evidence bundle consumed by query-wiki exploration."""
+    """Evidence bundle consumed by Task Wiki exploration."""
 
     query: str
     selected_skills: tuple[RouterSkillCandidate, ...]

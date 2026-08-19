@@ -6,16 +6,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from skillfabric.graph.builder import (
     BuildConfig,
     _BuildDependencies,
-    build_graph,
+    build_workspace,
 )
 from skillfabric.graph.semantic.candidates import CandidateRetrievalError
 from skillfabric.indexing.embeddings import DEFAULT_EMBEDDING_MODEL_ID, ApiEmbeddingProvider
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig
+from skillfabric.storage import Workspace
+from skillfabric.wiki.loader import clear_wiki_source_cache, load_wiki_source
+from skillfabric.wiki.pages import frontmatter
 from tests.support import (
     FIXTURE_SKILLS,
     FakeEmbeddingProvider,
@@ -27,7 +29,7 @@ from tests.support import (
 
 
 def _build(workspace: Path, *, contracts=None, judge=None):
-    return build_graph(
+    return build_workspace(
         BuildConfig(skill_root=FIXTURE_SKILLS, workspace=workspace),
         dependencies=_BuildDependencies(
             contract_extractor=contracts or FixtureContractExtractor(),
@@ -59,6 +61,63 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
         "embeddings.json",
     }
     assert not (workspace / "reports").exists()
+
+
+def test_build_publishes_full_wiki_before_ready_status(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+
+    result = _build(workspace)
+    status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
+
+    assert status == {
+        "state": "ready",
+        "stage": "complete",
+        "build_id": "semantic-builder-test",
+    }
+    assert result.wiki.pages_written > 0
+    assert (workspace / "wiki" / "manifest.json").is_file()
+
+
+def test_full_wiki_materialization_failure_marks_workspace_failed(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / ".skillfabric"
+    monkeypatch.setattr(
+        "skillfabric.graph.builder.materialize_full_wiki",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("render failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="render failed"):
+        _build(workspace)
+
+    status = json.loads((workspace / "status.json").read_text(encoding="utf-8"))
+    assert status == {
+        "state": "failed",
+        "failed_stage": "wiki",
+        "build_id": "semantic-builder-test",
+        "error_type": "RuntimeError",
+        "error": "render failed",
+    }
+
+
+def test_loader_rejects_registry_source_hash_mismatch(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    _build(workspace)
+    registry = workspace / "graph" / "registry.jsonl"
+    rows = [json.loads(line) for line in registry.read_text(encoding="utf-8").splitlines()]
+    rows[0]["raw_text"] += "\nTampered source."
+    registry.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    clear_wiki_source_cache()
+
+    with pytest.raises(ValueError, match="registry source hash differs"):
+        load_wiki_source(Workspace(workspace))
+
+
+def test_frontmatter_serializes_multiline_values_as_valid_yaml() -> None:
+    rendered = frontmatter({"description": "first line: value\nsecond line", "tags": ["a", "b"]})
+
+    assert yaml.safe_load(rendered.split("---", 2)[1]) == {
+        "description": "first line: value\nsecond line",
+        "tags": ["a", "b"],
+    }
 
 
 def test_api_embedding_provider_forwards_request_configuration() -> None:
@@ -165,12 +224,10 @@ def test_build_stats_contain_public_build_counts(tmp_path) -> None:
 
 def test_full_wiki_manifest_is_complete_and_hashed(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
-    _build(workspace)
-
-    result = build_wiki(WikiBuildConfig(workspace=workspace))
+    result = _build(workspace)
     manifest = json.loads((workspace / "wiki" / "manifest.json").read_text(encoding="utf-8"))
 
-    assert result.pages_written == len(manifest["page_hashes"])
+    assert result.wiki.pages_written == len(manifest["page_hashes"])
     assert manifest["build_id"] == "semantic-builder-test"
     assert {row["skill_id"] for row in manifest["skills"]} == {
         "skill:analyze-ci",
@@ -232,7 +289,7 @@ def test_duplicate_skill_ids_fail_before_contract_extraction(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
 
     with pytest.raises(ValueError, match="duplicate skill id"):
-        build_graph(
+        build_workspace(
             BuildConfig(skill_root=skill_root, workspace=workspace),
             dependencies=_BuildDependencies(
                 contract_extractor=extractor,

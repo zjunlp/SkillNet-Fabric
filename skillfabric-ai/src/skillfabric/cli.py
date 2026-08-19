@@ -14,7 +14,7 @@ from skillfabric.graph.builder import (
     BuildConfig,
     BuildResult,
     _BuildDependencies,
-    build_graph,
+    build_workspace,
 )
 from skillfabric.graph.models import GraphDocument
 from skillfabric.indexing.embeddings import ApiEmbeddingProvider
@@ -31,9 +31,8 @@ from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import read_env_file
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.backends.base import EXPLORER_BACKENDS
-from skillfabric.wiki.materializer import build_wiki
-from skillfabric.wiki.models import WikiBuildConfig, WikiBuildResult
-from skillfabric.wiki.query_wiki import render_query_wiki_skill_card
+from skillfabric.wiki.models import WikiBuildResult
+from skillfabric.wiki.task_wiki import render_task_wiki_skill_card
 
 PUBLIC_COMMANDS = (
     "init",
@@ -41,7 +40,7 @@ PUBLIC_COMMANDS = (
     "build",
     "route",
     "plan",
-    "query-wiki",
+    "task-wiki",
     "doctor-state",
     "run-state",
 )
@@ -103,7 +102,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.set_defaults(handler=_build)
     commands["build"] = build_parser
 
-    route_parser = subcommands.add_parser("route", help="Route a task through the query wiki")
+    route_parser = subcommands.add_parser("route", help="Route a task through the task Wiki")
     route_parser.add_argument("query")
     _add_route_options(route_parser)
     route_parser.set_defaults(handler=_route)
@@ -120,16 +119,16 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     plan_parser.set_defaults(handler=_plan)
     commands["plan"] = plan_parser
 
-    query_wiki_parser = subcommands.add_parser("query-wiki", help="Inspect a query wiki")
-    query_wiki_commands = query_wiki_parser.add_subparsers(
-        dest="query_wiki_command",
+    task_wiki_parser = subcommands.add_parser("task-wiki", help="Inspect a task Wiki")
+    task_wiki_commands = task_wiki_parser.add_subparsers(
+        dest="task_wiki_command",
         required=True,
     )
-    card_parser = query_wiki_commands.add_parser("card", help="Print one bounded skill card")
-    card_parser.add_argument("query_wiki_root")
+    card_parser = task_wiki_commands.add_parser("card", help="Print one task Wiki skill card")
+    card_parser.add_argument("task_wiki_root")
     card_parser.add_argument("skill_id")
-    card_parser.set_defaults(handler=_query_wiki_card)
-    commands["query-wiki"] = query_wiki_parser
+    card_parser.set_defaults(handler=_task_wiki_card)
+    commands["task-wiki"] = task_wiki_parser
 
     doctor_parser = subcommands.add_parser(
         "doctor-state",
@@ -280,7 +279,7 @@ def _build(args: argparse.Namespace) -> None:
     _require_api_configuration(Path(args.env_file))
     jobs = _llm_options(args)
     with command_status("Building skill graph and Full Wiki...", enabled=_show_status(args)):
-        result = build_graph(
+        result = build_workspace(
             BuildConfig(
                 skill_root=args.skill_root,
                 workspace=args.workspace,
@@ -296,8 +295,7 @@ def _build(args: argparse.Namespace) -> None:
                 )
             ),
         )
-        wiki_result = build_wiki(WikiBuildConfig(workspace=result.workspace.root))
-    print_command_result("build", _build_output(result, wiki_result), json_mode=args.json)
+    print_command_result("build", _build_output(result, result.wiki), json_mode=args.json)
 
 
 def _require_api_configuration(env_path: Path) -> None:
@@ -396,9 +394,9 @@ def _plan_route_context(args: argparse.Namespace) -> tuple[RouteResult, str, Pat
     return route, args.query, trace_dir / "execution_package"
 
 
-def _query_wiki_card(args: argparse.Namespace) -> None:
+def _task_wiki_card(args: argparse.Namespace) -> None:
     try:
-        print(render_query_wiki_skill_card(args.query_wiki_root, args.skill_id), end="")
+        print(render_task_wiki_skill_card(args.task_wiki_root, args.skill_id), end="")
     except (FileNotFoundError, KeyError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 

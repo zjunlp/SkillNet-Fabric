@@ -1,4 +1,4 @@
-"""Configuration for query-wiki routing."""
+"""Configuration for task-wiki routing."""
 
 from __future__ import annotations
 
