@@ -35,12 +35,11 @@ SkillFabric provides a Python SDK and CLI for Wiki-based Skill routing:
 
 ## Quick Start
 
-Install the package with the Claude Explorer:
+Install [`skillfabric-ai`](https://pypi.org/project/skillfabric-ai/) from PyPI with the Claude
+Explorer:
 
 ```bash
-git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
-cd SkillFabric/skillfabric-ai
-python -m pip install -e ".[claude]"
+python -m pip install "skillfabric-ai[claude]"
 ```
 
 Create a private `.env` file with your LLM and embedding settings:
@@ -61,6 +60,8 @@ skillfabric route "Analyze the dataset and prepare a presentation"
 
 ## News
 
+- **[2026-08-21] PyPI release.** `skillfabric-ai 0.1.1` is available on
+  [PyPI](https://pypi.org/project/skillfabric-ai/0.1.1/) with Claude Code and Codex Explorer extras.
 - **[2026-08-20] SkillNet paper update.** **SkillNet-Gym** brings executable benchmarks for
   skill construction, retrieval, and composition; **SkillNet-Fabric** provides task time routing
   through a task specific Wiki. [Paper](https://arxiv.org/abs/2603.04448).
@@ -228,16 +229,24 @@ The bundled Claude Code plugin exposes three commands:
 - `/skillfabric:build <skill-root>` builds or incrementally refreshes the default workspace.
 - `/skillfabric:route <task>` routes one task and reports selected Skills and evidence.
 
-Load a local checkout while developing:
+The plugin is a thin adapter over the `skillfabric` CLI and does not install the Python package.
+Install the Python package first, then clone this repository to access the plugin files:
 
 ```bash
-claude --plugin-dir /path/to/SkillFabric/plugins/claude-code/skillfabric
+python -m pip install "skillfabric-ai[claude]"
+git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
+```
+
+Load the plugin directly while developing:
+
+```bash
+claude --plugin-dir ./SkillFabric/plugins/claude-code/skillfabric
 ```
 
 Install it through the repository marketplace for a persistent setup:
 
 ```bash
-claude plugin marketplace add /path/to/SkillFabric/plugins/claude-code
+claude plugin marketplace add ./SkillFabric/plugins/claude-code
 claude plugin install skillfabric@skillfabric --scope user
 ```
 
@@ -257,8 +266,7 @@ Codex is available as the alternative Explorer backend. Build and Task Wiki arti
 across both backends; choose the Explorer that fits your environment:
 
 ```bash
-cd SkillFabric/skillfabric-ai
-python -m pip install -e ".[codex]"
+python -m pip install "skillfabric-ai[codex]"
 skillfabric route \
   "Extract KPIs from the supplied report" \
   --backend codex \

@@ -236,8 +236,10 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:doctor",
             "/skillfabric:build",
             "/skillfabric:route",
+            'python -m pip install "skillfabric-ai[claude]"',
             "embedding endpoint",
             "does not execute the task",
+            "plugin does not install or\nupdate the Python package",
             "claude plugin marketplace add",
             "Do not put API keys in Claude Code prompts",
         ):
@@ -255,11 +257,15 @@ class PublicPackageTests(unittest.TestCase):
             "/skillfabric:doctor",
             "/skillfabric:build",
             "/skillfabric:route",
+            'python -m pip install "skillfabric-ai[claude]"',
+            'python -m pip install "skillfabric-ai[codex]"',
+            "https://pypi.org/project/skillfabric-ai/0.1.1/",
             "claude plugin marketplace add",
             "claude plugin install skillfabric@skillfabric",
             "task specific Wiki",
         ):
             self.assertIn(snippet, readme)
+        self.assertNotIn("pip install -e", readme)
         self.assertNotIn("/skillfabric:prepare", readme)
         self.assertNotIn("/skillfabric:run", readme)
         self.assertNotIn("## Development", readme)

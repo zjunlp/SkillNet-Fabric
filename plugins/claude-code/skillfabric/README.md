@@ -17,23 +17,35 @@ or generate a plan. Claude Code remains responsible for using the selected skill
 
 ## Requirements
 
-Install the `skillfabric` CLI from the `skillfabric-ai` package and configure an LLM
-endpoint plus an OpenAI-compatible embedding endpoint. The first build uses both APIs;
-subsequent routes still use the embedding endpoint for the task query and the Claude
-Agent SDK for Task Wiki exploration.
+Install the published Python package with the Claude Explorer:
+
+```bash
+python -m pip install "skillfabric-ai[claude]"
+```
+
+This provides the `skillfabric` CLI and Claude Agent SDK. The plugin does not install or
+update the Python package. Configure an LLM endpoint plus an OpenAI-compatible embedding
+endpoint before the first build. Subsequent routes still use the embedding endpoint for
+the task query and the Claude Agent SDK for Task Wiki exploration.
 
 ## Install
 
-For local development, load this directory with:
+Clone this repository to obtain the plugin files:
 
 ```bash
-claude --plugin-dir /path/to/SkillFabric/plugins/claude-code/skillfabric
+git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
+```
+
+For local development, load the plugin directory directly:
+
+```bash
+claude --plugin-dir ./SkillFabric/plugins/claude-code/skillfabric
 ```
 
 For a persistent installation, add the repository marketplace and install the plugin:
 
 ```bash
-claude plugin marketplace add /path/to/SkillFabric/plugins/claude-code
+claude plugin marketplace add ./SkillFabric/plugins/claude-code
 claude plugin install skillfabric@skillfabric --scope user
 ```
 
