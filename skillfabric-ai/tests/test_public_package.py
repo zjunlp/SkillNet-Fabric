@@ -58,7 +58,7 @@ class PublicPackageTests(unittest.TestCase):
 
         self.assertEqual(
             dependencies,
-            {"httpx", "litellm", "numpy", "pyyaml", "rich"},
+            {"httpx", "litellm", "numpy", "pydantic", "pyyaml", "rich"},
         )
 
     def test_public_package_metadata_is_ready_for_distribution(self) -> None:
@@ -126,7 +126,7 @@ class PublicPackageTests(unittest.TestCase):
         manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "skillfabric")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.1.1")
         self.assertEqual(manifest["license"], "MIT")
         self.assertNotIn("skills", manifest)
 

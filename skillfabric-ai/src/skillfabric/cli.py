@@ -46,6 +46,7 @@ PUBLIC_COMMANDS = (
 _CONFIG_ALIASES = {
     "LLM_API_KEY": (
         "SKILLFABRIC_LLM_API_KEY",
+        "LLM_API_KEY",
         "API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",

@@ -61,10 +61,9 @@ skillfabric route "Analyze the dataset and prepare a presentation"
 
 ## News
 
-- **[2026-08-20] SkillNet update.** The updated technical report introduces
-  **SkillNet-Gym** for evaluating skill construction, retrieval, and composition, and
-  **SkillNet-Fabric** for task time routing through a task specific Wiki.
-  [Read the report](https://arxiv.org/abs/2603.04448).
+- **[2026-08-20] SkillNet paper update.** **SkillNet-Gym** brings executable benchmarks for
+  skill construction, retrieval, and composition; **SkillNet-Fabric** provides task time routing
+  through a task specific Wiki. [Paper](https://arxiv.org/abs/2603.04448).
 
 ## Architecture
 

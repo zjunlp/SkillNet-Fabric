@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("skillfabric-ai")
 except PackageNotFoundError:  # pragma: no cover - source tree without installation metadata.
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
 __all__ = ["SkillFabric", "__version__"]
 

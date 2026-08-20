@@ -16,7 +16,9 @@ from skillfabric.runtime.llm import (
 
 LLM_ENV_KEYS = (
     "API_KEY",
+    "LLM_API_KEY",
     "BASE_URL",
+    "LLM_BASE_URL",
     "MODEL",
     "MAX_TOKENS",
     "TIMEOUT",
@@ -116,6 +118,23 @@ class LLMConfigTests(unittest.TestCase):
             self.assertEqual(config.model, "openai/test-model")
             self.assertEqual(config.max_tokens, 123)
             self.assertEqual(config.reasoning_effort, "medium")
+
+    def test_loads_llm_named_aliases_from_env_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "LLM_API_KEY=sk-llm-file\n"
+                "LLM_BASE_URL=https://llm.example/v1\n"
+                "MODEL=openai/llm-model\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, _cleared_llm_env(), clear=False):
+                config = LLMConfig.from_env(env_path=env_path)
+
+        self.assertEqual(config.api_key, "sk-llm-file")
+        self.assertEqual(config.api_base, "https://llm.example/v1")
+        self.assertEqual(config.model, "openai/llm-model")
 
     def test_explicit_build_llm_options_override_env_without_mutation(self) -> None:
         with TemporaryDirectory() as tmp:

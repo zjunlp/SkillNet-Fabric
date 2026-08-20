@@ -1,6 +1,6 @@
 {
   "name": "skillfabric",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build a SkillFabric workspace and route tasks to relevant native skills.",
   "author": {
     "name": "SkillFabric Contributors"

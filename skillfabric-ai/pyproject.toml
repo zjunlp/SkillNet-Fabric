@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skillfabric-ai"
-version = "0.1.0"
+version = "0.1.1"
 description = "Skill graph, task specific Wiki routing, and execution prompt orchestration for agent skills."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,8 +24,9 @@ classifiers = [
 ]
 dependencies = [
   "httpx>=0.28,<1.0",
-  "litellm>=1.63.8,<2",
+  "litellm>=1.63.8,<1.90",
   "numpy>=1.26,<3",
+  "pydantic>=2.10,<2.13",
   "pyyaml>=6.0,<7",
   "rich>=13.9,<15",
 ]

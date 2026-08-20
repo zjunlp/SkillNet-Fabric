@@ -35,18 +35,20 @@ def build_codex_sdk_env(
         shell_env,
         env_file_values,
         "SKILLFABRIC_LLM_API_KEY",
+        "LLM_API_KEY",
         "API_KEY",
         "OPENAI_API_KEY",
     )
     if not api_key:
         raise ValueError(
-            "missing API key. Set SKILLFABRIC_LLM_API_KEY, API_KEY, or OPENAI_API_KEY."
+            "missing API key. Set SKILLFABRIC_LLM_API_KEY, LLM_API_KEY, API_KEY, or OPENAI_API_KEY."
         )
     api_base = (
         _first_env_value(
             shell_env,
             env_file_values,
             "SKILLFABRIC_LLM_API_BASE",
+            "LLM_BASE_URL",
             "BASE_URL",
             "OPENAI_BASE_URL",
             "OPENAI_API_BASE",
@@ -82,6 +84,7 @@ def build_claude_code_sdk_env(
         shell_env,
         env_file_values,
         "SKILLFABRIC_LLM_API_KEY",
+        "LLM_API_KEY",
         "API_KEY",
         "OPENAI_API_KEY",
     )
@@ -89,6 +92,7 @@ def build_claude_code_sdk_env(
         shell_env,
         env_file_values,
         "SKILLFABRIC_LLM_API_BASE",
+        "LLM_BASE_URL",
         "BASE_URL",
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
@@ -102,7 +106,7 @@ def build_claude_code_sdk_env(
     if llm_api_key:
         env["OPENAI_API_KEY"] = llm_api_key
         if _env_file_has_any(
-            env_file_values, "SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"
+            env_file_values, "SKILLFABRIC_LLM_API_KEY", "LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"
         ):
             env["ANTHROPIC_AUTH_TOKEN"] = llm_api_key
             env["ANTHROPIC_API_KEY"] = llm_api_key
@@ -116,6 +120,7 @@ def build_claude_code_sdk_env(
         if _env_file_has_any(
             env_file_values,
             "SKILLFABRIC_LLM_API_BASE",
+            "LLM_BASE_URL",
             "BASE_URL",
             "OPENAI_BASE_URL",
             "OPENAI_API_BASE",

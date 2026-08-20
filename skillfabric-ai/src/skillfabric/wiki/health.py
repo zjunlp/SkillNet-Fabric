@@ -11,6 +11,7 @@ from skillfabric.wiki.models import WikiHealthReport
 from skillfabric.wiki.pages import slug
 
 WIKILINK_RE = re.compile(r"\[\[([^]|]+)(?:\|[^]]+)?]]")
+INDEX_LINK_RE = re.compile(r"\[[^]]+\]\(([^)#\s]+)\)")
 
 
 def analyze_wiki_health(
@@ -43,7 +44,15 @@ def analyze_wiki_health(
             report.skills_without_contract_sections.append(page.stem)
         if page.parent == workspace.wiki_skill_cards_dir and "## Related Skills" not in text:
             report.skills_without_related_links.append(page.stem)
-        for target in WIKILINK_RE.findall(_strip_fenced_code_blocks(generated_text)):
+        link_text = _strip_fenced_code_blocks(generated_text)
+        targets = WIKILINK_RE.findall(link_text)
+        if page == wiki_dir / "index.md":
+            targets.extend(
+                target
+                for target in INDEX_LINK_RE.findall(link_text)
+                if target.startswith("skills/")
+            )
+        for target in targets:
             target_path = _wikilink_target_path(wiki_dir, target)
             if not target_path.exists():
                 report.broken_links.append(f"{page}: {target}")
@@ -88,17 +97,22 @@ def _strip_fenced_code_blocks(text: str) -> str:
 
 def _wikilink_target_path(wiki_dir: Path, target: str) -> Path:
     if target.startswith("skills/cards/"):
-        return wiki_dir / f"{target}.md"
+        return wiki_dir / target if target.endswith(".md") else wiki_dir / f"{target}.md"
     if target.startswith("skills/"):
-        return wiki_dir / "skills" / "cards" / f"{target.removeprefix('skills/')}.md"
-    return wiki_dir / f"{target}.md"
+        relative = target.removeprefix("skills/")
+        return (
+            wiki_dir / "skills" / relative
+            if relative.startswith(("sources/", "source/"))
+            else wiki_dir / "skills" / "cards" / relative
+        )
+    return wiki_dir / target if target.endswith(".md") else wiki_dir / f"{target}.md"
 
 
 def _wikilink_skill_slug(target: str) -> str:
     if target.startswith("skills/cards/"):
-        return target.removeprefix("skills/cards/")
+        return target.removeprefix("skills/cards/").removesuffix(".md")
     if target.startswith("skills/"):
-        return target.removeprefix("skills/")
+        return target.removeprefix("skills/").removesuffix(".md")
     return ""
 
 

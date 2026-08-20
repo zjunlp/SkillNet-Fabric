@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ from skillfabric.graph.builder import (
 from skillfabric.graph.semantic.candidates import CandidateRetrievalError
 from skillfabric.indexing.embeddings import DEFAULT_EMBEDDING_MODEL_ID, ApiEmbeddingProvider
 from skillfabric.storage import Workspace
+from skillfabric.wiki.health import analyze_wiki_health
 from skillfabric.wiki.loader import clear_wiki_source_cache, load_wiki_source
 from skillfabric.wiki.pages import frontmatter
 from tests.support import (
@@ -61,6 +63,53 @@ def test_builder_writes_current_semantic_artifacts(tmp_path) -> None:
         "embeddings.json",
     }
     assert not (workspace / "reports").exists()
+
+
+def test_builder_accepts_a_single_skill_library(tmp_path) -> None:
+    skill_root = tmp_path / "skills"
+    shutil.copytree(FIXTURE_SKILLS / "pdf-table-parser", skill_root / "pdf-table-parser")
+    workspace = tmp_path / ".skillfabric"
+
+    result = build_workspace(
+        BuildConfig(skill_root=skill_root, workspace=workspace),
+        dependencies=_BuildDependencies(
+            contract_extractor=FixtureContractExtractor(),
+            relation_judge=FixtureRelationJudge(),
+            embedding_provider=FakeEmbeddingProvider(),
+            build_id="single-skill-test",
+        ),
+    )
+
+    assert result.wiki.health.summary == {
+        "missing_skill_page_count": 0,
+        "broken_link_count": 0,
+        "orphan_skill_page_count": 0,
+        "skill_without_contract_sections_count": 0,
+        "skill_without_related_links_count": 0,
+        "raw_llm_output_leak_count": 0,
+    }
+
+
+def test_wiki_health_ignores_external_markdown_links_in_index(tmp_path) -> None:
+    workspace = tmp_path / ".skillfabric"
+    _build(workspace)
+    index = workspace / "wiki" / "index.md"
+    index.write_text(
+        index.read_text(encoding="utf-8") + "\n- [External docs](https://example.com/docs)\n",
+        encoding="utf-8",
+    )
+    workspace_obj = Workspace(workspace)
+
+    report = analyze_wiki_health(workspace_obj, source=load_wiki_source(workspace_obj))
+
+    assert report.summary == {
+        "missing_skill_page_count": 0,
+        "broken_link_count": 0,
+        "orphan_skill_page_count": 0,
+        "skill_without_contract_sections_count": 0,
+        "skill_without_related_links_count": 0,
+        "raw_llm_output_leak_count": 0,
+    }
 
 
 def test_build_publishes_full_wiki_before_ready_status(tmp_path) -> None:

@@ -88,12 +88,18 @@ class LLMConfig:
         values = read_env_file(env_path)
         configured_api_base, api_base_key = _first_config_entry(
             values,
-            ("SKILLFABRIC_LLM_API_BASE", "BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"),
+            (
+                "SKILLFABRIC_LLM_API_BASE",
+                "LLM_BASE_URL",
+                "BASE_URL",
+                "OPENAI_BASE_URL",
+                "OPENAI_API_BASE",
+            ),
             ("ANTHROPIC_BASE_URL",),
         )
         configured_api_key, credential_key = _first_config_entry(
             values,
-            ("SKILLFABRIC_LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"),
+            ("SKILLFABRIC_LLM_API_KEY", "LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"),
             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         )
         resolved_api_key = configured_api_key if api_key is None else api_key
@@ -140,7 +146,7 @@ class LLMConfig:
         )
         if not resolved_api_key:
             raise ValueError(
-                "missing API key. Set API_KEY, OPENAI_API_KEY, or ANTHROPIC_AUTH_TOKEN. "
+                "missing API key. Set LLM_API_KEY, API_KEY, OPENAI_API_KEY, or ANTHROPIC_AUTH_TOKEN. "
                 "Run `skillfabric help config` for details."
             )
         return cls(
@@ -446,10 +452,12 @@ def _normalize_litellm_model(
     anthropic_base = _first_value(values, "ANTHROPIC_BASE_URL")
     primary_config = credential_key in {
         "SKILLFABRIC_LLM_API_KEY",
+        "LLM_API_KEY",
         "API_KEY",
         "OPENAI_API_KEY",
     } or api_base_key in {
         "SKILLFABRIC_LLM_API_BASE",
+        "LLM_BASE_URL",
         "BASE_URL",
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
