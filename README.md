@@ -10,7 +10,7 @@
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-FFD21E)](https://huggingface.co/blog/xzwnlp/skillnet)
 [![Website](https://img.shields.io/badge/Website-skillnet.openkg.cn-0078D4.svg)](http://skillnet.openkg.cn/)
 
-[Website](http://skillnet.openkg.cn/) · [Quick Start](#quick-start) · [Architecture](#architecture) · [CLI](#cli) · [Agent Integrations](#agent-integrations) · [Paper](https://arxiv.org/abs/2603.04448)
+[Website](http://skillnet.openkg.cn/) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Python SDK](#python-sdk) · [CLI](#cli) · [Agent Integrations](#agent-integrations) · [Paper](https://arxiv.org/abs/2603.04448)
 
 </div>
 
@@ -31,24 +31,11 @@ SkillFabric provides a Python SDK and CLI for Wiki-based Skill routing:
   with reasons and evidence.
 - **Plan:** optionally turn a validated route into an execution prompt for a downstream agent.
 
-The package is `skillfabric-ai`; the command-line entry point is `skillfabric`. Agent integrations
-use the same build and routing pipeline described below.
-
 ---
 
 ## Quick Start
 
-### Requirements
-
-- Python 3.11 or newer.
-- An LLM endpoint supported by [LiteLLM](https://docs.litellm.ai/) for `build` and `plan`.
-- An OpenAI-compatible embedding endpoint for `build` and `route`.
-- The [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) for Claude
-  exploration, or the official Codex SDK for Codex exploration.
-
-### Install From Source
-
-Install the current checkout:
+Install the package with the Claude Explorer:
 
 ```bash
 git clone https://github.com/zjunlp/SkillNet-Fabric.git SkillFabric
@@ -56,41 +43,7 @@ cd SkillFabric/skillfabric-ai
 python -m pip install -e ".[claude]"
 ```
 
-Add the Codex Explorer from the same checkout when needed:
-
-```bash
-python -m pip install -e ".[codex]"
-```
-
-### Prepare a Skill Library
-
-SkillFabric reads one native `SKILL.md` from each immediate child directory of the skill root. A
-single `SKILL.md` file can also be passed directly as `--skill-root`.
-
-```text
-skills/
-|-- data-inspection/
-|   `-- SKILL.md
-|-- visualization/
-|   `-- SKILL.md
-`-- slide-creation/
-    `-- SKILL.md
-```
-
-Each file contains YAML frontmatter with a non-empty `name` and `description`, followed by the
-Skill instructions. Source text remains available for evidence checks throughout routing.
-
-### Configure Providers
-
-Keep credentials in a private `.env` file. CLI summaries contain provider status and artifact paths;
-secret values stay in the environment file.
-
-```bash
-skillfabric init --env-file .env
-skillfabric init --check --json --env-file .env
-```
-
-The smallest common configuration is:
+Create a private `.env` file with your LLM and embedding settings:
 
 ```text
 API_KEY=...
@@ -99,33 +52,11 @@ MODEL=openai/responses/gpt-5.4-mini
 EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
-Use `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` for a separate embedding service. Provider
-specific gateways can use the environment variables supported by LiteLLM and the selected agent
-SDK.
-
-### Build and Route
+Build a local Skill library, then route a task:
 
 ```bash
-skillfabric build \
-  --skill-root ./skills \
-  --workspace .skillfabric \
-  --env-file .env
-
-skillfabric route \
-  "Analyze the dataset and prepare a presentation" \
-  --workspace .skillfabric \
-  --env-file .env
-```
-
-Builds are incremental. After adding, editing, or removing `SKILL.md` files, run the same `build`
-command again. Unchanged contracts, embeddings, and relation judgments are reused; affected
-Skills and relationships are refreshed, followed by a consistent Full Wiki publication.
-
-Human-readable summaries are printed by default. Add `--json` for a stable result that can be
-consumed by scripts and plugins:
-
-```bash
-skillfabric route --json "Analyze the dataset and prepare a presentation"
+skillfabric build --skill-root ./skills
+skillfabric route "Analyze the dataset and prepare a presentation"
 ```
 
 ## News
@@ -158,25 +89,6 @@ The build stage converts the local Skill library into four reusable layers:
 For a task query, hybrid retrieval combines lexical BM25 matches with dense embedding matches using
 reciprocal rank fusion. The highest-ranked seeds are expanded through typed graph relations. The
 retained candidates and the evidence that admitted them are projected into a task specific Wiki.
-
-This projection keeps the routing space focused while preserving the complete sources needed for
-final comparison:
-
-```text
-Full Wiki + graph/indexes
-          |
-          v
-   retrieval + relation expansion
-          |
-          v
-      Task Wiki
-          |
-          v
-   Claude or Codex Explorer
-          |
-          v
-      RouteResult
-```
 
 ### Wiki Exploration
 
@@ -216,6 +128,46 @@ Generated state lives in the workspace passed to the CLI or Python API:
 
 The CLI owns generated artifacts. Rebuild the workspace after changing the source library so the
 graph, indexes, Full Wiki, and status remain aligned.
+
+## Skill Libraries
+
+SkillFabric reads one native `SKILL.md` from each immediate child directory of the skill root. A
+single `SKILL.md` file can also be passed directly as `--skill-root`:
+
+```text
+skills/
+|-- data-inspection/
+|   `-- SKILL.md
+|-- visualization/
+|   `-- SKILL.md
+`-- slide-creation/
+    `-- SKILL.md
+```
+
+Each file uses YAML frontmatter with a non-empty `name` and `description`, followed by the Skill
+instructions. Re-run `build` after adding, editing, or removing Skills. Unchanged contracts,
+embeddings, and relation judgments are reused, while affected Skills and relationships are
+refreshed.
+
+## Configuration
+
+Keep credentials in a private `.env` file. The CLI reads provider settings and keeps secret values
+in that file.
+
+```bash
+skillfabric init --env-file .env
+skillfabric init --check --json --env-file .env
+```
+
+Use `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` for a separate embedding service. Provider-specific
+gateways can use the environment variables supported by LiteLLM and the selected agent SDK.
+
+Human-readable summaries are printed by default. Add `--json` for stable output from scripts and
+plugins:
+
+```bash
+skillfabric route --json "Analyze the dataset and prepare a presentation"
+```
 
 ## Python SDK
 
@@ -315,27 +267,16 @@ skillfabric route \
   --env-file .env
 ```
 
-## Development
+## Citation
 
-Run the deterministic test and lint suite from `skillfabric-ai`:
-
-```bash
-cd skillfabric-ai
-python -m pip install -e ".[dev]"
-python -m pytest
-python -m ruff check src tests
-python -m ruff format --check src tests
-python -m compileall -q src
+```bibtex
+@article{liang2026skillnet,
+  title={Skillnet: Create, evaluate, and connect ai skills},
+  author={Liang, Yuan and Zhong, Ruobin and Xu, Haoming and Jiang, Chen and Zhong, Yi and Fang, Runnan and Gu, Jia-Chen and Deng, Shumin and Yao, Yunzhi and Wang, Mengru and others},
+  journal={arXiv preprint arXiv:2603.04448},
+  year={2026}
+}
 ```
-
-Provider integrations can be checked separately with a disposable Skill library and private
-credentials. Keep credentials, generated workspaces, raw provider logs, and experiment outputs
-outside commits.
-
-## Contributing
-
-Keep pull requests focused and include tests for behavior changes. Documentation should describe
-the public workflow and keep implementation details in the architecture section.
 
 ## License
 

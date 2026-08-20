@@ -61,6 +61,18 @@ class PublicPackageTests(unittest.TestCase):
             {"httpx", "litellm", "numpy", "pyyaml", "rich"},
         )
 
+    def test_public_package_metadata_is_ready_for_distribution(self) -> None:
+        pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        project = pyproject["project"]
+        targets = pyproject["tool"]["hatch"]["build"]["targets"]
+
+        self.assertEqual(project["readme"], "README.md")
+        self.assertEqual(project["license"], {"file": "LICENSE"})
+        self.assertEqual(project["requires-python"], ">=3.10")
+        self.assertIn("Development Status :: 5 - Production/Stable", project["classifiers"])
+        self.assertIn("/README.md", targets["sdist"]["include"])
+        self.assertIn("/LICENSE", targets["sdist"]["include"])
+
     def test_all_extra_contains_only_optional_runtime_backends(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         extras = pyproject["project"]["optional-dependencies"]
@@ -114,7 +126,7 @@ class PublicPackageTests(unittest.TestCase):
         manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "skillfabric")
-        self.assertEqual(manifest["version"], "0.2.0")
+        self.assertEqual(manifest["version"], "0.1.0")
         self.assertEqual(manifest["license"], "MIT")
         self.assertNotIn("skills", manifest)
 
@@ -236,7 +248,7 @@ class PublicPackageTests(unittest.TestCase):
         for section in (
             "## Quick Start",
             "## Agent Integrations",
-            "## Development",
+            "## Citation",
         ):
             self.assertIn(section, readme)
         for snippet in (
@@ -250,6 +262,10 @@ class PublicPackageTests(unittest.TestCase):
             self.assertIn(snippet, readme)
         self.assertNotIn("/skillfabric:prepare", readme)
         self.assertNotIn("/skillfabric:run", readme)
+        self.assertNotIn("## Development", readme)
+        self.assertNotIn("## Contributing", readme)
+        self.assertIn("## Citation", readme)
+        self.assertIn("@article{liang2026skillnet", readme)
 
     def test_public_docs_do_not_leak_local_paths(self) -> None:
         readme = PUBLIC_ROOT / "README.md"
@@ -400,7 +416,10 @@ class PublicPackageTests(unittest.TestCase):
         targets = pyproject["tool"]["hatch"]["build"]["targets"]
 
         self.assertEqual(targets["wheel"]["packages"], ["src/skillfabric"])
-        self.assertEqual(targets["sdist"]["include"], ["/pyproject.toml", "/src", "/tests"])
+        self.assertEqual(
+            targets["sdist"]["include"],
+            ["/README.md", "/LICENSE", "/pyproject.toml", "/src", "/tests"],
+        )
         self.assertEqual(
             set(targets["sdist"]["exclude"]),
             {
