@@ -7,7 +7,7 @@ name = "skillfabric-ai"
 version = "0.1.0"
 description = "Skill graph, task specific Wiki routing, and execution prompt orchestration for agent skills."
 readme = { text = "SkillFabric compiles native agent skills into an evidence-grounded graph, routes each task through a task specific Wiki, and produces a validated execution prompt. See the project homepage for complete documentation.", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
   { name = "SkillFabric Contributors" }
@@ -18,32 +18,34 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
   "httpx>=0.28,<1.0",
-  "litellm>=1.63.8",
-  "numpy>=1.26",
-  "pyyaml>=6.0",
+  "litellm>=1.63.8,<2",
+  "numpy>=1.26,<3",
+  "pyyaml>=6.0,<7",
   "rich>=13.9,<15",
 ]
 
 [project.optional-dependencies]
 claude = [
-  "claude-agent-sdk>=0.2.110",
+  "claude-agent-sdk>=0.2.110,<0.3",
 ]
 codex = [
-  "openai-codex>=0.144.4",
+  "openai-codex>=0.144.4,<0.2",
 ]
 dev = [
-  "build>=1.2",
-  "pytest>=8.0",
-  "ruff>=0.8",
+  "build>=1.2,<2",
+  "pytest>=8.0,<10",
+  "ruff>=0.8,<1",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 all = [
-  "claude-agent-sdk>=0.2.110",
-  "openai-codex>=0.144.4",
+  "claude-agent-sdk>=0.2.110,<0.3",
+  "openai-codex>=0.144.4,<0.2",
 ]
 
 [project.scripts]
@@ -77,7 +79,7 @@ exclude = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["ARG", "B", "BLE", "C4", "E", "F", "I", "PERF", "PIE", "RET", "RUF", "SIM", "UP"]

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
-import tomllib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
 
 from tests.support import build_fixture_workspace
 
@@ -62,7 +66,14 @@ class PublicPackageTests(unittest.TestCase):
         extras = pyproject["project"]["optional-dependencies"]
 
         self.assertEqual(extras["all"], [*extras["claude"], *extras["codex"]])
-        self.assertTrue({"build>=1.2", "pytest>=8.0", "ruff>=0.8"}.issubset(extras["dev"]))
+        self.assertTrue(
+            {
+                "build>=1.2,<2",
+                "pytest>=8.0,<10",
+                "ruff>=0.8,<1",
+                "tomli>=2.0; python_version < '3.11'",
+            }.issubset(extras["dev"])
+        )
 
     def test_public_brand_and_package_identifiers_are_consistent(self) -> None:
         readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -80,14 +91,23 @@ class PublicPackageTests(unittest.TestCase):
             },
         )
 
-        public_brand_text = readme
-        for transitional_url in (
-            "https://github.com/zjunlp/SkillNet-Fabric",
-            "https://img.shields.io/github/stars/zjunlp/SkillNet-Fabric?style=social",
+        self.assertNotIn("# SkillNet-Fabric", readme)
+        self.assertNotIn("# SkillNet Fabric", readme)
+        self.assertNotIn("SkillNet Fabric", readme)
+
+    def test_root_readme_uses_skillnet_public_research_links(self) -> None:
+        readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+
+        for link in (
+            "https://arxiv.org/abs/2603.04448",
+            "https://huggingface.co/blog/xzwnlp/skillnet",
+            "http://skillnet.openkg.cn/",
         ):
-            public_brand_text = public_brand_text.replace(transitional_url, "")
-        self.assertNotIn("SkillNet-Fabric", public_brand_text)
-        self.assertNotIn("SkillNet Fabric", public_brand_text)
+            self.assertIn(link, readme)
+        self.assertNotIn("badge.fury.io/py", readme)
+        self.assertNotIn("img.shields.io/badge/Python", readme)
+        self.assertNotIn("SkillNet and SkillFabric", readme)
+        self.assertNotIn("## Research", readme)
 
     def test_claude_code_plugin_manifest_and_commands_exist(self) -> None:
         plugin_root = PUBLIC_ROOT / "plugins" / "claude-code" / "skillfabric"
