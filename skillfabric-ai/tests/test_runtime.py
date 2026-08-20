@@ -8,7 +8,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import (
     LLMConfig,
     LLMRequestError,
@@ -44,9 +43,6 @@ def _cleared_llm_env(**overrides: str) -> dict[str, str]:
 
 
 class LLMConfigTests(unittest.TestCase):
-    def test_llm_jobs_are_quiet_by_default(self) -> None:
-        self.assertEqual(LLMJobOptions().progress_every, 0)
-
     def test_llm_config_rejects_invalid_runtime_values(self) -> None:
         invalid_overrides = [
             {"api_base": ""},

@@ -55,7 +55,6 @@ def route_task(
         WikiExplorerConfig(
             env_file=config.env_file,
             max_selected_skills=config.max_selected_skills,
-            required_selected_skills=config.required_selected_skills,
             model=config.explorer_model,
             reasoning_effort=config.explorer_reasoning_effort,
             backend=config.explorer_backend,

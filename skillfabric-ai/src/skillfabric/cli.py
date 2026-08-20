@@ -27,7 +27,6 @@ from skillfabric.router.routing import route_task
 from skillfabric.router.traces import _new_trace_id, validate_trace_id
 from skillfabric.runtime.console import command_status, print_command_result
 from skillfabric.runtime.defaults import default_router_options
-from skillfabric.runtime.jobs import LLMJobOptions
 from skillfabric.runtime.llm import read_env_file
 from skillfabric.storage import Workspace, atomic_write_text
 from skillfabric.wiki.explorer.backends.base import EXPLORER_BACKENDS
@@ -96,8 +95,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     build_parser.add_argument("--skill-root", required=True)
     build_parser.add_argument("--workspace", default=".skillfabric")
     build_parser.add_argument("--env-file", default=".env")
-    build_parser.add_argument("--embedding-model")
-    _add_llm_options(build_parser)
     _add_output_options(build_parser)
     build_parser.set_defaults(handler=_build)
     commands["build"] = build_parser
@@ -113,7 +110,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     plan_parser.add_argument("--route-file")
     plan_parser.add_argument("--workspace", default=".skillfabric")
     plan_parser.add_argument("--env-file", default=".env")
-    plan_parser.add_argument("--package-root")
     _add_route_tuning(plan_parser)
     _add_output_options(plan_parser)
     plan_parser.set_defaults(handler=_plan)
@@ -148,18 +144,6 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     return parser, commands
 
 
-def _add_llm_options(parser: argparse.ArgumentParser) -> None:
-    """Add the small set of build options users may need to change."""
-
-    parser.add_argument("--llm-model")
-    parser.add_argument("--llm-reasoning-effort")
-    parser.add_argument(
-        "--llm-progress-every",
-        type=int,
-        help="Print batch progress to stderr every N completed jobs (default: disabled)",
-    )
-
-
 def _add_output_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -167,7 +151,6 @@ def _add_output_options(parser: argparse.ArgumentParser) -> None:
 def _add_route_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", default=".skillfabric")
     parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--trace-id")
     _add_route_tuning(parser)
     _add_output_options(parser)
 
@@ -176,7 +159,6 @@ def _add_route_tuning(parser: argparse.ArgumentParser) -> None:
     """Add route controls that describe the requested result, not internals."""
 
     parser.add_argument("--max-selected-skills", type=int)
-    parser.add_argument("--explorer-model")
     parser.add_argument("--backend", choices=EXPLORER_BACKENDS, default="claude")
 
 
@@ -277,21 +259,16 @@ def _write_env_values(path: Path, updates: dict[str, str]) -> None:
 
 def _build(args: argparse.Namespace) -> None:
     _require_api_configuration(Path(args.env_file))
-    jobs = _llm_options(args)
     with command_status("Building skill graph and Full Wiki...", enabled=_show_status(args)):
         result = build_workspace(
             BuildConfig(
                 skill_root=args.skill_root,
                 workspace=args.workspace,
                 llm_env_path=args.env_file,
-                llm_options=jobs,
-                llm_model=args.llm_model,
-                llm_reasoning_effort=args.llm_reasoning_effort,
             ),
             dependencies=_BuildDependencies(
                 embedding_provider=ApiEmbeddingProvider.from_env(
                     env_path=args.env_file,
-                    model_id=args.embedding_model,
                 )
             ),
         )
@@ -357,15 +334,12 @@ def _plan(args: argparse.Namespace) -> None:
     with command_status("Routing and preparing the execution plan...", enabled=_show_status(args)):
         route, query, default_root = _plan_route_context(args)
         workspace = Workspace(args.workspace)
-        package_root = (
-            _inside(workspace.runs_dir, args.package_root) if args.package_root else default_root
-        )
         result = plan_execution_package(
             workspace,
             route,
             query=query,
             env_file=args.env_file,
-            package_root=package_root,
+            package_root=default_root,
         )
     print_command_result("plan", result.to_dict(), json_mode=args.json)
 
@@ -571,20 +545,12 @@ def _router_config(
         seed_limit=defaults.seed_limit,
         expanded_limit=defaults.expanded_limit,
         max_depth=defaults.max_depth,
-        explorer_model=args.explorer_model,
         explorer_backend=args.backend,
         explorer_max_turns=defaults.explorer_max_turns,
         explorer_load_timeout_ms=defaults.explorer_load_timeout_ms,
         explorer_timeout_seconds=defaults.explorer_timeout_seconds,
         explorer_max_attempts=defaults.explorer_max_attempts,
         explorer_retry_delay_seconds=defaults.explorer_retry_delay_seconds,
-    )
-
-
-def _llm_options(args: argparse.Namespace) -> LLMJobOptions:
-    return LLMJobOptions.from_env(
-        env_path=args.env_file,
-        progress_every=args.llm_progress_every,
     )
 
 

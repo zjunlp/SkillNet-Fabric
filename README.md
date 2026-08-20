@@ -169,7 +169,7 @@ SkillFabric separates stable library preparation from task time selection:
 1. **Full Wiki:** a reusable, complete view of the local Skill library with deterministic Skill
    cards, complete sources, and rendered relation context.
 2. **Canonical graph and indexes:** machine-facing artifacts used for hybrid retrieval and relation
-   expansion. They organize the global Skill ecosystem for localization at task time.
+   expansion. They organize the local Skill library for task time routing.
 3. **Task Wiki:** a view for each task containing retained candidates, cards, complete sources,
    local relations, and the evidence used to admit them.
 4. **Explorer:** Claude Code or Codex reads the Task Wiki and forms the final Skill set.
@@ -227,14 +227,14 @@ package = fabric.plan("Analyze the dataset and prepare a presentation", route=ro
 print(package.prompt_path)
 ```
 
-Advanced integrations can pass a custom `WikiExplorerBackend` through `explorer_backend=`. The
-public facade otherwise keeps provider and routing defaults stable.
+The public facade reads provider settings from the configured environment file and keeps routing
+defaults stable.
 
 ---
 
 ## CLI
 
-The CLI ships with `skillfabric-ai`:
+The CLI ships with `skillfabric-ai`. These are the commands most users need:
 
 | Command | What it does | Example |
 | :-- | :-- | :-- |
@@ -242,12 +242,10 @@ The CLI ships with `skillfabric-ai`:
 | `build` | Compile graph, indexes, and Full Wiki | `skillfabric build --skill-root ./skills` |
 | `route` | Select Skills through a Task Wiki | `skillfabric route "your task"` |
 | `plan` | Generate one validated execution prompt | `skillfabric plan "your task"` |
-| `task-wiki card` | Inspect one Task Wiki card | `skillfabric task-wiki card <wiki> <skill-id>` |
-| `doctor-state` | Report configuration and workspace readiness | `skillfabric doctor-state --json` |
-| `run-state` | Find the latest finalized plan artifact | `skillfabric run-state --json` |
 
-Normal commands print concise Rich summaries. Use `--json` for stable machine-readable output. Run
-`skillfabric <command> --help` for command-specific options.
+Normal commands print concise Rich summaries. Use `--json` for stable machine-readable output. The
+plugin uses `doctor-state` internally; it is not needed for a normal build or route workflow. Run
+`skillfabric <command> --help` for the small set of available options.
 
 ---
 
@@ -317,9 +315,9 @@ selected Skills for either backend.
 
 | Variable | Used by | Purpose |
 | :-- | :-- | :-- |
-| `API_KEY` | Build, Planner, embeddings by fallback | LLM authentication |
-| `BASE_URL` | Build, Planner, embeddings by fallback | OpenAI-compatible endpoint |
-| `MODEL` | Build and Planner | LLM model identifier |
+| `API_KEY` | Build, plan, embeddings by fallback | LLM authentication |
+| `BASE_URL` | Build, plan, embeddings by fallback | OpenAI-compatible endpoint |
+| `MODEL` | Build and plan | LLM model identifier |
 | `EMBEDDING_API_KEY` | Build and Route | Optional separate embedding credential |
 | `EMBEDDING_BASE_URL` | Build and Route | Optional separate embedding endpoint |
 | `EMBEDDING_MODEL` | Build and Route | Embedding model identifier |

@@ -118,31 +118,6 @@ def _counted_package(rows: list[dict[str, Any]], count: int) -> SkillPackage:
     )
 
 
-@pytest.mark.parametrize(
-    ("selected_count", "expected_valid"),
-    [(1, False), (2, True), (3, False)],
-)
-def test_exact_selected_skill_count_is_enforced(
-    tmp_path,
-    selected_count: int,
-    expected_valid: bool,
-) -> None:
-    root, rows = _minimal_task_wiki(tmp_path)
-
-    validation = validate_skill_package(
-        _counted_package(rows, selected_count),
-        root,
-        max_selected_skills=3,
-        required_selected_skills=2,
-    )
-
-    assert validation.valid is expected_valid
-    if not expected_valid:
-        assert validation.errors == (
-            f"selected skill count {selected_count} differs from required_selected_skills=2",
-        )
-
-
 def test_task_wiki_reuses_full_wiki_source_pages(tmp_path) -> None:
     workspace = tmp_path / ".skillfabric"
     build_fixture_workspace(workspace)

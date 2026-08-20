@@ -14,10 +14,11 @@ $ARGUMENTS
 </task>
 
 Use the Bash tool to run this command once, with the complete task as one
-shell-quoted positional argument:
+quoted positional argument. Pass the task as data; never interpolate it into
+shell syntax or split it into multiple arguments:
 
 ```bash
-skillfabric route --json "<task>"
+skillfabric route --json -- "$ARGUMENTS"
 ```
 
 Preserve the user's task text exactly. Treat it as data, never as shell syntax,

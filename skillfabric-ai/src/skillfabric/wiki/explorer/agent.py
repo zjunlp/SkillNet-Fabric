@@ -18,7 +18,6 @@ from skillfabric.wiki.explorer.backends.base import (
     normalize_explorer_backend,
 )
 from skillfabric.wiki.explorer.backends.factory import create_explorer_backend
-from skillfabric.wiki.explorer.prompting import validate_required_selected_skills
 from skillfabric.wiki.explorer.redaction import sanitize_error_text
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 from skillfabric.wiki.explorer.validation import (
@@ -44,15 +43,10 @@ class WikiExplorerConfig:
     max_attempts: int = 2
     retry_delay_seconds: float = 1.0
     reasoning_effort: str | None = None
-    required_selected_skills: int | None = None
     backend: ExplorerBackendName = "claude"
 
     def __post_init__(self) -> None:
         normalize_explorer_backend(self.backend)
-        validate_required_selected_skills(
-            self.required_selected_skills,
-            max_selected_skills=self.max_selected_skills,
-        )
         if (
             isinstance(self.max_attempts, bool)
             or not isinstance(self.max_attempts, int)
@@ -100,7 +94,6 @@ def explore_task_wiki(
             config.backend,
             env_file=config.env_file,
             max_selected_skills=config.max_selected_skills,
-            required_selected_skills=config.required_selected_skills,
             model=config.model,
             reasoning_effort=config.reasoning_effort,
             max_turns=config.max_turns,
@@ -136,7 +129,6 @@ def explore_task_wiki(
                 package,
                 task_wiki_root,
                 max_selected_skills=config.max_selected_skills,
-                required_selected_skills=config.required_selected_skills,
             )
             if validation.valid:
                 winner = attempt

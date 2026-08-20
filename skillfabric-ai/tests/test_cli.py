@@ -53,7 +53,7 @@ def test_public_cli_surface_exposes_core_commands() -> None:
     assert "Generate one execution prompt" in text
 
 
-def test_public_cli_help_hides_internal_runtime_tuning() -> None:
+def test_public_cli_help_exposes_only_user_controls() -> None:
     output = io.StringIO()
 
     with pytest.raises(SystemExit) as raised, contextlib.redirect_stdout(output):
@@ -61,8 +61,8 @@ def test_public_cli_help_hides_internal_runtime_tuning() -> None:
 
     assert raised.value.code == 0
     text = output.getvalue()
-    assert "--llm-progress-every" in text
     for option in (
+        "--llm-progress-every",
         "--llm-concurrency",
         "--llm-max-retries",
         "--llm-batch-size",
@@ -122,8 +122,6 @@ def test_route_cli_constructs_only_current_router_config_fields() -> None:
                 ".skillfabric-test",
                 "--max-selected-skills",
                 "3",
-                "--trace-id",
-                "test-trace",
                 "--json",
             ]
         )
@@ -134,7 +132,6 @@ def test_route_cli_constructs_only_current_router_config_fields() -> None:
     assert config.seed_limit == 24
     assert config.expanded_limit == 100
     assert config.max_depth == 2
-    assert config.trace_id == "test-trace"
     assert json.loads(output.getvalue())["selected_skills"][0]["skill_id"] == "skill:test"
 
 
@@ -208,33 +205,6 @@ def test_plan_cli_calls_prompt_planner_once(tmp_path) -> None:
     planner.assert_called_once()
     assert "planner_context_max_tokens" not in planner.call_args.kwargs
     assert json.loads(output.getvalue())["estimated_prompt_tokens"] == 321
-
-
-def test_build_cli_forwards_only_explicit_progress_setting(tmp_path) -> None:
-    workspace = SimpleNamespace(
-        root=tmp_path / ".skillfabric",
-        graph_dir=tmp_path / ".skillfabric" / "graph",
-        wiki_dir=tmp_path / ".skillfabric" / "wiki",
-        status_path=tmp_path / ".skillfabric" / "status.json",
-    )
-    result = SimpleNamespace(
-        workspace=workspace,
-        graph=SimpleNamespace(build_id="build-test", nodes=[], edges=[]),
-        wiki=SimpleNamespace(pages_written=0),
-        stats={},
-    )
-    output = io.StringIO()
-
-    with (
-        patch("skillfabric.cli._require_api_configuration"),
-        patch("skillfabric.cli.ApiEmbeddingProvider.from_env", return_value=object()),
-        patch("skillfabric.cli.LLMJobOptions.from_env", return_value=object()) as options,
-        patch("skillfabric.cli.build_workspace", return_value=result),
-        contextlib.redirect_stdout(output),
-    ):
-        cli_main(["build", "--skill-root", "skills", "--llm-progress-every", "25", "--json"])
-
-    assert options.call_args.kwargs == {"env_path": ".env", "progress_every": 25}
 
 
 def test_plan_cli_defaults_to_a_human_summary(tmp_path) -> None:

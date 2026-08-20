@@ -15,7 +15,6 @@ from skillfabric.router.models import (
     RouteResult,
     RouteSelectedSkill,
 )
-from skillfabric.wiki.explorer.prompting import validate_required_selected_skills
 from skillfabric.wiki.explorer.skill_package import SkillPackage
 
 
@@ -36,14 +35,15 @@ def validate_skill_package(
     task_wiki_root: Path,
     *,
     max_selected_skills: int = 8,
-    required_selected_skills: int | None = None,
 ) -> SkillPackageValidationResult:
     """Validate selection ids and evidence without treating graph edges as authority."""
 
-    validate_required_selected_skills(
-        required_selected_skills,
-        max_selected_skills=max_selected_skills,
-    )
+    if (
+        isinstance(max_selected_skills, bool)
+        or not isinstance(max_selected_skills, int)
+        or max_selected_skills < 0
+    ):
+        raise ValueError("max_selected_skills must be a non-negative integer")
     root = task_wiki_root.resolve()
     manifest = _load_manifest(root)
     manifest_skills = {str(item["skill_id"]): item for item in manifest["skills"]}
@@ -54,11 +54,6 @@ def validate_skill_package(
     if len(selected_ids) > max(0, max_selected_skills):
         errors.append(
             f"selected skill count {len(selected_ids)} exceeds max_selected_skills={max_selected_skills}"
-        )
-    if required_selected_skills is not None and len(selected_ids) != required_selected_skills:
-        errors.append(
-            f"selected skill count {len(selected_ids)} differs from "
-            f"required_selected_skills={required_selected_skills}"
         )
     if len(selected_set) != len(selected_ids):
         errors.append("selected_skills contains duplicate skill ids")

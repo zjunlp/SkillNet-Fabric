@@ -19,7 +19,6 @@ def create_explorer_backend(
     *,
     env_file: str | Path,
     max_selected_skills: int,
-    required_selected_skills: int | None,
     model: str | None,
     reasoning_effort: str | None,
     max_turns: int,
@@ -34,7 +33,6 @@ def create_explorer_backend(
     common = {
         "env_file": env_file,
         "max_selected_skills": max_selected_skills,
-        "required_selected_skills": required_selected_skills,
         "model": model,
         "execution_timeout_seconds": execution_timeout_seconds,
         "sdk_runtime": sdk_runtime,

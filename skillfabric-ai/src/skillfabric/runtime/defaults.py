@@ -53,34 +53,7 @@ class RouterOptions:
 def default_router_options() -> RouterOptions:
     return RouterOptions(
         max_selected_skills=_nonnegative_int("SKILLFABRIC_MAX_SELECTED_SKILLS", 8),
-        seed_limit=_nonnegative_int("SKILLFABRIC_SEED_LIMIT", 24),
-        expanded_limit=_nonnegative_int("SKILLFABRIC_EXPANDED_LIMIT", 100),
-        max_depth=_nonnegative_int("SKILLFABRIC_MAX_GRAPH_DEPTH", 2),
-        explorer_max_turns=_positive_int("SKILLFABRIC_EXPLORER_MAX_TURNS", 24),
-        explorer_load_timeout_ms=_positive_int(
-            "SKILLFABRIC_EXPLORER_LOAD_TIMEOUT_MS",
-            30_000,
-        ),
-        explorer_timeout_seconds=_nonnegative_float(
-            "SKILLFABRIC_EXPLORER_TIMEOUT_SECONDS",
-            300.0,
-        ),
-        explorer_max_attempts=_positive_int("SKILLFABRIC_EXPLORER_MAX_ATTEMPTS", 2),
-        explorer_retry_delay_seconds=_nonnegative_float(
-            "SKILLFABRIC_EXPLORER_RETRY_DELAY_SECONDS",
-            1.0,
-        ),
     )
-
-
-def _positive_int(name: str, default: int) -> int:
-    raw = os.environ.get(name, "")
-    if not raw:
-        return default
-    value = int(raw)
-    if value <= 0:
-        raise ValueError(f"{name} must be positive")
-    return value
 
 
 def _nonnegative_int(name: str, default: int) -> int:
@@ -90,16 +63,6 @@ def _nonnegative_int(name: str, default: int) -> int:
     value = int(raw)
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
-    return value
-
-
-def _nonnegative_float(name: str, default: float) -> float:
-    raw = os.environ.get(name, "")
-    if not raw:
-        return default
-    value = float(raw)
-    if not math.isfinite(value) or value < 0:
-        raise ValueError(f"{name} must be finite and non-negative")
     return value
 
 

@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import math
-import os
 import queue
-import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from skillfabric.runtime.llm import LLMRequestError, read_env_file
+from skillfabric.runtime.llm import LLMRequestError
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -29,61 +26,9 @@ class LLMJobOptions:
     rate_limit_per_minute: float = 0.0
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
-    progress_every: int = 0
     batch_size: int | None = None
     checkpoint_interval: int = 100
     circuit_breaker_threshold: int = 10
-
-    @classmethod
-    def from_env(
-        cls,
-        *,
-        env_path: str | Path | None = None,
-        concurrency: int | None = None,
-        rate_limit_per_minute: float | None = None,
-        max_retries: int | None = None,
-        retry_backoff_seconds: float | None = None,
-        progress_every: int | None = None,
-        batch_size: int | None = None,
-        checkpoint_interval: int | None = None,
-        circuit_breaker_threshold: int | None = None,
-    ) -> LLMJobOptions:
-        values = read_env_file(env_path)
-        options = cls(
-            concurrency=_int_value(values, "SKILLFABRIC_LLM_CONCURRENCY", concurrency, 4),
-            rate_limit_per_minute=_float_value(
-                values,
-                "SKILLFABRIC_LLM_RATE_LIMIT_PER_MINUTE",
-                rate_limit_per_minute,
-                0.0,
-            ),
-            max_retries=_int_value(values, "SKILLFABRIC_LLM_MAX_RETRIES", max_retries, 2),
-            retry_backoff_seconds=_float_value(
-                values,
-                "SKILLFABRIC_LLM_RETRY_BACKOFF_SECONDS",
-                retry_backoff_seconds,
-                1.0,
-            ),
-            progress_every=_int_value(values, "SKILLFABRIC_LLM_PROGRESS_EVERY", progress_every, 0),
-            batch_size=_optional_int_value(
-                values,
-                "SKILLFABRIC_LLM_BATCH_SIZE",
-                batch_size,
-            ),
-            checkpoint_interval=_int_value(
-                values,
-                "SKILLFABRIC_LLM_CHECKPOINT_INTERVAL",
-                checkpoint_interval,
-                100,
-            ),
-            circuit_breaker_threshold=_int_value(
-                values,
-                "SKILLFABRIC_LLM_CIRCUIT_BREAKER_THRESHOLD",
-                circuit_breaker_threshold,
-                10,
-            ),
-        )
-        return options.normalized()
 
     def normalized(self) -> LLMJobOptions:
         concurrency = _require_int(self.concurrency, name="concurrency", minimum=1)
@@ -97,11 +42,6 @@ class LLMJobOptions:
             self.retry_backoff_seconds,
             name="retry_backoff_seconds",
             minimum=0.0,
-        )
-        progress_every = _require_int(
-            self.progress_every,
-            name="progress_every",
-            minimum=0,
         )
         batch_size = (
             concurrency * 4
@@ -125,7 +65,6 @@ class LLMJobOptions:
             rate_limit_per_minute=rate_limit,
             max_retries=max_retries,
             retry_backoff_seconds=retry_backoff,
-            progress_every=progress_every,
             batch_size=batch_size,
             checkpoint_interval=checkpoint_interval,
             circuit_breaker_threshold=circuit_breaker_threshold,
@@ -293,15 +232,6 @@ def run_llm_jobs(
                 succeeded += 1
             else:
                 failed += 1
-            _log_progress(
-                label,
-                terminal,
-                total,
-                succeeded,
-                failed,
-                job_options.progress_every,
-            )
-
             if aborted is not None:
                 for pending in futures:
                     pending.cancel()
@@ -339,58 +269,6 @@ def _sleep_before_retry(base_delay: float, attempts: int) -> None:
     if base_delay <= 0:
         return
     time.sleep(base_delay * max(1, attempts))
-
-
-def _log_progress(
-    label: str,
-    terminal: int,
-    total: int,
-    succeeded: int,
-    failed: int,
-    progress_every: int,
-) -> None:
-    if progress_every <= 0:
-        return
-    if terminal != total and terminal % progress_every != 0:
-        return
-    sys.stderr.write(
-        f"[{label}] terminal {terminal}/{total} succeeded={succeeded} failed={failed}\n"
-    )
-    sys.stderr.flush()
-
-
-def _int_value(values: dict[str, str], key: str, override: int | None, default: int) -> int:
-    if override is not None:
-        return override
-    if os.environ.get(key):
-        return int(os.environ[key])
-    if values.get(key):
-        return int(values[key])
-    return default
-
-
-def _float_value(values: dict[str, str], key: str, override: float | None, default: float) -> float:
-    if override is not None:
-        return override
-    if os.environ.get(key):
-        return float(os.environ[key])
-    if values.get(key):
-        return float(values[key])
-    return default
-
-
-def _optional_int_value(
-    values: dict[str, str],
-    key: str,
-    override: int | None,
-) -> int | None:
-    if override is not None:
-        return override
-    if os.environ.get(key):
-        return int(os.environ[key])
-    if values.get(key):
-        return int(values[key])
-    return None
 
 
 def _require_int(value: object, *, name: str, minimum: int) -> int:

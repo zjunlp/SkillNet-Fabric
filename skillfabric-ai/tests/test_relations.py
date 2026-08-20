@@ -318,7 +318,7 @@ def test_relation_judges_each_uncached_pair_in_its_own_request() -> None:
         skills,
         contracts,
         judge=judge,
-        job_options=LLMJobOptions(concurrency=1, max_retries=0, progress_every=0),
+        job_options=LLMJobOptions(concurrency=1, max_retries=0),
     )
 
     assert all(len(call) == 1 for call in judge.calls)
@@ -362,7 +362,6 @@ def test_relation_cache_ignores_retrieval_rank_changes_for_the_same_pair(tmp_pat
         job_options=LLMJobOptions(
             concurrency=1,
             max_retries=0,
-            progress_every=0,
         ),
     )[0]
 
@@ -529,7 +528,7 @@ def test_relation_request_requires_exact_pair_coverage(
             skills,
             contracts,
             judge=RawJudge(),
-            job_options=LLMJobOptions(concurrency=1, max_retries=0, progress_every=0),
+            job_options=LLMJobOptions(concurrency=1, max_retries=0),
         )
 
 

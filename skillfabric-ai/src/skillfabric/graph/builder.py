@@ -117,9 +117,7 @@ def build_workspace(
                 deps,
                 relation_judge,
             )
-            job_options = (
-                config.llm_options or LLMJobOptions.from_env(env_path=config.llm_env_path)
-            ).normalized()
+            job_options = (config.llm_options or LLMJobOptions()).normalized()
             _write_running_status(workspace, build_id, stage="scan")
 
             stage = "scan"

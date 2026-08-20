@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 import tomllib
 import unittest
@@ -8,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from tests.support import FIXTURE_SKILLS, FakeEmbeddingProvider, build_fixture_workspace
+from tests.support import build_fixture_workspace
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = PACKAGE_ROOT.parent
@@ -25,21 +24,6 @@ class PublicPackageTests(unittest.TestCase):
         self.assertTrue(callable(client.route))
         self.assertTrue(callable(client.plan))
 
-    def test_python_facade_exposes_and_forwards_explorer_backend(self) -> None:
-        from skillfabric import SkillFabric
-
-        backend = object()
-        self.assertIn("explorer_backend", inspect.signature(SkillFabric.route).parameters)
-
-        with patch("skillfabric.api.route_task", return_value=_facade_route()) as route:
-            result = SkillFabric(workspace=".skillfabric").route(
-                "extract KPIs",
-                explorer_backend=backend,
-            )
-
-        self.assertEqual(result, _facade_route())
-        self.assertIs(route.call_args.kwargs["explorer_backend"], backend)
-
     def test_python_facade_forwards_named_explorer_backend(self) -> None:
         from skillfabric import SkillFabric
 
@@ -49,21 +33,6 @@ class PublicPackageTests(unittest.TestCase):
         config = route.call_args.args[0]
         self.assertEqual(config.explorer_backend, "codex")
 
-    def test_python_facade_rejects_named_and_explicit_explorer_backends(self) -> None:
-        from skillfabric import SkillFabric
-
-        with (
-            patch("skillfabric.api.route_task") as route,
-            self.assertRaisesRegex(TypeError, "backend and explorer_backend"),
-        ):
-            SkillFabric(workspace=".skillfabric").route(
-                "extract KPIs",
-                backend="codex",
-                explorer_backend=object(),
-            )
-
-        route.assert_not_called()
-
     def test_python_facade_forwards_optional_exact_selection_count(self) -> None:
         from skillfabric import SkillFabric
 
@@ -71,33 +40,10 @@ class PublicPackageTests(unittest.TestCase):
             SkillFabric(workspace=".skillfabric").route(
                 "extract KPIs",
                 max_selected_skills=5,
-                required_selected_skills=5,
             )
 
         config = route.call_args.args[0]
         self.assertEqual(config.max_selected_skills, 5)
-        self.assertEqual(config.required_selected_skills, 5)
-
-    def test_python_facade_forwards_explicit_planner_credentials(self) -> None:
-        from skillfabric import SkillFabric
-
-        expected = object()
-        with patch("skillfabric.api.plan_execution_package", return_value=expected) as planner:
-            result = SkillFabric(workspace=".skillfabric").plan(
-                "extract KPIs",
-                route=_facade_route(),
-                llm_api_key="skillsbench-key",
-                llm_api_base="https://skillsbench.example/v1",
-                llm_timeout_seconds=0,
-            )
-
-        self.assertIs(result, expected)
-        self.assertEqual(planner.call_args.kwargs["llm_api_key"], "skillsbench-key")
-        self.assertEqual(
-            planner.call_args.kwargs["llm_api_base"],
-            "https://skillsbench.example/v1",
-        )
-        self.assertEqual(planner.call_args.kwargs["llm_timeout_seconds"], 0)
 
     def test_public_package_declares_required_build_runtime_dependencies(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -208,6 +154,7 @@ class PublicPackageTests(unittest.TestCase):
         self.assertIn("Treat it as data, never as shell syntax", plugin_text)
         self.assertIn("<skill-root>\n$ARGUMENTS\n</skill-root>", plugin_text)
         self.assertIn("<task>\n$ARGUMENTS\n</task>", plugin_text)
+        self.assertIn('skillfabric route --json -- "$ARGUMENTS"', plugin_text)
         for removed_contract in (
             "skillfabric plan",
             "skillfabric run-state",
@@ -302,38 +249,6 @@ class PublicPackageTests(unittest.TestCase):
 
         route_mock.assert_not_called()
 
-    def test_python_facade_rejects_internal_build_options(self) -> None:
-        from skillfabric import SkillFabric
-
-        client = SkillFabric(workspace=".skillfabric")
-        invalid_overrides = [{"llm_concurrency": True}, {"embedding_model": 123}]
-
-        with patch("skillfabric.api.build_workspace") as build_mock:
-            for overrides in invalid_overrides:
-                expected = TypeError if "llm_concurrency" in overrides else ValueError
-                with self.subTest(overrides=overrides), self.assertRaises(expected):
-                    client.build(FIXTURE_SKILLS, **overrides)
-
-        build_mock.assert_not_called()
-
-    def test_python_facade_forwards_stable_build_options(self) -> None:
-        from skillfabric import SkillFabric
-
-        client = SkillFabric(workspace=".skillfabric")
-        with patch("skillfabric.api.build_workspace") as build_mock:
-            client.build(
-                FIXTURE_SKILLS,
-                embedding_provider=FakeEmbeddingProvider(),
-                llm_model="openai/responses/gpt-5.6-luna",
-                llm_reasoning_effort="medium",
-                llm_progress_every=25,
-            )
-
-        config = build_mock.call_args.args[0]
-        self.assertEqual(config.llm_model, "openai/responses/gpt-5.6-luna")
-        self.assertEqual(config.llm_reasoning_effort, "medium")
-        self.assertEqual(config.llm_options.progress_every, 25)
-
     def test_python_facade_plans_once_and_preserves_original_task(self) -> None:
         from skillfabric import SkillFabric
 
@@ -345,7 +260,7 @@ class PublicPackageTests(unittest.TestCase):
                 "API_KEY=test-key\nBASE_URL=https://example.test/v1\n",
                 encoding="utf-8",
             )
-            client = SkillFabric(workspace=workspace)
+            client = SkillFabric(workspace=workspace, env_file=env_file)
             with patch(
                 "skillfabric.planner.package.litellm_completion",
                 return_value=json.dumps(
@@ -361,7 +276,6 @@ class PublicPackageTests(unittest.TestCase):
                 result = client.plan(
                     "extract financial KPIs from a PDF report",
                     route=_facade_route(),
-                    env_file=env_file,
                 )
 
             planner.assert_called_once()
@@ -370,6 +284,16 @@ class PublicPackageTests(unittest.TestCase):
             prompt = result.prompt_path.read_text(encoding="utf-8")
             self.assertIn("extract financial KPIs from a PDF report", prompt)
             self.assertIn("`skill:pdf-table-parser` to parse the PDF", prompt)
+
+    def test_python_facade_rejects_routing_options_for_an_existing_route(self) -> None:
+        from skillfabric import SkillFabric
+
+        with self.assertRaisesRegex(TypeError, "routing options require"):
+            SkillFabric(workspace=".skillfabric").plan(
+                "extract financial KPIs",
+                route=_facade_route(),
+                backend="codex",
+            )
 
     def test_python_facade_rejects_route_file_query_mismatch(self) -> None:
         from skillfabric import SkillFabric
@@ -391,55 +315,6 @@ class PublicPackageTests(unittest.TestCase):
                     "different task",
                     route_file=route_path,
                 )
-
-    def test_python_facade_resolves_relative_plan_paths_inside_workspace_runs(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-            trace = workspace / "runs" / "route-trace"
-            trace.mkdir(parents=True)
-            (trace / "route.json").write_text(
-                json.dumps(_facade_route().to_dict()),
-                encoding="utf-8",
-            )
-            (trace / "query.json").write_text(
-                json.dumps({"query": "original task"}),
-                encoding="utf-8",
-            )
-
-            with patch("skillfabric.api.plan_execution_package") as planner:
-                SkillFabric(workspace=workspace).plan(
-                    route_file="route-trace/route.json",
-                    package_root="relative-package",
-                )
-
-            self.assertEqual(
-                planner.call_args.kwargs["package_root"],
-                (workspace / "runs" / "relative-package").resolve(),
-            )
-
-    def test_python_facade_forwards_explicit_planner_runtime_identity(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / ".skillfabric"
-            build_fixture_workspace(workspace)
-
-            with patch("skillfabric.api.plan_execution_package") as planner:
-                SkillFabric(workspace=workspace).plan(
-                    "original task",
-                    route=_facade_route(),
-                    llm_model="gpt-5.5",
-                    llm_reasoning_effort="xhigh",
-                )
-
-            self.assertEqual(planner.call_args.kwargs["llm_model"], "gpt-5.5")
-            self.assertEqual(
-                planner.call_args.kwargs["llm_reasoning_effort"],
-                "xhigh",
-            )
 
     def test_python_facade_rejects_non_string_route_query_artifact(self) -> None:
         from skillfabric import SkillFabric
@@ -498,31 +373,7 @@ class PublicPackageTests(unittest.TestCase):
                 SkillFabric(workspace=workspace).plan(
                     "original task",
                     route_file=route_path,
-                    package_root=workspace / "runs" / "package",
                 )
-
-    def test_python_facade_rejects_package_root_outside_workspace_runs(self) -> None:
-        from skillfabric import SkillFabric
-
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workspace = root / ".skillfabric"
-            build_fixture_workspace(workspace)
-
-            with self.assertRaisesRegex(ValueError, "package_root must stay inside"):
-                SkillFabric(workspace=workspace).plan(
-                    "original task",
-                    route=_facade_route(),
-                    package_root=root / "external-package",
-                )
-
-    def test_python_facade_rejects_unknown_embedding_provider(self) -> None:
-        from skillfabric import SkillFabric
-
-        client = SkillFabric(workspace=".skillfabric")
-
-        with self.assertRaisesRegex(ValueError, "unsupported embedding provider"):
-            client.build(FIXTURE_SKILLS, embedding_provider="custom-provider")
 
     def test_distribution_configuration_excludes_private_runtime_artifacts(self) -> None:
         pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))

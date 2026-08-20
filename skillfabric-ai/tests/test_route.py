@@ -309,12 +309,6 @@ def test_router_config_rejects_unsafe_trace_ids(trace_id) -> None:
     "overrides,match",
     [
         ({"max_selected_skills": -1}, "max_selected_skills"),
-        ({"required_selected_skills": True}, "required_selected_skills"),
-        ({"required_selected_skills": -1}, "required_selected_skills"),
-        (
-            {"max_selected_skills": 5, "required_selected_skills": 6},
-            "required_selected_skills",
-        ),
         ({"seed_limit": -1}, "seed_limit"),
         ({"seed_limit": 2, "expanded_limit": 1}, "expanded_limit"),
         ({"max_depth": -1}, "max_depth"),
@@ -336,14 +330,12 @@ def test_router_config_rejects_invalid_numeric_limits(overrides, match) -> None:
 def test_router_config_allows_explicit_zero_budgets() -> None:
     config = RouterConfig(
         max_selected_skills=0,
-        required_selected_skills=0,
         seed_limit=0,
         expanded_limit=0,
         max_depth=0,
     )
 
     assert config.max_selected_skills == 0
-    assert config.required_selected_skills == 0
     assert config.seed_limit == 0
     assert config.expanded_limit == 0
     assert config.max_depth == 0
